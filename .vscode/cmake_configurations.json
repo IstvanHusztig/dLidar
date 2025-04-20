@@ -1,0 +1,31 @@
+{
+    "configurations": [
+      {
+        "name": "Debug",
+        "buildType": "Debug",
+        "generator": "Ninja", 
+        "toolchain": "clang"
+      },
+      {
+        "name": "Release",
+        "buildType": "Release",
+        "generator": "Ninja",
+        "toolchain": "clang"
+        
+      },
+      {
+        "name": "RelWithDebInfo",
+        "buildType": "RelWithDebInfo",
+        "generator": "Ninja",
+        "toolchain": "clang"
+       
+      },
+      {
+        "name": "MinSizeRel",
+        "buildType": "MinSizeRel",
+        "generator": "Ninja",
+        "toolchain": "clang"
+       
+      }
+    ]
+  }
