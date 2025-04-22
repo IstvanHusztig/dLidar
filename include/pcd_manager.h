@@ -96,6 +96,8 @@ void GetImuData(UnitreeLidarReader *lreader)
 			   imu.linear_acceleration[0],
 			   imu.linear_acceleration[1],
 			   imu.linear_acceleration[2]);
+
+			   
 	}
 }
 
@@ -115,7 +117,7 @@ std::vector<PointUnitree> GetPointCloud(UnitreeLidarReader *lreader)
 
 void PrintPointCloudToFile(const std::vector<PointUnitree>& points, int suffix = 0) 
 {
-	std::string fileName = "point_cloud_" + std::to_string(suffix) + ".dl";
+	std::string fileName = "point_cloud_" + std::to_string(suffix) + ".txt";
 	std::string content;
 
 	for (const auto& point : points) 
@@ -133,7 +135,7 @@ void PrintPointCloudToFile(const std::vector<PointUnitree>& points, int suffix =
 void ReadSensorData(UnitreeLidarReader *lreader) 
 {
 	int result;
-	int max_points = 2000000;
+	int max_points = 1500000;
 	int current_points = 0;
 	int cycleCount = 0;
 	//LidarImuData imu;
@@ -145,7 +147,7 @@ void ReadSensorData(UnitreeLidarReader *lreader)
 
 	PrintTimeDelay(lreader);
 	
-	while(cycleCount<5)
+	while(cycleCount<1)
 	{
 		while(current_points< max_points) 
 		{

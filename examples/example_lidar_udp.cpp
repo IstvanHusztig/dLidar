@@ -17,7 +17,7 @@ UnitreeLidarReader* InitializeLidar()
 	std::string local_ip = "192.168.1.2";
 
 	unsigned short lidar_port = 6101;
-	unsigned short local_port = 6201;
+	unsigned short local_port ls-= 6201;
 
 	if (lreader->initializeUDP(lidar_port, lidar_ip, local_port, local_ip))
 	{
