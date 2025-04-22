@@ -53,7 +53,7 @@ typedef struct
     float z;
     float intensity;
     float time;    // relative time of this point from cloud stamp
-    uint32_t ring; // ring
+    uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } PointUnitree;
 
 /**
