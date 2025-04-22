@@ -1,0 +1,3 @@
+[submodule "/home/vs2022/unitree_lidar_sdk/3rd"]
+	path = /home/vs2022/unitree_lidar_sdk/3rd
+	url = https://github.com/LASzip/LASzip.git
