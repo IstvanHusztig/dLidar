@@ -9,6 +9,20 @@
 
 using namespace unitree_lidar_sdk;
 
+struct OutputImuData
+{
+	public:
+		int Timestamp;
+		
+		int GyroX;
+		int GyroY;
+		int GyroZ;
+		
+		int AccelerationX;
+		int AccelerationY;
+		int AccelerationZ;
+};
+
 bool SaveToLaz(const std::string& filename, std::vector<PointUnitree>& points)
 {
 
@@ -230,35 +244,31 @@ void RestartLidar(UnitreeLidarReader *lreader) {
 	sleep(3);
 }
 
-void GetImuData(UnitreeLidarReader *lreader) 
+OutputImuData GetOutputImuData(UnitreeLidarReader *lreader) 
 {
-	LidarImuData imu;
+	OutputImuData imuData;
+	LidarImuData  imu;
 	
 	if(lreader->getImuData(imu)) 
 	{
-		printf("An IMU msg is parsed!\n");
+		printf("IMU msg %d !\n", imu.info.seq);
 		
 		std::cout << std::setprecision(20) << "\tsystem stamp = " << getSystemTimeStamp() << std::endl;
 		
 		printf("\tseq = %d, stamp = %d.%d\n", imu.info.seq, imu.info.stamp.sec, imu.info.stamp.nsec);
 
-		printf("\tquaternion (x, y, z, w) = [%.4f, %.4f, %.4f, %.4f]\n",
-			   imu.quaternion[0],
-			   imu.quaternion[1],
-			   imu.quaternion[2],
-			   imu.quaternion[3]);
+		imuData.AccelerationX = imu.linear_acceleration[0];
+		imuData.AccelerationY = imu.linear_acceleration[1];
+		imuData.AccelerationZ = imu.linear_acceleration[2];
 
-		printf("\tangular_velocity (x, y, z) = [%.4f, %.4f, %.4f]\n",
-			   imu.angular_velocity[0],
-			   imu.angular_velocity[1],
-			   imu.angular_velocity[2]);
-		printf("\tlinear_acceleration (x, y, z) = [%.4f, %.4f, %.4f]\n",
-			   imu.linear_acceleration[0],
-			   imu.linear_acceleration[1],
-			   imu.linear_acceleration[2]);
+		imuData.GyroX = imu.angular_velocity[0];
+		imuData.GyroY = imu.angular_velocity[1];
+		imuData.GyroZ = imu.angular_velocity[2];
 
-			   
+		imuData.Timestamp = imu.info.stamp.sec * 1000000 + imu.info.stamp.nsec / 1000;
 	}
+	
+	return imuData;
 }
 
 std::vector<PointUnitree> GetPointCloud(UnitreeLidarReader *lreader) 
@@ -291,14 +301,14 @@ void PrintPointCloudToFile(const std::vector<PointUnitree>& points, int suffix =
 	WriteToFile(fileName, content);
 }
 
-void ReadSensorData(UnitreeLidarReader *lreader) 
+void ProcessSensorData(UnitreeLidarReader *lreader) 
 {
 	int result;
 	int max_points = 1500000;
 	int current_points = 0;
 	int cycleCount = 0;
-	//LidarImuData imu;
 	std::vector<PointUnitree> ptCloudResult= std::vector<PointUnitree>();
+	std::vector<LidarImuData> imuResult= std::vector<LidarImuData>();
 		
 	RestartLidar(lreader);
 
@@ -314,22 +324,25 @@ void ReadSensorData(UnitreeLidarReader *lreader)
 
 			switch(result) 
 			{
-				/*case LIDAR_IMU_DATA_PACKET_TYPE: 
-					GetImuData(lreader); 
-					
-					break;*/
-				case LIDAR_POINT_DATA_PACKET_TYPE:
-					std::vector<PointUnitree> ptCloud = GetPointCloud(lreader); 
-					if(ptCloud.size()>0)
+				case LIDAR_IMU_DATA_PACKET_TYPE: 
 					{
-						ptCloudResult.insert(ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
-						current_points += ptCloud.size();
+						OutputImuData imuDt = GetOutputImuData(lreader); 
+					}
+				break;
+				case LIDAR_POINT_DATA_PACKET_TYPE:
+					{
+						std::vector<PointUnitree> ptCloud = GetPointCloud(lreader); 
+						if(ptCloud.size()>0)
+						{
+							ptCloudResult.insert(ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
+							current_points += ptCloud.size();
+						}
 					}
 				break;
 			}
 		}
 		
-		std::string fileName = "point_cloud_" + std::to_string(cycleCount++) + ".txt";
+		std::string fileName = "point_cloud_" + std::to_string(cycleCount++) + ".laz";
 		SaveToLaz(fileName, ptCloudResult);
 		//PrintPointCloudToFile(ptCloudResult, cycleCount);
 	}
