@@ -1,6 +1,7 @@
 #pragma once
 
 #include "unitree_lidar_sdk.h"
+#include "unitree_lidar_utilities.h"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -12,7 +13,9 @@ using namespace unitree_lidar_sdk;
 struct OutputImuData
 {
 	public:
-		int Timestamp;
+		float Timestamp;
+
+		int ImuId;
 		
 		int GyroX;
 		int GyroY;
@@ -119,8 +122,8 @@ bool SaveToLaz(const std::string& filename, std::vector<PointUnitree>& points)
 	fprintf(stderr, "writing file '%s' %scompressed\n", filename.c_str(), (compress ? "" : "un"));
 
 	// get a pointer to the point of the writer that we will populate and write
-
 	laszip_point* laszipPoint;
+	
 	if(laszip_get_point_pointer(laszip_writer, &laszipPoint))
 	{
 		fprintf(stderr, "DLL ERROR: getting point pointer from laszip writer\n");
@@ -133,11 +136,11 @@ bool SaveToLaz(const std::string& filename, std::vector<PointUnitree>& points)
 	for(uint i = 0; i < points.size(); i += step)
 	{
 		laszipPoint->intensity = points[i].intensity;
-		laszipPoint->gps_time = points[i].time * 1e-9;
-		//laszipPoint->user_data = p.line_id;
-		//laszipPoint->classification = p.point.tag;
+		laszipPoint->gps_time = points[i].time;
 		laszipPoint->user_data = points[i].ring;
+
 		p_count++;
+
 		coordinates[0] = 0.001 * points[i].x;
 		coordinates[1] = 0.001 * points[i].y;
 		coordinates[2] = 0.001 * points[i].z;
@@ -251,9 +254,7 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 	
 	if(lreader->getImuData(imu)) 
 	{
-		printf("IMU msg %d !\n", imu.info.seq);
-		
-		std::cout << std::setprecision(20) << "\tsystem stamp = " << getSystemTimeStamp() << std::endl;
+		std::cout << std::setprecision(20) << "\tIMU system stamp = " << getSystemTimeStamp() << std::endl;
 		
 		printf("\tseq = %d, stamp = %d.%d\n", imu.info.seq, imu.info.stamp.sec, imu.info.stamp.nsec);
 
@@ -265,7 +266,9 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroY = imu.angular_velocity[1];
 		imuData.GyroZ = imu.angular_velocity[2];
 
-		imuData.Timestamp = imu.info.stamp.sec * 1000000 + imu.info.stamp.nsec / 1000;
+		imuData.Timestamp = imu.info.stamp.sec  + imu.info.stamp.nsec / 1.0e9;
+
+		imuData.ImuId = imu.info.seq; 
 	}
 	
 	return imuData;
@@ -273,29 +276,34 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 
 std::vector<PointUnitree> GetPointCloud(UnitreeLidarReader *lreader) 
 {
+	LidarPointDataPacket lidarDataPacket = reader->getLidarPointDataPacket();
 	PointCloudUnitree cloud;
 	
-	if(lreader->getPointCloud(cloud)) 
+	if(lidarDataPacket) 
 	{
 		printf("A Cloud msg is parsed! \n");
+		parseFromPacketToPointCloud(cloud, lidarDataPacket, false);
 		//FilterPointCloud(cloud);
 	}
 	
-	//TransformUnitreeCloudToPCL(cloud, cloudOut);
 	return cloud.points;
 }
 
-void PrintPointCloudToFile(const std::vector<PointUnitree>& points, int suffix = 0) 
+void PrintImuDatasToFile(const std::vector<OutputImuData>& imuVector, int suffix = 0) 
 {
-	std::string fileName = "point_cloud_" + std::to_string(suffix) + ".txt";
+	std::string fileName = printf("imu_%d.txt", suffix);
 	std::string content;
 
-	for (const auto& point : points) 
+	for (const auto& imu : imuVector) 
 	{
-		content += std::to_string(point.x) + " " +
-			std::to_string(point.y) + " " +
-			std::to_string(point.z) + " " +
-			std::to_string(point.intensity) + "\n";
+		content += std::to_string(imu.Timestamp) +" " +
+				   std::to_string(imu.GyroX) + " " +
+				   std::to_string(imu.GyroY) + " " +
+				   std::to_string(imu.GyroZ)+ " " +
+				   std::to_string(imu.AccelerationX) + " " +
+				   std::to_string(imu.AccelerationY) + " " +
+				   std::to_string(imu.AccelerationZ) + "\n";
+				   
 	}
 
 	WriteToFile(fileName, content);
