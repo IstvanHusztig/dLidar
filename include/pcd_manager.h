@@ -42,9 +42,9 @@ bool SaveToLazOrLas(const std::string &filename, std::vector<DLidarPoint> &point
 
 	for (const auto &point : points)
 	{
-		double x = 0.001 * point.x;
-		double y = 0.001 * point.y;
-		double z = 0.001 * point.z;
+		double x = point.x;
+		double y = point.y;
+		double z = point.z;
 
 		max_x = std::max(max_x, x);
 		max_y = std::max(max_y, y);
@@ -262,10 +262,13 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 {
 	OutputImuData imuData;
 	LidarImuData imu;
+	TimeStamp timeStamp;
 
 	if (lreader->getImuData(imu))
 	{
 		std::cout << std::setprecision(20) << "\tIMU system stamp = " << getSystemTimeStamp() << std::endl;
+		
+		getSystemTimeStamp(timeStamp);
 
 		printf("\tseq = %d, stamp = %d.%d\n", imu.info.seq, imu.info.stamp.sec, imu.info.stamp.nsec);
 
@@ -278,7 +281,7 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroZ = imu.angular_velocity[2];
 
 		imuData.LidarTimestamp = imu.info.stamp.sec* 1.0e9 + imu.info.stamp.nsec; 
-		imuData.SystemTimeStamp = getSystemTimeStamp()* 1.0e9;
+		imuData.SystemTimeStamp = timeStamp.sec * 1.0e9 + timeStamp.nsec;
 		imuData.ImuId = 0;
 	}
 
