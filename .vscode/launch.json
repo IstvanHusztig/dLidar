@@ -2,14 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug example_lidar_udp",
+            "name": "Debug dLidar",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/example_lidar_udp",
-           //"MIMode": "lldb", // Use LLDB as the debugger
-           // "miDebuggerPath": "/usr/bin/lldb", // Path to the LLDB binary
-            "preLaunchTask": "build" 
-            
+            "program": "${workspaceFolder}/bin/dLidar",
+            //"MIMode": "lldb", // Use LLDB as the debugger
+            // "miDebuggerPath": "/usr/bin/lldb", // Path to the LLDB binary
+            "preLaunchTask": "build"
         }
     ]
 }
