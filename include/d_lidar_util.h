@@ -55,7 +55,7 @@ inline void ParseFrom_UniTreePointCloud_To_DLidarPointCloud(
     // scan info
     const int num_of_points = cloudIn.points.size();
        
-    cloud.stamp = cloudIn.stamp * 1.0e9 ;
+    cloud.stamp = cloudIn.stamp;
   
     cloud.id = 1;
     cloud.ringNum = 1;
@@ -71,9 +71,9 @@ inline void ParseFrom_UniTreePointCloud_To_DLidarPointCloud(
         point3d.y = cloudIn.points[j].y;
         point3d.z = cloudIn.points[j].z;
         point3d.intensity = cloudIn.points[j].intensity;
-        point3d.time = cloudIn.points[j].time * 1.0e9;
+        point3d.time = cloudIn.points[j].time;//* 1.0e9;
         
-        cloud.points.push_back(point3d);
+        cloud.points.emplace_back(point3d);
     }
 }
 }
