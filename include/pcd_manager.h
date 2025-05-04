@@ -7,6 +7,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <dll/laszip_api.h>
+#include <chrono>
 
 using namespace unitree_lidar_sdk;
 
@@ -14,7 +15,7 @@ struct OutputImuData
 {
 public:
 	double LidarTimestamp;
-	double SystemTimeStamp;
+	double EpochTimestamp;
 	int ImuId;
 
 	int GyroX;
@@ -255,6 +256,10 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 	LidarImuData imu;
 	TimeStamp timeStamp;
 
+	auto now = std::chrono::system_clock::now();
+	auto duration = now.time_since_epoch();
+	auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
+
 	if (lreader->getImuData(imu))
 	{
 		std::cout << std::setprecision(20) << "\tIMU system stamp = " << getSystemTimeStamp() << std::endl;
@@ -271,33 +276,34 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroY = imu.angular_velocity[1];
 		imuData.GyroZ = imu.angular_velocity[2];
 
-		imuData.LidarTimestamp = imu.info.stamp.sec + imu.info.stamp.nsec; 
-		imuData.SystemTimeStamp = timeStamp.sec + timeStamp.nsec;
+		imuData.LidarTimestamp = getSystemTimeStamp(); 
+		imuData.EpochTimestamp = millis.count();
 		imuData.ImuId = 0;
 	}
 
 	return imuData;
 }
 
-std::vector<DLidarPoint> GetPointCloud(UnitreeLidarReader *lreader)
+std::vector<PointUnitree> GetPointCloud(UnitreeLidarReader *lreader)
 {
-	//LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
+	LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
 	PointCloudUnitree cloud;
-	DLidarPointCloud dlidarCloud;
 
-	if (lreader->getPointCloud(cloud))
+	if(lidarDataPacket.data.point_num == 0)
 	{
-		printf("A Cloud msg is parsed! \n");
-		ParseFrom_UniTreePointCloud_To_DLidarPointCloud(dlidarCloud, cloud);
-		// FilterPointCloud(cloud);
+		std::cout << "No point data in this packet!" << std::endl;
+		return {};
 	}
 
-	return dlidarCloud.points;
+	printf("A Cloud msg is parsed! \n");
+	parseFromPacketToPointCloud(cloud,lreader->getLidarPointDataPacket());
+
+	return cloud.points;
 }
 
 void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> &imuVector)
 {
-	std::string content = "gyroX gyroY gyroZ accX accY accZ imuId timestamp  timestampUnix\n";
+	std::string content = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
 	for (const auto &imu : imuVector)
 	{
@@ -309,7 +315,7 @@ void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> 
 				   std::to_string(imu.AccelerationZ) + " " +
 				   std::to_string(imu.ImuId) + " " +
 				   std::to_string(imu.LidarTimestamp) + " " +
-				   std::to_string(imu.SystemTimeStamp) + "\n";
+				   std::to_string(imu.EpochTimestamp) + "\n";
 	}
 
 	WriteToFile(fileName, content);
