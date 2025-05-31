@@ -52,9 +52,22 @@ typedef struct
     float y;
     float z;
     float intensity;
-    float time;    // relative time of this point from cloud stamp
+    float time;    
     uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } PointUnitree;
+
+/*
+ * @brief Point Type DLidar
+ */
+typedef struct
+{
+    float x;
+    float y;
+    float z;
+    float intensity;
+    long time;    
+    uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
+} PointDLidar;
 
 /**
  * @brief Point Cloud Type
@@ -66,6 +79,17 @@ typedef struct
     uint32_t ringNum; // number of rings
     std::vector<PointUnitree> points;
 } PointCloudUnitree;
+
+/**
+ * @brief Point Cloud Type
+ */
+typedef struct
+{
+    double stamp;     // cloud start timestamp, the point timestamp is relative to this
+    uint32_t id;      // sequence id
+    uint32_t ringNum; // number of rings
+    std::vector<PointDLidar> points;
+} PointCloudDLidar;
 
 ///////////////////////////////////////////////////////////////////////////////
 // FUNCTIONS
@@ -85,11 +109,11 @@ inline void getSystemTimeStamp(TimeStamp &timestamp)
 /**
  * @brief Get system timestamp
  */
-inline double getSystemTimeStamp()
+inline long getSystemTimeStamp()
 {
     struct timespec time1 = {0, 0};
     clock_gettime(CLOCK_REALTIME, &time1);
-    return time1.tv_sec + time1.tv_nsec / 1.0e9;
+    return time1.tv_sec*  1.0e9 + time1.tv_nsec;
 }
 
 /**
@@ -125,7 +149,7 @@ inline uint32_t crc32(const uint8_t *buf, uint32_t len)
  * @param[in] range_max allowed maximum point range in meters
  */
 inline void parseFromPacketToPointCloud(
-    PointCloudUnitree &cloud,
+    PointCloudDLidar &cloud,
     const LidarPointDataPacket &packet,
     bool use_system_timestamp = true,
     float range_min = 0,
@@ -172,7 +196,7 @@ inline void parseFromPacketToPointCloud(
     float sin_alpha, cos_alpha, sin_theta, cos_theta;
     float A, B, C;
 
-    PointUnitree point3d;
+    PointDLidar point3d;
     point3d.ring = 1;
     // std::cout << "packet.data.param.range_scale = " << packet.data.param.range_scale << std::endl;
 
@@ -216,7 +240,7 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = time_relative + static_cast<float>(cloud.stamp);
+        point3d.time = cloud.stamp + j*packet.data.scan_period;
         cloud.points.push_back(point3d);
     }
 }

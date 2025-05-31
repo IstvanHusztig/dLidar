@@ -1,5 +1,3 @@
-
-
 #include "pcd_manager.h"
 
 void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
