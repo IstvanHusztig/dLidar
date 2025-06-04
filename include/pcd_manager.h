@@ -7,7 +7,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <dll/laszip_api.h>
-#include <chrono>
+
 
 using namespace unitree_lidar_sdk;
 
@@ -136,6 +136,7 @@ bool SaveToLazOrLas(const std::string &filename, std::vector<PointDLidar> &point
 
 	laszip_I64 p_count = 0;
 	laszip_F64 coordinates[3];
+ 	
 
 	for (uint i = 0; i < points.size(); i += step)
 	{
@@ -267,7 +268,7 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroY = imu.angular_velocity[1];
 		imuData.GyroZ = imu.angular_velocity[2];
 
-		imuData.LidarTimestamp = getSystemTimeStamp();// imu.info.stamp.sec * 1.0e9 + imu.info.stamp.nsec;
+		imuData.LidarTimestamp =  imu.info.stamp.sec + imu.info.stamp.nsec/1.0e6;//getSystemTimeStamp();//
 		imuData.EpochTimestamp = millis.count();
 		imuData.ImuId = 0;
 	}
@@ -315,7 +316,7 @@ void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> 
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	int result;
-	int max_points = 750000;
+	int max_points = 350000;
 	int current_points = 0;
 	int cycleCount = 0;
 	std::vector<PointDLidar> ptCloudResult = std::vector<PointDLidar>();
@@ -349,7 +350,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 				if (ptCloud.size() > 0)
 				{
 					for(auto point: ptCloud)
-					{
+					{ 
 						pointLogContent+=std::to_string(point.x)+ " "+std::to_string(point.y)+" "+
 										 std::to_string(point.z)+ " "+ std::to_string( point.time)+"\n";
 					}

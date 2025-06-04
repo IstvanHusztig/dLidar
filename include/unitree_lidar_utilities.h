@@ -27,6 +27,7 @@ typedef unsigned __int64 uint64_t;
 #include <memory>
 #include <math.h>
 #include <iostream>
+#include <chrono>
 
 #include "unitree_lidar_sdk_config.h"
 #include "unitree_lidar_protocol.h"
@@ -85,7 +86,7 @@ typedef struct
  */
 typedef struct
 {
-    long stamp;     
+    double stamp;     
     uint32_t id;      // sequence id
     uint32_t ringNum; // number of rings
     std::vector<PointDLidar> points;
@@ -104,16 +105,6 @@ inline void getSystemTimeStamp(TimeStamp &timestamp)
     clock_gettime(CLOCK_REALTIME, &time1);
     timestamp.sec = time1.tv_sec;
     timestamp.nsec = time1.tv_nsec;
-}
-
-/**
- * @brief Get system timestamp
- */
-inline long getSystemTimeStamp()
-{
-    struct timespec time1 = {0, 0};
-    clock_gettime(CLOCK_REALTIME, &time1);
-    return time1.tv_sec*  1.0e9 + time1.tv_nsec;
 }
 
 /**
@@ -242,12 +233,12 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = getSystemTimeStamp() / 1e9 -scan_period;//cloudOut.stamp / 1e9 + time_relative-scan_period;// cloudOut.stamp + time_relative*1.0e9;
+        point3d.time = packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6;
         cloudOut.points.push_back(point3d);
     }
 }
 
-/**
+/**  
  * @brief Parse from a packet to a 2D LaserScan
  * @param[out] cloud
  * @param[in] packet lidar point data packet

@@ -2,6 +2,7 @@
 
 namespace unitree_lidar_sdk
 {
+
 /**
  * @brief Point Type
  */
