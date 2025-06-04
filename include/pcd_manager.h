@@ -252,7 +252,6 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 {
 	OutputImuData imuData;
 	LidarImuData imu;
-	//TimeStamp timeStamp;
 
 	auto now = std::chrono::system_clock::now();
 	auto duration = now.time_since_epoch();
@@ -260,10 +259,6 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 
 	if (lreader->getImuData(imu))
 	{
-		std::cout << std::setprecision(20) << "\tIMU system stamp = " << getSystemTimeStamp() << std::endl;
-		
-		printf("\tseq = %d, stamp = %d.%d\n", imu.info.seq, imu.info.stamp.sec, imu.info.stamp.nsec);
-
 		imuData.AccelerationX = imu.linear_acceleration[0];
 		imuData.AccelerationY = imu.linear_acceleration[1];
 		imuData.AccelerationZ = imu.linear_acceleration[2];
@@ -272,7 +267,7 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroY = imu.angular_velocity[1];
 		imuData.GyroZ = imu.angular_velocity[2];
 
-		imuData.LidarTimestamp = getSystemTimeStamp();
+		imuData.LidarTimestamp = getSystemTimeStamp();// imu.info.stamp.sec * 1.0e9 + imu.info.stamp.nsec;
 		imuData.EpochTimestamp = millis.count();
 		imuData.ImuId = 0;
 	}
@@ -283,7 +278,7 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 {
 	LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
-	PointCloudDLidar cloud;
+	PointCloudDLidar cloudOut;
 
 	if(lidarDataPacket.data.point_num == 0)
 	{
@@ -292,9 +287,9 @@ std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 	}
 
 	printf("A Cloud msg is parsed! \n");
-	parseFromPacketToPointCloud(cloud,lreader->getLidarPointDataPacket());
+	parseFromPacketToPointCloud(cloudOut,lreader->getLidarPointDataPacket());
 
-	return cloud.points;
+	return cloudOut.points;
 }
 
 void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> &imuVector)
@@ -320,7 +315,7 @@ void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> 
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	int result;
-	int max_points = 1500000;
+	int max_points = 750000;
 	int current_points = 0;
 	int cycleCount = 0;
 	std::vector<PointDLidar> ptCloudResult = std::vector<PointDLidar>();

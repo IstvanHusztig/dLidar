@@ -85,7 +85,7 @@ typedef struct
  */
 typedef struct
 {
-    double stamp;     // cloud start timestamp, the point timestamp is relative to this
+    long stamp;     
     uint32_t id;      // sequence id
     uint32_t ringNum; // number of rings
     std::vector<PointDLidar> points;
@@ -149,16 +149,13 @@ inline uint32_t crc32(const uint8_t *buf, uint32_t len)
  * @param[in] range_max allowed maximum point range in meters
  */
 inline void parseFromPacketToPointCloud(
-    PointCloudDLidar &cloud,
+    PointCloudDLidar &cloudOut,
     const LidarPointDataPacket &packet,
     bool use_system_timestamp = true,
     float range_min = 0,
     float range_max = 100)
 {
-    // scan info
-    const int num_of_points = packet.data.point_num;
-    const float time_step = packet.data.time_increment;
-    const float scan_period = packet.data.scan_period;
+    
 
     // intermediate variables
     const float sin_beta = sin(packet.data.param.beta_angle);
@@ -169,18 +166,23 @@ inline void parseFromPacketToPointCloud(
     const float sin_beta_cos_xi = sin_beta * cos_xi;
     const float sin_beta_sin_xi = sin_beta * sin_xi;
     const float cos_beta_cos_xi = cos_beta * cos_xi;
+ 
+    // scan info
+    const int num_of_points = packet.data.point_num;
+    const float time_step = packet.data.time_increment;
+    const double scan_period = packet.data.scan_period;
 
     // cloud init
     if (use_system_timestamp)
     {
-        cloud.stamp = getSystemTimeStamp() - scan_period;
+        cloudOut.stamp = getSystemTimeStamp() - scan_period*1.0e9;
     }else{
-        cloud.stamp = packet.data.info.stamp.sec + packet.data.info.stamp.nsec / 1.0e9;
+        cloudOut.stamp = (packet.data.info.stamp.sec*  1.0e9 + packet.data.info.stamp.nsec) ;
     }
-    cloud.id = 1;
-    cloud.ringNum = 1;
-    cloud.points.clear();
-    cloud.points.reserve(300);
+    cloudOut.id = 1;
+    cloudOut.ringNum = 1;
+    cloudOut.points.clear();
+    cloudOut.points.reserve(num_of_points);
 
     // transform raw data to a pointcloud
     auto &ranges = packet.data.ranges;
@@ -240,8 +242,8 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = cloud.stamp + j*packet.data.scan_period;
-        cloud.points.push_back(point3d);
+        point3d.time = getSystemTimeStamp() / 1e9 -scan_period;//cloudOut.stamp / 1e9 + time_relative-scan_period;// cloudOut.stamp + time_relative*1.0e9;
+        cloudOut.points.push_back(point3d);
     }
 }
 
