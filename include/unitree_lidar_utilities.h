@@ -67,7 +67,7 @@ typedef struct
     float y;
     float z;
     float intensity;
-    long time;    
+    double time;    
     uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } PointDLidar;
 
@@ -87,7 +87,6 @@ typedef struct
  */
 typedef struct
 {
-    double stamp;     
     uint32_t id;      // sequence id
     uint32_t ringNum; // number of rings
     std::vector<PointDLidar> points;
@@ -161,10 +160,7 @@ inline void parseFromPacketToPointCloud(
     // scan info
     const int num_of_points = packet.data.point_num;
     const float time_step = packet.data.time_increment;
-    const double scan_period = packet.data.scan_period;
 
-    cloudOut.stamp = (packet.data.info.stamp.sec*  1.0e9 + packet.data.info.stamp.nsec) ;
- 
     cloudOut.id = 1;
     cloudOut.ringNum = 1;
     cloudOut.points.clear();
@@ -228,7 +224,7 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6;
+        point3d.time = (packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6)/1.0e9;
         cloudOut.points.push_back(point3d);
     }
 }

@@ -12,7 +12,7 @@ typedef struct
     float y;
     float z;
     float intensity;
-    double time;    // relative time of this point from cloud stamp
+    double time;    
     uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } DLidarPoint;
 
@@ -26,20 +26,6 @@ typedef struct
     uint32_t ringNum; // number of rings
     std::vector<DLidarPoint> points;
 } DLidarPointCloud;
-
-/**
- * @brief Get system timestamp
- */
-inline uint getDLidarSystemTimeStamp()
-{
-    struct timespec time1 = {0, 0};
-    clock_gettime(CLOCK_REALTIME, &time1);
-    return time1.tv_sec * 1.0e9 + time1.tv_nsec;
-}
-/**
- * @brief Lidar Point Data Packet
- * @note 1036 bytes
- */
 
 /**
  * @brief Parse from a point packet to a 3D point cloud
