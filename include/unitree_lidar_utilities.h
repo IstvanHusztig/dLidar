@@ -32,7 +32,8 @@ typedef unsigned __int64 uint64_t;
 #include "unitree_lidar_sdk_config.h"
 #include "unitree_lidar_protocol.h"
 
-namespace unitree_lidar_sdk{
+namespace unitree_lidar_sdk
+{
 
 ///////////////////////////////////////////////////////////////////////////////
 // CONSTANTS
@@ -142,7 +143,6 @@ inline uint32_t crc32(const uint8_t *buf, uint32_t len)
 inline void parseFromPacketToPointCloud(
     PointCloudDLidar &cloudOut,
     const LidarPointDataPacket &packet,
-    bool use_system_timestamp = true,
     float range_min = 0,
     float range_max = 100)
 {
@@ -163,13 +163,8 @@ inline void parseFromPacketToPointCloud(
     const float time_step = packet.data.time_increment;
     const double scan_period = packet.data.scan_period;
 
-    // cloud init
-    if (use_system_timestamp)
-    {
-        cloudOut.stamp = getSystemTimeStamp() - scan_period*1.0e9;
-    }else{
-        cloudOut.stamp = (packet.data.info.stamp.sec*  1.0e9 + packet.data.info.stamp.nsec) ;
-    }
+    cloudOut.stamp = (packet.data.info.stamp.sec*  1.0e9 + packet.data.info.stamp.nsec) ;
+ 
     cloudOut.id = 1;
     cloudOut.ringNum = 1;
     cloudOut.points.clear();
@@ -235,89 +230,6 @@ inline void parseFromPacketToPointCloud(
         point3d.intensity = intensities[j];
         point3d.time = packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6;
         cloudOut.points.push_back(point3d);
-    }
-}
-
-/**  
- * @brief Parse from a packet to a 2D LaserScan
- * @param[out] cloud
- * @param[in] packet lidar point data packet
- * @param[in] use_system_timestamp use system timestamp, otherwise use lidar hardware timestamp
- * @param[in] range_min allowed minimum point range in meters
- * @param[in] range_max allowed maximum point range in meters
- */
-inline void parseFromPacketPointCloud2D(
-    PointCloudUnitree &cloud,
-    const Lidar2DPointDataPacket &packet,
-    bool use_system_timestamp = true,
-    float range_min = 0,
-    float range_max = 100)
-{
-    // scan info
-    const int num_of_points = packet.data.point_num;
-    const float time_step = packet.data.time_increment;
-    const float scan_period = packet.data.scan_period;
-
-    // cloud init
-    if (use_system_timestamp)
-    {
-        cloud.stamp = getSystemTimeStamp() - scan_period;
-    }else{
-        cloud.stamp = packet.data.info.stamp.sec + packet.data.info.stamp.nsec / 1.0e9;
-    }
-    cloud.id = 1;
-    cloud.ringNum = 1;
-    cloud.points.clear();
-    cloud.points.reserve(300);
-
-    // transform raw data to a pointcloud
-    auto &ranges = packet.data.ranges;
-    auto &intensities = packet.data.intensities;
-
-    float time_relative = 0;
-    float alpha_cur = packet.data.angle_min + packet.data.param.alpha_angle_bias;
-    float alpha_step = packet.data.angle_increment;
-
-    float range_float;
-    float sin_alpha, cos_alpha;
-
-    PointUnitree point3d;
-    point3d.ring = 1;
-
-    for (int j = 0; j < num_of_points; j += 1, alpha_cur += alpha_step, time_relative += time_step)
-    {
-        // jump invalid points
-        if (ranges[j] < 1)
-        {
-            continue;
-        }
-
-        // calculate point range in float type
-        range_float = packet.data.param.range_scale * (ranges[j] + packet.data.param.range_bias);
-
-        // jump points beyond range limit
-        if (range_float < packet.data.range_min || range_float > packet.data.range_max)
-        {
-            continue;
-        }
-
-        // jump points beyond range limit
-        if (range_float < range_min || range_float > range_max)
-        {
-            continue;
-        }
-
-        // transform to XYZ coordinate
-        sin_alpha = sin(alpha_cur);
-        cos_alpha = cos(alpha_cur);
-        point3d.x = 0;
-        point3d.y = cos_alpha * range_float;
-        point3d.z = sin_alpha * range_float + packet.data.param.a_axis_dist;
-
-        // push back this point to cloud
-        point3d.intensity = intensities[j];
-        point3d.time = time_relative;
-        cloud.points.push_back(point3d);
     }
 }
 
