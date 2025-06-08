@@ -67,7 +67,7 @@ typedef struct
     float y;
     float z;
     float intensity;
-    long time;    
+    double time;    
     uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } PointDLidar;
 
@@ -224,7 +224,7 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6;
+        point3d.time = (packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6)/1.0e9;
         cloudOut.points.push_back(point3d);
     }
 }

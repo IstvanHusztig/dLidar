@@ -12,7 +12,7 @@ typedef struct
     float y;
     float z;
     float intensity;
-    double time;    // relative time of this point from cloud stamp
+    double time;    
     uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } DLidarPoint;
 
