@@ -27,6 +27,7 @@ typedef unsigned __int64 uint64_t;
 #include <memory>
 #include <math.h>
 #include <iostream>
+#include <chrono>
 
 #include "unitree_lidar_sdk_config.h"
 #include "unitree_lidar_protocol.h"
@@ -52,9 +53,22 @@ typedef struct
     float y;
     float z;
     float intensity;
-    float time;    // relative time of this point from cloud stamp
+    float time;    
     uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
 } PointUnitree;
+
+/*
+ * @brief Point Type DLidar
+ */
+typedef struct
+{
+    float x;
+    float y;
+    float z;
+    float intensity;
+    long time;    
+    uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
+} PointDLidar;
 
 /**
  * @brief Point Cloud Type
@@ -66,6 +80,17 @@ typedef struct
     uint32_t ringNum; // number of rings
     std::vector<PointUnitree> points;
 } PointCloudUnitree;
+
+/**
+ * @brief Point Cloud Type
+ */
+typedef struct
+{
+    double stamp;     
+    uint32_t id;      // sequence id
+    uint32_t ringNum; // number of rings
+    std::vector<PointDLidar> points;
+} PointCloudDLidar;
 
 ///////////////////////////////////////////////////////////////////////////////
 // FUNCTIONS
@@ -80,16 +105,6 @@ inline void getSystemTimeStamp(TimeStamp &timestamp)
     clock_gettime(CLOCK_REALTIME, &time1);
     timestamp.sec = time1.tv_sec;
     timestamp.nsec = time1.tv_nsec;
-}
-
-/**
- * @brief Get system timestamp
- */
-inline double getSystemTimeStamp()
-{
-    struct timespec time1 = {0, 0};
-    clock_gettime(CLOCK_REALTIME, &time1);
-    return time1.tv_sec + time1.tv_nsec / 1.0e9;
 }
 
 /**
@@ -125,16 +140,13 @@ inline uint32_t crc32(const uint8_t *buf, uint32_t len)
  * @param[in] range_max allowed maximum point range in meters
  */
 inline void parseFromPacketToPointCloud(
-    PointCloudUnitree &cloud,
+    PointCloudDLidar &cloudOut,
     const LidarPointDataPacket &packet,
     bool use_system_timestamp = true,
     float range_min = 0,
     float range_max = 100)
 {
-    // scan info
-    const int num_of_points = packet.data.point_num;
-    const float time_step = packet.data.time_increment;
-    const float scan_period = packet.data.scan_period;
+    
 
     // intermediate variables
     const float sin_beta = sin(packet.data.param.beta_angle);
@@ -145,18 +157,23 @@ inline void parseFromPacketToPointCloud(
     const float sin_beta_cos_xi = sin_beta * cos_xi;
     const float sin_beta_sin_xi = sin_beta * sin_xi;
     const float cos_beta_cos_xi = cos_beta * cos_xi;
+ 
+    // scan info
+    const int num_of_points = packet.data.point_num;
+    const float time_step = packet.data.time_increment;
+    const double scan_period = packet.data.scan_period;
 
     // cloud init
     if (use_system_timestamp)
     {
-        cloud.stamp = getSystemTimeStamp() - scan_period;
+        cloudOut.stamp = getSystemTimeStamp() - scan_period*1.0e9;
     }else{
-        cloud.stamp = packet.data.info.stamp.sec + packet.data.info.stamp.nsec / 1.0e9;
+        cloudOut.stamp = (packet.data.info.stamp.sec*  1.0e9 + packet.data.info.stamp.nsec) ;
     }
-    cloud.id = 1;
-    cloud.ringNum = 1;
-    cloud.points.clear();
-    cloud.points.reserve(300);
+    cloudOut.id = 1;
+    cloudOut.ringNum = 1;
+    cloudOut.points.clear();
+    cloudOut.points.reserve(num_of_points);
 
     // transform raw data to a pointcloud
     auto &ranges = packet.data.ranges;
@@ -172,7 +189,7 @@ inline void parseFromPacketToPointCloud(
     float sin_alpha, cos_alpha, sin_theta, cos_theta;
     float A, B, C;
 
-    PointUnitree point3d;
+    PointDLidar point3d;
     point3d.ring = 1;
     // std::cout << "packet.data.param.range_scale = " << packet.data.param.range_scale << std::endl;
 
@@ -216,12 +233,12 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = time_relative;
-        cloud.points.push_back(point3d);
+        point3d.time = packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6;
+        cloudOut.points.push_back(point3d);
     }
 }
 
-/**
+/**  
  * @brief Parse from a packet to a 2D LaserScan
  * @param[out] cloud
  * @param[in] packet lidar point data packet

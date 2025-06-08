@@ -8,13 +8,14 @@
 #include <sys/stat.h>
 #include <dll/laszip_api.h>
 
+
 using namespace unitree_lidar_sdk;
 
 struct OutputImuData
 {
 public:
-	double LidarTimestamp;
-	double SystemTimeStamp;
+	long LidarTimestamp;
+	long EpochTimestamp;
 	int ImuId;
 
 	int GyroX;
@@ -26,7 +27,7 @@ public:
 	int AccelerationZ;
 };
 
-bool SaveToLazOrLas(const std::string &filename, std::vector<DLidarPoint> &points)
+bool SaveToLazOrLas(const std::string &filename, std::vector<PointDLidar> &points)
 {
 
 	constexpr float scale = 0.0001f; // one tenth of milimeter
@@ -135,6 +136,7 @@ bool SaveToLazOrLas(const std::string &filename, std::vector<DLidarPoint> &point
 
 	laszip_I64 p_count = 0;
 	laszip_F64 coordinates[3];
+ 	
 
 	for (uint i = 0; i < points.size(); i += step)
 	{
@@ -191,8 +193,6 @@ bool SaveToLazOrLas(const std::string &filename, std::vector<DLidarPoint> &point
 
 void WriteToFile(std::string filePath, const std::string &content)
 {
-	struct stat info;
-
 	std::ofstream outFile(filePath, std::ios::out);
 
 	if (!outFile)
@@ -253,16 +253,13 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 {
 	OutputImuData imuData;
 	LidarImuData imu;
-	TimeStamp timeStamp;
+
+	auto now = std::chrono::system_clock::now();
+	auto duration = now.time_since_epoch();
+	auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
 
 	if (lreader->getImuData(imu))
 	{
-		std::cout << std::setprecision(20) << "\tIMU system stamp = " << getSystemTimeStamp() << std::endl;
-		
-		getSystemTimeStamp(timeStamp);
-
-		printf("\tseq = %d, stamp = %d.%d\n", imu.info.seq, imu.info.stamp.sec, imu.info.stamp.nsec);
-
 		imuData.AccelerationX = imu.linear_acceleration[0];
 		imuData.AccelerationY = imu.linear_acceleration[1];
 		imuData.AccelerationZ = imu.linear_acceleration[2];
@@ -271,33 +268,34 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroY = imu.angular_velocity[1];
 		imuData.GyroZ = imu.angular_velocity[2];
 
-		imuData.LidarTimestamp = imu.info.stamp.sec + imu.info.stamp.nsec; 
-		imuData.SystemTimeStamp = timeStamp.sec + timeStamp.nsec;
+		imuData.LidarTimestamp =  imu.info.stamp.sec + imu.info.stamp.nsec/1.0e6;//getSystemTimeStamp();//
+		imuData.EpochTimestamp = millis.count();
 		imuData.ImuId = 0;
 	}
 
 	return imuData;
 }
 
-std::vector<DLidarPoint> GetPointCloud(UnitreeLidarReader *lreader)
+std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 {
-	//LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
-	PointCloudUnitree cloud;
-	DLidarPointCloud dlidarCloud;
+	LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
+	PointCloudDLidar cloudOut;
 
-	if (lreader->getPointCloud(cloud))
+	if(lidarDataPacket.data.point_num == 0)
 	{
-		printf("A Cloud msg is parsed! \n");
-		ParseFrom_UniTreePointCloud_To_DLidarPointCloud(dlidarCloud, cloud);
-		// FilterPointCloud(cloud);
+		std::cout << "No point data in this packet!" << std::endl;
+		return {};
 	}
 
-	return dlidarCloud.points;
+	printf("A Cloud msg is parsed! \n");
+	parseFromPacketToPointCloud(cloudOut,lreader->getLidarPointDataPacket());
+
+	return cloudOut.points;
 }
 
 void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> &imuVector)
 {
-	std::string content = "gyroX gyroY gyroZ accX accY accZ imuId timestamp  timestampUnix\n";
+	std::string content = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
 	for (const auto &imu : imuVector)
 	{
@@ -309,7 +307,7 @@ void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> 
 				   std::to_string(imu.AccelerationZ) + " " +
 				   std::to_string(imu.ImuId) + " " +
 				   std::to_string(imu.LidarTimestamp) + " " +
-				   std::to_string(imu.SystemTimeStamp) + "\n";
+				   std::to_string(imu.EpochTimestamp) + "\n";
 	}
 
 	WriteToFile(fileName, content);
@@ -318,10 +316,10 @@ void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> 
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	int result;
-	int max_points = 1500000;
+	int max_points = 350000;
 	int current_points = 0;
 	int cycleCount = 0;
-	std::vector<DLidarPoint> ptCloudResult = std::vector<DLidarPoint>();
+	std::vector<PointDLidar> ptCloudResult = std::vector<PointDLidar>();
 	std::vector<OutputImuData> imuResult = std::vector<OutputImuData>();
 
 	std::string pointLogContent;
@@ -348,11 +346,11 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 			break;
 			case LIDAR_POINT_DATA_PACKET_TYPE:
 			{
-				std::vector<DLidarPoint> ptCloud = GetPointCloud(lreader);
+				std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
 				if (ptCloud.size() > 0)
 				{
 					for(auto point: ptCloud)
-					{
+					{ 
 						pointLogContent+=std::to_string(point.x)+ " "+std::to_string(point.y)+" "+
 										 std::to_string(point.z)+ " "+ std::to_string( point.time)+"\n";
 					}
