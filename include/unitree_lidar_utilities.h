@@ -224,7 +224,7 @@ inline void parseFromPacketToPointCloud(
 
         // push back this point to cloud
         point3d.intensity = intensities[j];
-        point3d.time = (packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e6)/1.0e9;
+        point3d.time = (packet.data.info.stamp.sec + packet.data.info.stamp.nsec/1.0e9)/1.0e9;
         cloudOut.points.push_back(point3d);
     }
 }
