@@ -7,24 +7,29 @@
 #include <string>
 #include <sys/stat.h>
 #include <dll/laszip_api.h>
-
+#include <fstream>
+#include <iomanip>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <iostream>
 
 using namespace unitree_lidar_sdk;
 
 struct OutputImuData
 {
 public:
-	long LidarTimestamp;
-	long EpochTimestamp;
+	double LidarTimestamp;
+	double EpochTimestamp;
 	int ImuId;
 
-	int GyroX;
-	int GyroY;
-	int GyroZ;
+	float GyroX;
+	float GyroY;
+	float GyroZ;
 
-	int AccelerationX;
-	int AccelerationY;
-	int AccelerationZ;
+	float AccelerationX;
+	float AccelerationY;
+	float AccelerationZ;
 };
 
 bool SaveToLazOrLas(const std::string &filename, std::vector<PointDLidar> &points)
@@ -136,7 +141,6 @@ bool SaveToLazOrLas(const std::string &filename, std::vector<PointDLidar> &point
 
 	laszip_I64 p_count = 0;
 	laszip_F64 coordinates[3];
- 	
 
 	for (uint i = 0; i < points.size(); i += step)
 	{
@@ -260,16 +264,16 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 
 	if (lreader->getImuData(imu))
 	{
-		imuData.AccelerationX = imu.linear_acceleration[0];
-		imuData.AccelerationY = imu.linear_acceleration[1];
-		imuData.AccelerationZ = imu.linear_acceleration[2];
+		imuData.AccelerationX = imu.linear_acceleration[0] / 9.81f; // convert to g
+		imuData.AccelerationY = imu.linear_acceleration[1] / 9.81f; // convert to g
+		imuData.AccelerationZ = imu.linear_acceleration[2] / 9.81f; // convert to g
 
-		imuData.GyroX = imu.angular_velocity[0];
-		imuData.GyroY = imu.angular_velocity[1];
-		imuData.GyroZ = imu.angular_velocity[2];
+		imuData.GyroX = imu.angular_velocity[0]; // 57.2958f; // convert to rad/s
+		imuData.GyroY = imu.angular_velocity[1]; // 57.2958f; // convert to rad/s
+		imuData.GyroZ = imu.angular_velocity[2]; // 57.2958f; // convert to rad/s
 
-		imuData.LidarTimestamp =  imu.info.stamp.sec + imu.info.stamp.nsec/1.0e6;//getSystemTimeStamp();//
-		imuData.EpochTimestamp = millis.count();
+		imuData.LidarTimestamp = ((double)imu.info.stamp.sec + (double)imu.info.stamp.nsec / 1000000000.0);
+		imuData.EpochTimestamp = ((double)millis.count() / 1000.0);
 		imuData.ImuId = 0;
 	}
 
@@ -281,48 +285,44 @@ std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 	LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
 	PointCloudDLidar cloudOut;
 
-	if(lidarDataPacket.data.point_num == 0)
+	if (lidarDataPacket.data.point_num == 0)
 	{
 		std::cout << "No point data in this packet!" << std::endl;
 		return {};
 	}
 
 	printf("A Cloud msg is parsed! \n");
-	parseFromPacketToPointCloud(cloudOut,lreader->getLidarPointDataPacket());
+	parseFromPacketToPointCloud(cloudOut, lidarDataPacket);
 
 	return cloudOut.points;
 }
 
 void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> &imuVector)
 {
-	std::string content = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
+	std::ostringstream content_stream;
+	content_stream << "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
 	for (const auto &imu : imuVector)
 	{
-		content += std::to_string(imu.GyroX) + " " +
-				   std::to_string(imu.GyroY) + " " +
-				   std::to_string(imu.GyroZ) + " " +
-				   std::to_string(imu.AccelerationX) + " " +
-				   std::to_string(imu.AccelerationY) + " " +
-				   std::to_string(imu.AccelerationZ) + " " +
-				   std::to_string(imu.ImuId) + " " +
-				   std::to_string(imu.LidarTimestamp) + " " +
-				   std::to_string(imu.EpochTimestamp) + "\n";
+		content_stream << std::fixed << std::setprecision(17)
+					   << imu.GyroX << " " << imu.GyroY << " " << imu.GyroZ << " "
+					   << imu.AccelerationX << " " << imu.AccelerationY << " " << imu.AccelerationZ << " "
+					   << imu.ImuId << " " << imu.LidarTimestamp << " " << imu.EpochTimestamp << "\n";
 	}
 
-	WriteToFile(fileName, content);
+	WriteToFile(fileName, content_stream.str());
 }
 
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	int result;
-	int max_points = 350000;
+	int max_points = 100000;
 	int current_points = 0;
 	int cycleCount = 0;
 	std::vector<PointDLidar> ptCloudResult = std::vector<PointDLidar>();
 	std::vector<OutputImuData> imuResult = std::vector<OutputImuData>();
-
-	std::string pointLogContent;
+	std::ostringstream pointLogContent;
+	pointLogContent << "x y z time";
 
 	RestartLidar(lreader);
 
@@ -330,7 +330,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 
 	PrintTimeDelay(lreader);
 
-	while (cycleCount < 3)
+	while (cycleCount < 6)
 	{
 		while (current_points < max_points)
 		{
@@ -349,10 +349,14 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 				std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
 				if (ptCloud.size() > 0)
 				{
-					for(auto point: ptCloud)
-					{ 
-						pointLogContent+=std::to_string(point.x)+ " "+std::to_string(point.y)+" "+
-										 std::to_string(point.z)+ " "+ std::to_string( point.time)+"\n";
+
+					for (auto point : ptCloud)
+					{
+						pointLogContent << std::fixed << std::setprecision(17)
+										<< point.x << " "
+										<< point.y << " "
+										<< point.z << " "
+										<< point.time << "\n";
 					}
 					ptCloudResult.insert(ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
 					current_points += ptCloud.size();
@@ -363,13 +367,16 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 		}
 
 		cycleCount++;
-		std::string fileName = "/home/vs2022/PointCloudDump/lidar000" + std::to_string(cycleCount) + ".laz";
-		std::string imuFileName = "/home/vs2022/PointCloudDump/imu000" + std::to_string(cycleCount) + ".csv";
-		std::string pointLog = "/home/vs2022/PointCloudDump/point_log"+ std::to_string(cycleCount) + ".log";
+		// FixImuTimestamps(imuResult);
+
+		std::string linuxUser = getenv("USER");
+		std::string fileName = "/home/" + linuxUser + "/PointCloudDump/lidar000" + std::to_string(cycleCount) + ".laz";
+		std::string imuFileName = "/home/" + linuxUser + "/PointCloudDump/imu000" + std::to_string(cycleCount) + ".csv";
+		std::string pointLog = "/home/" + linuxUser + "/PointCloudDump/point_log" + std::to_string(cycleCount) + ".csv";
 
 		SaveToLazOrLas(fileName, ptCloudResult);
 		PrintImuDatasToFile(imuFileName, imuResult);
-		WriteToFile(pointLog, pointLogContent);
+		WriteToFile(pointLog, pointLogContent.str());
 
 		ptCloudResult.clear();
 		imuResult.clear();
