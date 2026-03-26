@@ -224,7 +224,10 @@ namespace unitree_lidar_sdk
             // push back this point to cloud
             point3d.intensity = intensities[j];
 
-            point3d.time = ((double)packet.data.info.stamp.sec + (double)packet.data.info.stamp.nsec / 1.0e9) / 1.0e9;
+            // point3d.time = ((double)packet.data.info.stamp.sec + (double)packet.data.info.stamp.nsec / 1.0e9) / 1.0e9;
+            double packet_base_time = (double)packet.data.info.stamp.sec + ((double)packet.data.info.stamp.nsec / 1.0e9);
+            point3d.time = packet_base_time + time_relative;
+
             cloudOut.points.push_back(point3d);
         }
     }

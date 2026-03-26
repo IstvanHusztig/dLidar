@@ -262,19 +262,42 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 	auto duration = now.time_since_epoch();
 	auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
 
+	// Static variables to track the last timestamps across function calls
+	static double last_lidar_time = 0.0;
+	static double last_epoch_time = 0.0;
+
 	if (lreader->getImuData(imu))
 	{
-		imuData.AccelerationX = imu.linear_acceleration[0] / 9.81f; // convert to g
-		imuData.AccelerationY = imu.linear_acceleration[1] / 9.81f; // convert to g
-		imuData.AccelerationZ = imu.linear_acceleration[2] / 9.81f; // convert to g
+		imuData.AccelerationX = imu.linear_acceleration[0];
+		imuData.AccelerationY = imu.linear_acceleration[1];
+		imuData.AccelerationZ = imu.linear_acceleration[2];
 
-		imuData.GyroX = imu.angular_velocity[0]; // 57.2958f; // convert to rad/s
-		imuData.GyroY = imu.angular_velocity[1]; // 57.2958f; // convert to rad/s
-		imuData.GyroZ = imu.angular_velocity[2]; // 57.2958f; // convert to rad/s
+		imuData.GyroX = imu.angular_velocity[0];
+		imuData.GyroY = imu.angular_velocity[1];
+		imuData.GyroZ = imu.angular_velocity[2];
 
-		imuData.LidarTimestamp = ((double)imu.info.stamp.sec + (double)imu.info.stamp.nsec / 1000000000.0);
-		imuData.EpochTimestamp = ((double)millis.count() / 1000.0);
+		double current_lidar_time = ((double)imu.info.stamp.sec * 1000000000.0) + (double)imu.info.stamp.nsec;
+		double current_epoch_time = (double)millis.count() * 1000000.0;
+
+		// --- THE FIX: SPACE OUT THE BUFFERED SAMPLES ---
+		// If the time difference is less than 1 millisecond (1,000,000 ns),
+		// we know it's a buffered sample. Space it out by exactly 1/600th of a second (1,666,666 ns).
+		if (last_lidar_time > 0.0 && (current_lidar_time - last_lidar_time) < 1000000.0)
+		{
+			current_lidar_time = last_lidar_time + 1666666.666;
+			current_epoch_time = last_epoch_time + 1666666.666;
+		}
+
+		last_lidar_time = current_lidar_time;
+		last_epoch_time = current_epoch_time;
+
+		imuData.LidarTimestamp = current_lidar_time;
+		imuData.EpochTimestamp = current_epoch_time;
 		imuData.ImuId = 0;
+	}
+	else
+	{
+		imuData.ImuId = -1; // Mark as invalid if no data
 	}
 
 	return imuData;
