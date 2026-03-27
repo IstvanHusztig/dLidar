@@ -13,6 +13,11 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <atomic>
 
 using namespace unitree_lidar_sdk;
 
@@ -30,6 +35,13 @@ public:
 	float AccelerationX;
 	float AccelerationY;
 	float AccelerationZ;
+};
+
+struct SensorChunk
+{
+	int chunk_index;
+	std::vector<PointDLidar> points;
+	std::vector<OutputImuData> imu_data;
 };
 
 bool SaveToLazOrLas(const std::string &filename, std::vector<PointDLidar> &points)
@@ -340,79 +352,134 @@ void PrintImuDatasToFile(std::string fileName, const std::vector<OutputImuData> 
 
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
-	int result;
-	int max_points = 100000;
-	int cycleCount = 0;
+	// Tuning parameters
+	const int max_points_per_chunk = 14000; // As requested, ~14k points per chunk
+	const int target_chunks = 15;			// Adjust based on your scanning needs
 
-	// Create containers to hold all chunks in memory during the capture
-	std::vector<std::vector<PointDLidar>> all_ptClouds;
-	std::vector<std::vector<OutputImuData>> all_imuDatas;
+	// Concurrency primitives
+	std::queue<SensorChunk> chunk_queue;
+	std::mutex queue_mutex;
+	std::condition_variable queue_cv;
+	std::atomic<bool> is_capturing{true};
 
-	std::vector<PointDLidar> current_ptCloudResult;
-	std::vector<OutputImuData> current_imuResult;
+	std::string linuxUser = getenv("USER");
+	std::string base_path = "/home/" + linuxUser + "/PointCloudDump/";
 
+	// ==========================================
+	// CONSUMER THREAD: Disk I/O (.laz & .csv)
+	// ==========================================
+	std::thread consumer_thread([&]()
+								{
+        while (true)
+        {
+            SensorChunk current_chunk;
+
+            // 1. Wait for data or shutdown signal
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex);
+                queue_cv.wait(lock, [&]{ return !chunk_queue.empty() || !is_capturing; });
+
+                // If capturing stopped and queue is drained, exit thread
+                if (chunk_queue.empty() && !is_capturing)
+                {
+                    break;
+                }
+
+                // 2. Extract the chunk and immediately release the lock
+                current_chunk = std::move(chunk_queue.front());
+                chunk_queue.pop();
+            } // lock goes out of scope here, unblocking the Producer
+
+            // 3. Heavy I/O Operations (Safe to run slowly here)
+            std::string fileName = base_path + "lidar000" + std::to_string(current_chunk.chunk_index) + ".laz";
+            std::string imuFileName = base_path + "imu000" + std::to_string(current_chunk.chunk_index) + ".csv";
+
+            SaveToLazOrLas(fileName, current_chunk.points);
+            PrintImuDatasToFile(imuFileName, current_chunk.imu_data);
+        } });
+
+	// ==========================================
+	// PRODUCER THREAD (Main): Network & UDP Parsing
+	// ==========================================
 	RestartLidar(lreader);
 	PrintDirtyPercentage(lreader);
 	PrintTimeDelay(lreader);
 
-	std::cout << ">>> STARTING DATA CAPTURE <<<" << std::endl;
-	sleep(2); // Short delay to ensure lidar is fully operational before starting capture
+	std::cout << ">>> STARTING MULTITHREADED DATA CAPTURE <<<" << std::endl;
+	sleep(2);
 
-	while (cycleCount < 15)
+	int chunks_produced = 0;
+	std::vector<PointDLidar> current_ptCloudResult;
+	std::vector<OutputImuData> current_imuResult;
+
+	// Pre-reserve memory to prevent reallocation overhead during the UDP loop
+	current_ptCloudResult.reserve(max_points_per_chunk + 2000);
+	current_imuResult.reserve((max_points_per_chunk / 10) + 100);
+
+	while (chunks_produced < target_chunks)
 	{
-		int current_points = 0;
+		// Run as fast as possible. NO std::cout or printf inside this loop!
+		int result = lreader->runParse();
 
-		while (current_points < max_points)
+		switch (result)
 		{
-			// runParse() must be called as fast as possible. No heavy operations here.
-			result = lreader->runParse();
-
-			switch (result)
+		case LIDAR_IMU_DATA_PACKET_TYPE:
+		{
+			current_imuResult.push_back(GetOutputImuData(lreader));
+			break;
+		}
+		case LIDAR_POINT_DATA_PACKET_TYPE:
+		{
+			std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
+			if (!ptCloud.empty())
 			{
-			case LIDAR_IMU_DATA_PACKET_TYPE:
-			{
-				OutputImuData imuDt = GetOutputImuData(lreader);
-				current_imuResult.push_back(imuDt);
+				current_ptCloudResult.insert(current_ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
 			}
 			break;
-			case LIDAR_POINT_DATA_PACKET_TYPE:
-			{
-				std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
-				if (ptCloud.size() > 0)
-				{
-					// Removed the heavy string stream logging that was causing micro-drops
-					current_ptCloudResult.insert(current_ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
-					current_points += ptCloud.size();
-				}
-			}
-			break;
-			}
+		}
 		}
 
-		// Store the completed chunk in memory instead of writing to disk
-		all_ptClouds.push_back(current_ptCloudResult);
-		all_imuDatas.push_back(current_imuResult);
+		// Check if we have accumulated enough points for a chunk
+		if (current_ptCloudResult.size() >= max_points_per_chunk)
+		{
+			chunks_produced++;
 
-		current_ptCloudResult.clear();
-		current_imuResult.clear();
-		cycleCount++;
+			SensorChunk new_chunk;
+			new_chunk.chunk_index = chunks_produced;
+
+			// std::move transfers ownership of the underlying memory buffers instantly.
+			// This avoids a massive copy operation of the 14,000 points.
+			new_chunk.points = std::move(current_ptCloudResult);
+			new_chunk.imu_data = std::move(current_imuResult);
+
+			// Lock, push, and notify Consumer
+			{
+				std::lock_guard<std::mutex> lock(queue_mutex);
+				chunk_queue.push(std::move(new_chunk));
+			}
+			queue_cv.notify_one();
+
+			// Re-initialize and pre-reserve vectors for the next UDP packets
+			current_ptCloudResult = std::vector<PointDLidar>();
+			current_ptCloudResult.reserve(max_points_per_chunk + 2000);
+
+			current_imuResult = std::vector<OutputImuData>();
+			current_imuResult.reserve((max_points_per_chunk / 10) + 100);
+		}
 	}
 
-	// Stop the LiDAR rotation BEFORE executing slow disk I/O
+	// ==========================================
+	// GRACEFUL SHUTDOWN
+	// ==========================================
 	lreader->stopLidarRotation();
-	std::cout << "LiDAR stopped. Writing files to disk..." << std::endl;
+	std::cout << "LiDAR stopped. Waiting for the Consumer thread to finish writing remaining chunks..." << std::endl;
 
-	// Write all accumulated data to disk safely
-	std::string linuxUser = getenv("USER");
-	for (size_t i = 0; i < all_ptClouds.size(); ++i)
-	{
-		int chunkIndex = i + 1;
-		std::string fileName = "/home/" + linuxUser + "/PointCloudDump/lidar000" + std::to_string(chunkIndex) + ".laz";
-		std::string imuFileName = "/home/" + linuxUser + "/PointCloudDump/imu000" + std::to_string(chunkIndex) + ".csv";
+	// Signal the Consumer to drain the queue and exit
+	is_capturing = false;
+	queue_cv.notify_one();
 
-		SaveToLazOrLas(fileName, all_ptClouds[i]);
-		PrintImuDatasToFile(imuFileName, all_imuDatas[i]);
-	}
+	// Block the main thread until the Consumer is completely finished
+	consumer_thread.join();
 
-	std::cout << "All data successfully saved." << std::endl;
+	std::cout << "All data successfully saved. Multithreaded capture complete." << std::endl;
 }
