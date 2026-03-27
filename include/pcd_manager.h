@@ -19,8 +19,8 @@ using namespace unitree_lidar_sdk;
 struct OutputImuData
 {
 public:
-	double LidarTimestamp;
-	double EpochTimestamp;
+	uint64_t LidarTimestamp;
+	uint64_t EpochTimestamp;
 	int ImuId;
 
 	float GyroX;
@@ -262,9 +262,9 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 	auto duration = now.time_since_epoch();
 	auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
 
-	// Static variables to track the last timestamps across function calls
-	static double last_lidar_time = 0.0;
-	static double last_epoch_time = 0.0;
+	static uint64_t last_packet_base_time = 0;
+	static uint64_t current_epoch_base_time = 0;
+	static int buffer_idx = 0;
 
 	if (lreader->getImuData(imu))
 	{
@@ -276,28 +276,31 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 		imuData.GyroY = imu.angular_velocity[1];
 		imuData.GyroZ = imu.angular_velocity[2];
 
-		double current_lidar_time = ((double)imu.info.stamp.sec * 1000000000.0) + (double)imu.info.stamp.nsec;
-		double current_epoch_time = (double)millis.count() * 1000000.0;
+		// 1. Get the true hardware time to stay perfectly synchronized with the .laz Point Cloud
+		uint64_t raw_time = ((uint64_t)imu.info.stamp.sec * 1000000000ULL) + (uint64_t)imu.info.stamp.nsec;
+		uint64_t hardware_epoch_time = (uint64_t)millis.count() * 1000000ULL;
 
-		// --- THE FIX: SPACE OUT THE BUFFERED SAMPLES ---
-		// If the time difference is less than 1 millisecond (1,000,000 ns),
-		// we know it's a buffered sample. Space it out by exactly 1/600th of a second (1,666,666 ns).
-		if (last_lidar_time > 0.0 && (current_lidar_time - last_lidar_time) < 1000000.0)
+		// 2. Threshold check: > 1.5ms (1500000 ns) difference means a fresh UDP packet arrived
+		if (raw_time > last_packet_base_time + 1500000ULL || last_packet_base_time == 0)
 		{
-			current_lidar_time = last_lidar_time + 1666666.666;
-			current_epoch_time = last_epoch_time + 1666666.666;
+			last_packet_base_time = raw_time;
+			current_epoch_base_time = hardware_epoch_time;
+			buffer_idx = 0;
+		}
+		else
+		{
+			// The difference is tiny (microseconds). It is a buffered sample from the SAME packet.
+			buffer_idx++;
 		}
 
-		last_lidar_time = current_lidar_time;
-		last_epoch_time = current_epoch_time;
-
-		imuData.LidarTimestamp = current_lidar_time;
-		imuData.EpochTimestamp = current_epoch_time;
+		// 3. Anchor timestamp to the true hardware time, but space the 4 readings perfectly by 1.66ms
+		imuData.LidarTimestamp = last_packet_base_time + (buffer_idx * 1666666ULL);
+		imuData.EpochTimestamp = current_epoch_base_time + (buffer_idx * 1666666ULL);
 		imuData.ImuId = 0;
 	}
 	else
 	{
-		imuData.ImuId = -1; // Mark as invalid if no data
+		imuData.ImuId = -1;
 	}
 
 	return imuData;
@@ -340,23 +343,29 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	int result;
 	int max_points = 100000;
-	int current_points = 0;
 	int cycleCount = 0;
-	std::vector<PointDLidar> ptCloudResult = std::vector<PointDLidar>();
-	std::vector<OutputImuData> imuResult = std::vector<OutputImuData>();
-	std::ostringstream pointLogContent;
-	pointLogContent << "x y z time";
+
+	// Create containers to hold all chunks in memory during the capture
+	std::vector<std::vector<PointDLidar>> all_ptClouds;
+	std::vector<std::vector<OutputImuData>> all_imuDatas;
+
+	std::vector<PointDLidar> current_ptCloudResult;
+	std::vector<OutputImuData> current_imuResult;
 
 	RestartLidar(lreader);
-
 	PrintDirtyPercentage(lreader);
-
 	PrintTimeDelay(lreader);
 
-	while (cycleCount < 6)
+	std::cout << ">>> STARTING DATA CAPTURE <<<" << std::endl;
+	sleep(2); // Short delay to ensure lidar is fully operational before starting capture
+
+	while (cycleCount < 15)
 	{
+		int current_points = 0;
+
 		while (current_points < max_points)
 		{
+			// runParse() must be called as fast as possible. No heavy operations here.
 			result = lreader->runParse();
 
 			switch (result)
@@ -364,7 +373,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 			case LIDAR_IMU_DATA_PACKET_TYPE:
 			{
 				OutputImuData imuDt = GetOutputImuData(lreader);
-				imuResult.push_back(imuDt);
+				current_imuResult.push_back(imuDt);
 			}
 			break;
 			case LIDAR_POINT_DATA_PACKET_TYPE:
@@ -372,16 +381,8 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 				std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
 				if (ptCloud.size() > 0)
 				{
-
-					for (auto point : ptCloud)
-					{
-						pointLogContent << std::fixed << std::setprecision(17)
-										<< point.x << " "
-										<< point.y << " "
-										<< point.z << " "
-										<< point.time << "\n";
-					}
-					ptCloudResult.insert(ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
+					// Removed the heavy string stream logging that was causing micro-drops
+					current_ptCloudResult.insert(current_ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
 					current_points += ptCloud.size();
 				}
 			}
@@ -389,22 +390,30 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 			}
 		}
 
+		// Store the completed chunk in memory instead of writing to disk
+		all_ptClouds.push_back(current_ptCloudResult);
+		all_imuDatas.push_back(current_imuResult);
+
+		current_ptCloudResult.clear();
+		current_imuResult.clear();
 		cycleCount++;
-		// FixImuTimestamps(imuResult);
-
-		std::string linuxUser = getenv("USER");
-		std::string fileName = "/home/" + linuxUser + "/PointCloudDump/lidar000" + std::to_string(cycleCount) + ".laz";
-		std::string imuFileName = "/home/" + linuxUser + "/PointCloudDump/imu000" + std::to_string(cycleCount) + ".csv";
-		std::string pointLog = "/home/" + linuxUser + "/PointCloudDump/point_log" + std::to_string(cycleCount) + ".csv";
-
-		SaveToLazOrLas(fileName, ptCloudResult);
-		PrintImuDatasToFile(imuFileName, imuResult);
-		WriteToFile(pointLog, pointLogContent.str());
-
-		ptCloudResult.clear();
-		imuResult.clear();
-		current_points = 0;
 	}
 
+	// Stop the LiDAR rotation BEFORE executing slow disk I/O
 	lreader->stopLidarRotation();
+	std::cout << "LiDAR stopped. Writing files to disk..." << std::endl;
+
+	// Write all accumulated data to disk safely
+	std::string linuxUser = getenv("USER");
+	for (size_t i = 0; i < all_ptClouds.size(); ++i)
+	{
+		int chunkIndex = i + 1;
+		std::string fileName = "/home/" + linuxUser + "/PointCloudDump/lidar000" + std::to_string(chunkIndex) + ".laz";
+		std::string imuFileName = "/home/" + linuxUser + "/PointCloudDump/imu000" + std::to_string(chunkIndex) + ".csv";
+
+		SaveToLazOrLas(fileName, all_ptClouds[i]);
+		PrintImuDatasToFile(imuFileName, all_imuDatas[i]);
+	}
+
+	std::cout << "All data successfully saved." << std::endl;
 }
