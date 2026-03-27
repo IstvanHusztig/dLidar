@@ -317,7 +317,6 @@ std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 		return {};
 	}
 
-	printf("A Cloud msg is parsed! \n");
 	parseFromPacketToPointCloud(cloudOut, lidarDataPacket);
 
 	return cloudOut.points;
