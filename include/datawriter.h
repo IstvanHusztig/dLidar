@@ -10,7 +10,7 @@
 #include <iomanip>
 #include <limits>
 #include <algorithm>
-#include <cstdio> // For std::remove
+#include <cstdio>
 
 using namespace unitree_lidar_sdk;
 
