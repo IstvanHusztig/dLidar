@@ -45,6 +45,7 @@ void RestartLidar(UnitreeLidarReader *lreader)
 	sleep(3);
 }
 
+// Unitree L2 Imu acceleration is in m/s^2 and angular velocity is in rad/s
 OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 {
 	OutputImuData imuData;
@@ -60,9 +61,9 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 
 	if (lreader->getImuData(imu))
 	{
-		imuData.AccelerationX = imu.linear_acceleration[0];
-		imuData.AccelerationY = imu.linear_acceleration[1];
-		imuData.AccelerationZ = imu.linear_acceleration[2];
+		imuData.AccelerationX = imu.linear_acceleration[0] / 9.80665f;
+		imuData.AccelerationY = imu.linear_acceleration[1] / 9.80665f;
+		imuData.AccelerationZ = imu.linear_acceleration[2] / 9.80665f;
 
 		imuData.GyroX = imu.angular_velocity[0];
 		imuData.GyroY = imu.angular_velocity[1];
