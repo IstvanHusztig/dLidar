@@ -7,7 +7,7 @@ void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
 	sleep(1);
 }
 
-UnitreeLidarReader* InitializeLidar() 
+UnitreeLidarReader *InitializeLidar()
 {
 	UnitreeLidarReader *lreader = createUnitreeLidarReader();
 
@@ -28,7 +28,7 @@ UnitreeLidarReader* InitializeLidar()
 	}
 
 	SetLidarWorkMode(lreader);
-	
+
 	return lreader;
 }
 
@@ -37,8 +37,8 @@ int main(int argc, char *argv[])
 	UnitreeLidarReader *lidarReader = InitializeLidar();
 
 	ProcessSensorData(lidarReader);
-	
+
 	lidarReader->stopLidarRotation();
-	
+
 	return 0;
 }
