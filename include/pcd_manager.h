@@ -45,7 +45,7 @@ void RestartLidar(UnitreeLidarReader *lreader)
 	sleep(3);
 }
 
-// Unitree L2 Imu acceleration is in m/s^2 and angular velocity is in rad/s
+// Unitree L2 Imu acceleration is in g and angular velocity is in rad/s
 OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 {
 	OutputImuData imuData;
@@ -55,26 +55,33 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 	auto duration = now.time_since_epoch();
 	auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
 
+	// L2 IMU output rate is 500 Hz -> 2 ms between samples
+	const uint64_t imu_sample_period_ns = 2000000ULL;
+
 	static uint64_t last_packet_base_time = 0;
 	static uint64_t current_epoch_base_time = 0;
 	static int buffer_idx = 0;
 
 	if (lreader->getImuData(imu))
 	{
-		imuData.AccelerationX = imu.linear_acceleration[0] / 9.80665f;
-		imuData.AccelerationY = imu.linear_acceleration[1] / 9.80665f;
-		imuData.AccelerationZ = imu.linear_acceleration[2] / 9.80665f;
+		ParsedImuData parsedImu;
+		parseFromImuPacket(parsedImu, imu); // Call our new utility function
 
-		imuData.GyroX = imu.angular_velocity[0];
-		imuData.GyroY = imu.angular_velocity[1];
-		imuData.GyroZ = imu.angular_velocity[2];
+		// Data mapping is now clean and decoupled
+		imuData.AccelerationX = parsedImu.accel[0];
+		imuData.AccelerationY = parsedImu.accel[1];
+		imuData.AccelerationZ = parsedImu.accel[2];
 
-		uint64_t raw_time = ((uint64_t)imu.info.stamp.sec * 1000000000ULL) + (uint64_t)imu.info.stamp.nsec;
+		imuData.GyroX = parsedImu.gyro[0];
+		imuData.GyroY = parsedImu.gyro[1];
+		imuData.GyroZ = parsedImu.gyro[2];
+
 		uint64_t hardware_epoch_time = (uint64_t)millis.count() * 1000000ULL;
 
-		if (raw_time > last_packet_base_time + 1500000ULL || last_packet_base_time == 0)
+		// Evaluate against the new parsed relative timeline
+		if (parsedImu.timestamp > last_packet_base_time + 1500000ULL || last_packet_base_time == 0)
 		{
-			last_packet_base_time = raw_time;
+			last_packet_base_time = parsedImu.timestamp;
 			current_epoch_base_time = hardware_epoch_time;
 			buffer_idx = 0;
 		}
@@ -83,8 +90,9 @@ OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
 			buffer_idx++;
 		}
 
-		imuData.LidarTimestamp = last_packet_base_time + (buffer_idx * 1666666ULL);
-		imuData.EpochTimestamp = current_epoch_base_time + (buffer_idx * 1666666ULL);
+		// Calculate fine-grained timestamps for 500Hz fusion
+		imuData.LidarTimestamp = last_packet_base_time + (buffer_idx * imu_sample_period_ns);
+		imuData.EpochTimestamp = current_epoch_base_time + (buffer_idx * imu_sample_period_ns);
 		imuData.ImuId = 0;
 	}
 	else
@@ -112,7 +120,7 @@ std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	const int max_points_per_chunk = 14000;
-	const int target_chunks = 200;
+	const int target_chunks = 80;
 
 	std::queue<SensorChunk> chunk_queue;
 	std::mutex queue_mutex;

@@ -26,7 +26,6 @@ typedef unsigned __int64 uint64_t;
 #include <vector>
 #include <memory>
 #include <math.h>
-#include <iostream>
 #include <chrono>
 
 #include "unitree_lidar_sdk_config.h"
@@ -34,6 +33,34 @@ typedef unsigned __int64 uint64_t;
 
 namespace unitree_lidar_sdk
 {
+    /**
+     * @brief Shared zero-point for all sensor streams to preserve nanosecond precision
+     * when using 64-bit doubles in HDmapper.
+     */
+    inline int64_t &GetGlobalTimeOffsetNs()
+    {
+        static int64_t offset = 0;
+        return offset;
+    }
+
+    /**
+     * @brief Defines the physical mounting orientation of the sensor
+     */
+    enum class SensorOrientation
+    {
+        STANDARD, // +X Front, +Y Left, +Z Up
+        VERTICAL  // Physical: +Z Front, +X Down, +Y Left
+    };
+
+    /**
+     * @brief Global property to toggle the sensor orientation mapping.
+     * Defaults to SensorOrientation::STANDARD.
+     */
+    inline SensorOrientation &GetSensorOrientation()
+    {
+        static SensorOrientation orientation = SensorOrientation::STANDARD;
+        return orientation;
+    }
 
     ///////////////////////////////////////////////////////////////////////////////
     // CONSTANTS
@@ -55,7 +82,7 @@ namespace unitree_lidar_sdk
         float z;
         float intensity;
         float time;
-        uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
+        uint32_t ring;
     } PointUnitree;
 
     /*
@@ -68,17 +95,27 @@ namespace unitree_lidar_sdk
         float z;
         float intensity;
         double time;
-        uint32_t ring; // the ring number indicates which channel of the sensor that this point belongs to
+        uint32_t ring;
     } PointDLidar;
+
+    /**
+     * @brief Parsed IMU Data container for modular axis mapping.
+     */
+    typedef struct
+    {
+        float gyro[3];
+        float accel[3];
+        uint64_t timestamp; // relative nanoseconds
+    } ParsedImuData;
 
     /**
      * @brief Point Cloud Type
      */
     typedef struct
     {
-        double stamp;     // cloud start timestamp, the point timestamp is relative to this
-        uint32_t id;      // sequence id
-        uint32_t ringNum; // number of rings
+        double stamp;
+        uint32_t id;
+        uint32_t ringNum;
         std::vector<PointUnitree> points;
     } PointCloudUnitree;
 
@@ -87,8 +124,8 @@ namespace unitree_lidar_sdk
      */
     typedef struct
     {
-        uint32_t id;      // sequence id
-        uint32_t ringNum; // number of rings
+        uint32_t id;
+        uint32_t ringNum;
         std::vector<PointDLidar> points;
     } PointCloudDLidar;
 
@@ -109,9 +146,6 @@ namespace unitree_lidar_sdk
 
     /**
      * @brief crc32 check
-     * @param buf
-     * @param len
-     * @return uint32_t
      */
     inline uint32_t crc32(const uint8_t *buf, uint32_t len)
     {
@@ -132,12 +166,55 @@ namespace unitree_lidar_sdk
     }
 
     /**
+     * @brief Centralized IMU parsing and coordinate mapping.
+     */
+    inline void parseFromImuPacket(ParsedImuData &out, const LidarImuData &imu)
+    {
+        switch (GetSensorOrientation())
+        {
+        case SensorOrientation::VERTICAL:
+            // -------------------------------------------------------------
+            // IMU AXIS MAPPING (Vertical Mount)
+            // Physical: +Z Front, +X Down, +Y Left
+            // Target: +X Front, +Y Left, +Z Up
+            // Math: X_out = Z_phys, Y_out = Y_phys, Z_out = -X_phys
+            // -------------------------------------------------------------
+            out.accel[0] = imu.linear_acceleration[2] / 9.80665f;
+            out.accel[1] = imu.linear_acceleration[1] / 9.80665f;
+            out.accel[2] = -imu.linear_acceleration[0] / 9.80665f;
+
+            out.gyro[0] = imu.angular_velocity[2];
+            out.gyro[1] = imu.angular_velocity[1];
+            out.gyro[2] = -imu.angular_velocity[0];
+            break;
+
+        case SensorOrientation::STANDARD:
+        default:
+            // -------------------------------------------------------------
+            // IMU AXIS MAPPING (Standard NWU)
+            // -------------------------------------------------------------
+            out.accel[0] = imu.linear_acceleration[0] / 9.80665f;
+            out.accel[1] = imu.linear_acceleration[1] / 9.80665f;
+            out.accel[2] = imu.linear_acceleration[2] / 9.80665f;
+
+            out.gyro[0] = imu.angular_velocity[0];
+            out.gyro[1] = imu.angular_velocity[1];
+            out.gyro[2] = imu.angular_velocity[2];
+            break;
+        }
+
+        int64_t absolute_raw_time = ((int64_t)imu.info.stamp.sec * 1000000000LL) + (int64_t)imu.info.stamp.nsec;
+
+        if (GetGlobalTimeOffsetNs() == 0)
+        {
+            GetGlobalTimeOffsetNs() = absolute_raw_time;
+        }
+
+        out.timestamp = (uint64_t)(absolute_raw_time - GetGlobalTimeOffsetNs());
+    }
+
+    /**
      * @brief Parse from a point packet to a 3D point cloud
-     * @param[out] cloud
-     * @param[in] packet lidar point data packet
-     * @param[in] use_system_timestamp use system timestamp, otherwise use lidar hardware timestamp
-     * @param[in] range_min allowed minimum point range in meters
-     * @param[in] range_max allowed maximum point range in meters
      */
     inline void parseFromPacketToPointCloud(
         PointCloudDLidar &cloudOut,
@@ -145,8 +222,7 @@ namespace unitree_lidar_sdk
         float range_min = 0,
         float range_max = 100)
     {
-
-        // intermediate variables
+        // ... [Matrix math remains unchanged] ...
         const float sin_beta = sin(packet.data.param.beta_angle);
         const float cos_beta = cos(packet.data.param.beta_angle);
         const float sin_xi = sin(packet.data.param.xi_angle);
@@ -156,7 +232,6 @@ namespace unitree_lidar_sdk
         const float sin_beta_sin_xi = sin_beta * sin_xi;
         const float cos_beta_cos_xi = cos_beta * cos_xi;
 
-        // scan info
         const int num_of_points = packet.data.point_num;
         const float time_step = packet.data.time_increment;
 
@@ -165,7 +240,6 @@ namespace unitree_lidar_sdk
         cloudOut.points.clear();
         cloudOut.points.reserve(num_of_points);
 
-        // transform raw data to a pointcloud
         auto &ranges = packet.data.ranges;
         auto &intensities = packet.data.intensities;
 
@@ -175,61 +249,75 @@ namespace unitree_lidar_sdk
         float theta_cur = packet.data.com_horizontal_angle_start + packet.data.param.theta_angle_bias;
         float theta_step = packet.data.com_horizontal_angle_step;
 
-        float range_float;
-        float sin_alpha, cos_alpha, sin_theta, cos_theta;
-        float A, B, C;
-
         PointDLidar point3d;
         point3d.ring = 1;
-        // std::cout << "packet.data.param.range_scale = " << packet.data.param.range_scale << std::endl;
 
         for (int j = 0; j < num_of_points; j += 1, alpha_cur += alpha_step,
                  theta_cur += theta_step, time_relative += time_step)
         {
-            // jump invalid points
             if (ranges[j] < 1)
-            {
                 continue;
-            }
 
-            // calculate point range in float type
-            range_float = packet.data.param.range_scale * ((float)ranges[j] + packet.data.param.range_bias);
+            float range_float = packet.data.param.range_scale * ((float)ranges[j] + packet.data.param.range_bias);
 
-            // jump points beyond range limit
             if (range_float < packet.data.range_min || range_float > packet.data.range_max)
-            {
                 continue;
-            }
-
-            // jump points beyond range limit
             if (range_float < range_min || range_float > range_max)
-            {
                 continue;
+
+            float sin_alpha = sin(alpha_cur);
+            float cos_alpha = cos(alpha_cur);
+            float sin_theta = sin(theta_cur);
+            float cos_theta = cos(theta_cur);
+
+            float A = (-cos_beta_sin_xi + sin_beta_cos_xi * sin_alpha) * range_float + packet.data.param.b_axis_dist;
+            float B = cos_alpha * cos_xi * range_float;
+            float C = (sin_beta_sin_xi + cos_beta_cos_xi * sin_alpha) * range_float;
+
+            float orig_x = cos_theta * A - sin_theta * B;
+            float orig_y = sin_theta * A + cos_theta * B;
+            float orig_z = C + packet.data.param.a_axis_dist;
+
+            switch (GetSensorOrientation())
+            {
+            case SensorOrientation::VERTICAL:
+                // -------------------------------------------------------------
+                // LIDAR AXIS MAPPING (Vertical Mount)
+                // Physical: +Z Front, +X Down, +Y Left
+                // Target: +X Front, +Y Left, +Z Up
+                // Math: X_out = Z_phys, Y_out = Y_phys, Z_out = -X_phys
+                // -------------------------------------------------------------
+                point3d.x = orig_z;
+                point3d.y = orig_y;
+                point3d.z = -orig_x;
+                break;
+
+            case SensorOrientation::STANDARD:
+            default:
+                // -------------------------------------------------------------
+                // LIDAR AXIS MAPPING (Standard)
+                // -------------------------------------------------------------
+                point3d.x = orig_x;
+                point3d.y = orig_y;
+                point3d.z = orig_z;
+                break;
             }
 
-            // transform to XYZ coordinate
-            sin_alpha = sin(alpha_cur);
-            cos_alpha = cos(alpha_cur);
-            sin_theta = sin(theta_cur);
-            cos_theta = cos(theta_cur);
-
-            A = (-cos_beta_sin_xi + sin_beta_cos_xi * sin_alpha) * range_float + packet.data.param.b_axis_dist;
-            B = cos_alpha * cos_xi * range_float;
-            C = (sin_beta_sin_xi + cos_beta_cos_xi * sin_alpha) * range_float;
-
-            point3d.x = cos_theta * A - sin_theta * B;
-            point3d.y = sin_theta * A + cos_theta * B;
-            point3d.z = C + packet.data.param.a_axis_dist;
-
-            // push back this point to cloud
             point3d.intensity = intensities[j];
 
-            // point3d.time = ((double)packet.data.info.stamp.sec + (double)packet.data.info.stamp.nsec / 1.0e9) / 1.0e9;
-            double packet_base_time = (double)packet.data.info.stamp.sec + ((double)packet.data.info.stamp.nsec / 1.0e9);
+            int64_t packet_time_ns = ((int64_t)packet.data.info.stamp.sec * 1000000000LL) + (int64_t)packet.data.info.stamp.nsec;
+
+            if (GetGlobalTimeOffsetNs() == 0)
+            {
+                GetGlobalTimeOffsetNs() = packet_time_ns;
+            }
+
+            int64_t relative_packet_time_ns = packet_time_ns - GetGlobalTimeOffsetNs();
+            double packet_base_time = (double)relative_packet_time_ns / 1.0e9;
+
             point3d.time = packet_base_time + time_relative;
 
             cloudOut.points.push_back(point3d);
         }
     }
-
 }

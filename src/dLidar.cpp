@@ -2,6 +2,8 @@
 
 void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
 {
+	unitree_lidar_sdk::GetSensorOrientation() = unitree_lidar_sdk::SensorOrientation::VERTICAL;
+
 	std::cout << "set Lidar work mode to: " << 0 << std::endl;
 	lidarReader->setLidarWorkMode(0);
 	sleep(1);

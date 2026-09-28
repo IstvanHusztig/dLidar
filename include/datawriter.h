@@ -1,7 +1,6 @@
 #pragma once
 
 #include "unitree_lidar_sdk.h"
-#include "d_lidar_util.h"
 #include <dll/laszip_api.h>
 #include <string>
 #include <vector>
