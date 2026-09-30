@@ -105,7 +105,8 @@ namespace unitree_lidar_sdk
     {
         float gyro[3];
         float accel[3];
-        uint64_t timestamp; // relative nanoseconds
+        int64_t timestamp; // sensor stamp, ns relative to GetGlobalTimeOffsetNs() (may be < 0)
+        uint32_t seq;      // packet sequence id, one sample per packet
     } ParsedImuData;
 
     /**
@@ -210,7 +211,8 @@ namespace unitree_lidar_sdk
             GetGlobalTimeOffsetNs() = absolute_raw_time;
         }
 
-        out.timestamp = (uint64_t)(absolute_raw_time - GetGlobalTimeOffsetNs());
+        out.timestamp = absolute_raw_time - GetGlobalTimeOffsetNs();
+        out.seq = imu.info.seq;
     }
 
     /**
@@ -220,7 +222,8 @@ namespace unitree_lidar_sdk
         PointCloudDLidar &cloudOut,
         const LidarPointDataPacket &packet,
         float range_min = 0,
-        float range_max = 100)
+        float range_max = 100,
+        uint8_t min_intensity = 0)
     {
         // ... [Matrix math remains unchanged] ...
         const float sin_beta = sin(packet.data.param.beta_angle);
@@ -263,6 +266,8 @@ namespace unitree_lidar_sdk
             if (range_float < packet.data.range_min || range_float > packet.data.range_max)
                 continue;
             if (range_float < range_min || range_float > range_max)
+                continue;
+            if (intensities[j] < min_intensity)
                 continue;
 
             float sin_alpha = sin(alpha_cur);

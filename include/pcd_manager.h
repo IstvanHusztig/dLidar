@@ -23,6 +23,34 @@ void PrintDirtyPercentage(UnitreeLidarReader *lreader)
 	sleep(1);
 }
 
+// Lens dirtiness above which we warn during capture. A dirty lens
+// attenuates/scatters returns and quietly degrades the whole run
+// (fogging, dust - relevant for handheld cave/outdoor use).
+const float kDirtyPercentageWarnThreshold = 5.0f;
+
+// Non-blocking: reuses whatever dirty_index was cached from the most
+// recently parsed packet, so it is safe to call every loop iteration
+// without consuming extra data. Warns at most once per interval so a
+// persistently dirty lens doesn't spam the console.
+void CheckDirtyPercentage(UnitreeLidarReader *lreader)
+{
+	static auto last_check = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+	auto now = std::chrono::steady_clock::now();
+	if (now - last_check < std::chrono::seconds(10))
+	{
+		return;
+	}
+	last_check = now;
+
+	float dirtyPercentage;
+	if (lreader->getDirtyPercentage(dirtyPercentage) && dirtyPercentage > kDirtyPercentageWarnThreshold)
+	{
+		std::cerr << "WARNING: lens dirty percentage = " << dirtyPercentage
+				  << " % (threshold " << kDirtyPercentageWarnThreshold
+				  << " %) - clean the sensor housing, points may be degraded." << std::endl;
+	}
+}
+
 void PrintTimeDelay(UnitreeLidarReader *lreader)
 {
 	double timeDelay;
@@ -45,63 +73,45 @@ void RestartLidar(UnitreeLidarReader *lreader)
 	sleep(3);
 }
 
-// Unitree L2 Imu acceleration is in g and angular velocity is in rad/s
-OutputImuData GetOutputImuData(UnitreeLidarReader *lreader)
+// Reads the IMU sample of the packet just parsed. Acceleration is in g and
+// angular velocity in rad/s. Timestamps are assigned later by ImuTimestamper.
+bool ReadImuSample(UnitreeLidarReader *lreader, OutputImuData &imuData, ParsedImuData &parsedImu)
 {
-	OutputImuData imuData;
 	LidarImuData imu;
-
-	auto now = std::chrono::system_clock::now();
-	auto duration = now.time_since_epoch();
-	auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
-
-	// L2 IMU output rate is 500 Hz -> 2 ms between samples
-	const uint64_t imu_sample_period_ns = 2000000ULL;
-
-	static uint64_t last_packet_base_time = 0;
-	static uint64_t current_epoch_base_time = 0;
-	static int buffer_idx = 0;
-
-	if (lreader->getImuData(imu))
+	if (!lreader->getImuData(imu))
 	{
-		ParsedImuData parsedImu;
-		parseFromImuPacket(parsedImu, imu); // Call our new utility function
-
-		// Data mapping is now clean and decoupled
-		imuData.AccelerationX = parsedImu.accel[0];
-		imuData.AccelerationY = parsedImu.accel[1];
-		imuData.AccelerationZ = parsedImu.accel[2];
-
-		imuData.GyroX = parsedImu.gyro[0];
-		imuData.GyroY = parsedImu.gyro[1];
-		imuData.GyroZ = parsedImu.gyro[2];
-
-		uint64_t hardware_epoch_time = (uint64_t)millis.count() * 1000000ULL;
-
-		// Evaluate against the new parsed relative timeline
-		if (parsedImu.timestamp > last_packet_base_time + 1500000ULL || last_packet_base_time == 0)
-		{
-			last_packet_base_time = parsedImu.timestamp;
-			current_epoch_base_time = hardware_epoch_time;
-			buffer_idx = 0;
-		}
-		else
-		{
-			buffer_idx++;
-		}
-
-		// Calculate fine-grained timestamps for 500Hz fusion
-		imuData.LidarTimestamp = last_packet_base_time + (buffer_idx * imu_sample_period_ns);
-		imuData.EpochTimestamp = current_epoch_base_time + (buffer_idx * imu_sample_period_ns);
-		imuData.ImuId = 0;
-	}
-	else
-	{
-		imuData.ImuId = -1;
+		return false;
 	}
 
-	return imuData;
+	parseFromImuPacket(parsedImu, imu);
+
+	imuData.AccelerationX = parsedImu.accel[0];
+	imuData.AccelerationY = parsedImu.accel[1];
+	imuData.AccelerationZ = parsedImu.accel[2];
+
+	imuData.GyroX = parsedImu.gyro[0];
+	imuData.GyroY = parsedImu.gyro[1];
+	imuData.GyroZ = parsedImu.gyro[2];
+
+	imuData.ImuId = 0;
+	return true;
 }
+
+int64_t HostUnixTimeNs()
+{
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(
+			   std::chrono::system_clock::now().time_since_epoch())
+		.count();
+}
+
+// Reject points inside the housing blind zone (spec: 0.05 m) to filter out
+// self-reflection off the sensor housing. Kept a bit past the blind zone
+// since accuracy degrades near it.
+const float kMinPointRangeM = 0.1f;
+
+// Reject low-reflectivity returns (0-255 scale) that are usually noise/
+// multipath rather than a real surface.
+const uint8_t kMinPointIntensity = 5;
 
 std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 {
@@ -113,7 +123,7 @@ std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 		return {};
 	}
 
-	parseFromPacketToPointCloud(cloudOut, lidarDataPacket);
+	parseFromPacketToPointCloud(cloudOut, lidarDataPacket, kMinPointRangeM, 100, kMinPointIntensity);
 	return cloudOut.points;
 }
 
@@ -171,6 +181,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	sleep(2);
 
 	int chunks_produced = 0;
+	ImuTimestamper imu_timestamper;
 	std::vector<PointDLidar> current_ptCloudResult;
 	std::vector<OutputImuData> current_imuResult;
 
@@ -184,14 +195,22 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 		switch (result)
 		{
 		case LIDAR_IMU_DATA_PACKET_TYPE:
-			current_imuResult.push_back(GetOutputImuData(lreader));
+		{
+			OutputImuData imuData;
+			ParsedImuData parsedImu;
+			if (ReadImuSample(lreader, imuData, parsedImu))
+			{
+				imu_timestamper.Push(imuData, parsedImu.timestamp, parsedImu.seq, HostUnixTimeNs(), current_imuResult);
+			}
 			break;
+		}
 		case LIDAR_POINT_DATA_PACKET_TYPE:
 			std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
 			if (!ptCloud.empty())
 			{
 				current_ptCloudResult.insert(current_ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
 			}
+			CheckDirtyPercentage(lreader);
 			break;
 		}
 
@@ -220,6 +239,30 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 
 	lreader->stopLidarRotation();
 	std::cout << "LiDAR stopped. Flushing final data to continuous streams..." << std::endl;
+
+	// The timestamper holds back IMU samples until its first period fit;
+	// if the capture ended before that, write them out as a final chunk.
+	imu_timestamper.Flush(current_imuResult);
+
+	const ImuTimestamper::Stats &imuStats = imu_timestamper.GetStats();
+	if (imuStats.samples > 0)
+	{
+		std::cout << "IMU timeline: " << imuStats.samples << " samples, period "
+				  << imuStats.period_ns / 1e6 << " ms (" << 1e9 / imuStats.period_ns << " Hz), seq "
+				  << (imuStats.seq_used ? "used" : "not usable") << ", lost packets " << imuStats.lost_packets
+				  << ", resyncs " << imuStats.resyncs << ", lag clamps " << imuStats.lag_clamps
+				  << ", arrival lead mean " << imuStats.lead_sum_ns / imuStats.samples / 1e6
+				  << " ms / max " << imuStats.max_lead_ns / 1e6 << " ms" << std::endl;
+	}
+	if (!current_imuResult.empty())
+	{
+		SensorChunk final_chunk;
+		final_chunk.chunk_index = chunks_produced + 1;
+		final_chunk.imu_data = std::move(current_imuResult);
+
+		std::lock_guard<std::mutex> lock(queue_mutex);
+		chunk_queue.push(std::move(final_chunk));
+	}
 
 	is_capturing = false;
 	queue_cv.notify_one();

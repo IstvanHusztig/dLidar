@@ -1,6 +1,7 @@
 #pragma once
 
 #include "unitree_lidar_sdk.h"
+#include "imu_timestamper.h"
 #include <dll/laszip_api.h>
 #include <string>
 #include <vector>
@@ -12,21 +13,6 @@
 #include <cstdio>
 
 using namespace unitree_lidar_sdk;
-
-struct OutputImuData
-{
-    uint64_t LidarTimestamp;
-    uint64_t EpochTimestamp;
-    int ImuId;
-
-    float GyroX;
-    float GyroY;
-    float GyroZ;
-
-    float AccelerationX;
-    float AccelerationY;
-    float AccelerationZ;
-};
 
 struct SensorChunk
 {
@@ -44,6 +30,16 @@ private:
     std::string final_laz_filename;
 
     uint32_t total_points = 0;
+
+    // Timestamp order guards: SLAM expects IMU and point times to increase
+    // in file order, so any regression is reported rather than silently written.
+    bool has_last_imu = false;
+    int64_t last_imu_timestamp = 0;
+    int64_t last_imu_epoch = 0;
+    uint64_t non_increasing_imu = 0;
+    bool has_last_point = false;
+    double last_point_time = 0;
+    uint64_t decreasing_points = 0;
     double max_x{std::numeric_limits<double>::lowest()};
     double max_y{std::numeric_limits<double>::lowest()};
     double max_z{std::numeric_limits<double>::lowest()};
@@ -86,12 +82,28 @@ public:
         // Stream IMU Data
         if (csv_file.is_open())
         {
+            uint64_t chunk_non_increasing = 0;
             for (const auto &imu : chunk.imu_data)
             {
+                if (has_last_imu && (imu.LidarTimestamp <= last_imu_timestamp || imu.EpochTimestamp <= last_imu_epoch))
+                {
+                    chunk_non_increasing++;
+                }
+                has_last_imu = true;
+                last_imu_timestamp = imu.LidarTimestamp;
+                last_imu_epoch = imu.EpochTimestamp;
+
                 csv_file << std::fixed << std::setprecision(17)
                          << imu.GyroX << " " << imu.GyroY << " " << imu.GyroZ << " "
                          << imu.AccelerationX << " " << imu.AccelerationY << " " << imu.AccelerationZ << " "
                          << imu.ImuId << " " << imu.LidarTimestamp << " " << imu.EpochTimestamp << "\n";
+            }
+
+            if (chunk_non_increasing > 0)
+            {
+                non_increasing_imu += chunk_non_increasing;
+                std::cerr << "WARNING: chunk " << chunk.chunk_index << " wrote " << chunk_non_increasing
+                          << " non-increasing IMU timestamps (" << non_increasing_imu << " total)." << std::endl;
             }
         }
 
@@ -101,8 +113,16 @@ public:
             // Write vector directly to disk as raw bytes (highly efficient)
             bin_file.write(reinterpret_cast<const char *>(chunk.points.data()), chunk.points.size() * sizeof(PointDLidar));
 
+            uint64_t chunk_decreasing = 0;
             for (const auto &point : chunk.points)
             {
+                if (has_last_point && point.time < last_point_time)
+                {
+                    chunk_decreasing++;
+                }
+                has_last_point = true;
+                last_point_time = point.time;
+
                 max_x = std::max(max_x, (double)point.x);
                 min_x = std::min(min_x, (double)point.x);
                 max_y = std::max(max_y, (double)point.y);
@@ -111,6 +131,13 @@ public:
                 min_z = std::min(min_z, (double)point.z);
             }
             total_points += chunk.points.size();
+
+            if (chunk_decreasing > 0)
+            {
+                decreasing_points += chunk_decreasing;
+                std::cerr << "WARNING: chunk " << chunk.chunk_index << " has " << chunk_decreasing
+                          << " point times going backwards (" << decreasing_points << " total)." << std::endl;
+            }
         }
     }
 
@@ -120,6 +147,9 @@ public:
             csv_file.close();
         if (bin_file.is_open())
             bin_file.close();
+
+        std::cout << "\nTimestamp check: " << non_increasing_imu << " non-increasing IMU timestamps, "
+                  << decreasing_points << " backward point times." << std::endl;
 
         std::cout << "\nCapture finished. Packaging " << total_points << " points into LAZ format..." << std::endl;
 
