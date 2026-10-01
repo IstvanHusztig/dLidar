@@ -127,26 +127,41 @@ std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
 	return cloudOut.points;
 }
 
+std::string OutputDirectory()
+{
+	const char *linuxUser = getenv("USER");
+	return std::string("/home/") + (linuxUser ? linuxUser : "") + "/PointCloudDump/";
+}
+
+// The SDK buffers packets while nothing reads them (lidar restart, the
+// status queries above). Reading those out now instead of sleeping keeps a
+// burst of stale packets with compressed host stamps out of the recording.
+void DrainPendingPackets(UnitreeLidarReader *lreader, std::chrono::milliseconds duration)
+{
+	auto until = std::chrono::steady_clock::now() + duration;
+	while (std::chrono::steady_clock::now() < until && !StopRequested())
+	{
+		lreader->runParse();
+	}
+}
+
 void ProcessSensorData(UnitreeLidarReader *lreader)
 {
 	const int max_points_per_chunk = 14000;
-	const int target_chunks = 80;
+	const int target_chunks = 1000;
 
 	std::queue<SensorChunk> chunk_queue;
 	std::mutex queue_mutex;
 	std::condition_variable queue_cv;
 	std::atomic<bool> is_capturing{true};
 
-	std::string linuxUser = getenv("USER");
-	std::string base_path = "/home/" + linuxUser + "/PointCloudDump/";
+	std::string base_path = OutputDirectory();
 
 	std::thread consumer_thread([&]()
 								{
         ContinuousDataWriter stream_writer;
-        std::string laz_path = base_path + "lidar0001.laz";
-        std::string csv_path = base_path + "imu0001.csv";
 
-        if (!stream_writer.Open(laz_path, csv_path)) {
+        if (!stream_writer.Open(base_path)) {
             std::cerr << "Fatal Error: Failed to open output streams!" << std::endl;
             return;
         }
@@ -177,8 +192,8 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	PrintDirtyPercentage(lreader);
 	PrintTimeDelay(lreader);
 
-	std::cout << ">>> STARTING CONTINUOUS DATA CAPTURE <<<" << std::endl;
-	sleep(2);
+	DrainPendingPackets(lreader, std::chrono::seconds(2));
+	std::cout << ">>> STARTING CONTINUOUS DATA CAPTURE <<< (Ctrl-C to stop)" << std::endl;
 
 	int chunks_produced = 0;
 	ImuTimestamper imu_timestamper;
@@ -188,7 +203,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	current_ptCloudResult.reserve(max_points_per_chunk + 2000);
 	current_imuResult.reserve((max_points_per_chunk / 10) + 100);
 
-	while (chunks_produced < target_chunks)
+	while (chunks_produced < target_chunks && !StopRequested())
 	{
 		int result = lreader->runParse();
 
@@ -240,24 +255,30 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	lreader->stopLidarRotation();
 	std::cout << "LiDAR stopped. Flushing final data to continuous streams..." << std::endl;
 
-	// The timestamper holds back IMU samples until its first period fit;
-	// if the capture ended before that, write them out as a final chunk.
+	// The timestamper holds back the last ~0.5 s of IMU samples (and the
+	// first ~2 s until its clock fit settles); write them out with the
+	// remaining points as a final chunk.
 	imu_timestamper.Flush(current_imuResult);
 
 	const ImuTimestamper::Stats &imuStats = imu_timestamper.GetStats();
-	if (imuStats.samples > 0)
+	if (imuStats.samples_out > 0)
 	{
-		std::cout << "IMU timeline: " << imuStats.samples << " samples, period "
+		std::cout << "IMU timeline: " << imuStats.samples_out << " of " << imuStats.samples_in << " samples written, period "
 				  << imuStats.period_ns / 1e6 << " ms (" << 1e9 / imuStats.period_ns << " Hz), seq "
-				  << (imuStats.seq_used ? "used" : "not usable") << ", lost packets " << imuStats.lost_packets
-				  << ", resyncs " << imuStats.resyncs << ", lag clamps " << imuStats.lag_clamps
-				  << ", arrival lead mean " << imuStats.lead_sum_ns / imuStats.samples / 1e6
+				  << (imuStats.seq_used ? "used" : "not usable") << ", lost samples " << imuStats.lost_samples
+				  << " (" << imuStats.drop_events << " detected drops), index corrections " << imuStats.index_corrections
+				  << ", resyncs " << imuStats.resyncs << ", clock steps back " << imuStats.clock_steps_back
+				  << ", slew violations " << imuStats.slew_violations
+				  << ", dropped: " << imuStats.negative_dropped << " before t=0, " << imuStats.conflicts_dropped
+				  << " conflicting, " << imuStats.duplicates_dropped << " duplicate"
+				  << ", arrival lead mean " << imuStats.lead_sum_ns / imuStats.samples_out / 1e6
 				  << " ms / max " << imuStats.max_lead_ns / 1e6 << " ms" << std::endl;
 	}
-	if (!current_imuResult.empty())
+	if (!current_imuResult.empty() || !current_ptCloudResult.empty())
 	{
 		SensorChunk final_chunk;
 		final_chunk.chunk_index = chunks_produced + 1;
+		final_chunk.points = std::move(current_ptCloudResult);
 		final_chunk.imu_data = std::move(current_imuResult);
 
 		std::lock_guard<std::mutex> lock(queue_mutex);
@@ -269,5 +290,5 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 
 	consumer_thread.join();
 
-	std::cout << "Capture complete. Feed continuous_lidar.laz to HDmapper to resolve bias lift-off." << std::endl;
+	std::cout << "Capture complete. Recording is in " << base_path << std::endl;
 }

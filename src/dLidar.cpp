@@ -49,6 +49,22 @@ UnitreeLidarReader *InitializeLidar()
 
 int main(int argc, char *argv[])
 {
+	InstallSignalHandlers();
+
+	// --finalize: only convert an interrupted recording in place, no capture.
+	if (argc > 1 && std::string(argv[1]) == "--finalize")
+	{
+		return RecoverInterruptedRecording(OutputDirectory(), false) ? 0 : 1;
+	}
+
+	// A recording that was killed or lost power is finalized into its own
+	// subdirectory first, so the new recording does not overwrite it.
+	if (!RecoverInterruptedRecording(OutputDirectory(), true))
+	{
+		std::cerr << "Could not finalize the previous recording; fix that first (or run with --finalize)." << std::endl;
+		return 1;
+	}
+
 	UnitreeLidarReader *lidarReader = InitializeLidar();
 
 	ProcessSensorData(lidarReader);
