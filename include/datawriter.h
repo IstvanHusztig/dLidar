@@ -23,10 +23,14 @@
 using namespace unitree_lidar_sdk;
 
 // Files of a recording inside the output directory.
-const char *const kImuCsvName = "imu.csv";
-const char *const kPointsTempName = "points_temp.bin"; // raw PointDLidar records while recording
-const char *const kLazPrefix = "lidar";                // lidar0001.laz, lidar0002.laz, ...
-const uint64_t kMaxPointsPerLaz = 20000000;            // ~5 min of L2 points per LAZ chunk
+// Every recording takes the next free session number N, so its files group:
+// imuNNNN.csv, lidarNNNN.laz and (while recording) points_tempNNNN.bin.
+const char *const kImuCsvPrefix = "imu";
+const char *const kImuCsvSuffix = ".csv";
+const char *const kLazPrefix = "lidar";
+const char *const kLazSuffix = ".laz";
+const char *const kPointsTempPrefix = "points_temp"; // raw PointDLidar records while recording
+const char *const kPointsTempSuffix = ".bin";
 const char *const kImuCsvHeader = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
 struct SensorChunk
@@ -41,11 +45,61 @@ inline std::string JoinPath(const std::string &dir, const std::string &name)
     return (std::filesystem::path(dir) / name).string();
 }
 
-inline std::string LazChunkName(int index)
+inline std::string SessionFileName(const char *prefix, int index, const char *suffix)
 {
-    char name[32];
-    snprintf(name, sizeof name, "%s%04d.laz", kLazPrefix, index);
+    char name[48];
+    snprintf(name, sizeof name, "%s%04d%s", prefix, index, suffix);
     return name;
+}
+inline std::string ImuCsvName(int index) { return SessionFileName(kImuCsvPrefix, index, kImuCsvSuffix); }
+inline std::string LazName(int index) { return SessionFileName(kLazPrefix, index, kLazSuffix); }
+inline std::string PointsTempName(int index) { return SessionFileName(kPointsTempPrefix, index, kPointsTempSuffix); }
+
+// The session number in `name` if it is exactly prefix + 4 digits + suffix, else 0.
+inline int ParseSessionIndex(const std::string &name, const char *prefix, const char *suffix)
+{
+    size_t p = strlen(prefix), q = strlen(suffix);
+    if (name.size() != p + 4 + q || name.compare(0, p, prefix) != 0 || name.compare(p + 4, q, suffix) != 0)
+        return 0;
+    int index = 0;
+    for (size_t i = p; i < p + 4; i++)
+    {
+        if (name[i] < '0' || name[i] > '9')
+            return 0;
+        index = index * 10 + (name[i] - '0');
+    }
+    return index;
+}
+
+// The session number for a new recording: one above the highest used by any
+// recording file in `dir`, so nothing from an earlier recording is overwritten.
+inline int NextSessionIndex(const std::string &dir)
+{
+    int highest = 0;
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
+    {
+        std::string name = entry.path().filename().string();
+        highest = std::max({highest, ParseSessionIndex(name, kImuCsvPrefix, kImuCsvSuffix),
+                            ParseSessionIndex(name, kLazPrefix, kLazSuffix),
+                            ParseSessionIndex(name, kPointsTempPrefix, kPointsTempSuffix)});
+    }
+    return highest + 1;
+}
+
+// Session numbers of unfinished recordings (points temp files) in `dir`, ascending.
+inline std::vector<int> LeftoverSessions(const std::string &dir)
+{
+    std::vector<int> found;
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
+    {
+        int index = ParseSessionIndex(entry.path().filename().string(), kPointsTempPrefix, kPointsTempSuffix);
+        if (index > 0)
+            found.push_back(index);
+    }
+    std::sort(found.begin(), found.end());
+    return found;
 }
 
 // One CSV row, formatted as before (std::fixed with 17 decimals for floats).
@@ -118,27 +172,6 @@ inline int64_t TrimPartialCsvLine(const std::string &csv_path)
         ok = WriteAll(fd, kImuCsvHeader, strlen(kImuCsvHeader));
     close(fd);
     return ok ? removed : -1;
-}
-
-// Removes lidarNNNN.laz chunks numbered above `keep`: leftovers of an earlier
-// recording in the same directory, which the new one replaces.
-inline void RemoveStaleLazChunks(const std::string &dir, int keep)
-{
-    std::error_code ec;
-    for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
-    {
-        std::string name = entry.path().filename().string();
-        int index = 0;
-        char tail = 0;
-        size_t prefix = strlen(kLazPrefix);
-        if (name.size() == prefix + 8 && name.compare(0, prefix, kLazPrefix) == 0 &&
-            sscanf(name.c_str() + prefix, "%4d.la%c", &index, &tail) == 2 && tail == 'z' &&
-            name == LazChunkName(index) && index > keep)
-        {
-            std::cout << "Removing " << name << " left over from an earlier recording." << std::endl;
-            std::filesystem::remove(entry.path(), ec);
-        }
-    }
 }
 
 // Encodes `count` points starting at record `first` of the temp file into a
@@ -254,13 +287,11 @@ inline bool WriteLazChunk(std::ifstream &in, uint64_t first, uint64_t count, con
     return ok;
 }
 
-// Converts a points temp file into lidar0001.laz, lidar0002.laz, ... in
-// out_dir (max_points_per_file points each). A trailing partial record (from
-// an interrupted write) is ignored. Each chunk is written to a .tmp file and
-// renamed when complete; the temp file is deleted only after all chunks are
-// in place, so an interrupted finalization is simply redone next time.
-inline bool FinalizePointsTemp(const std::string &temp_path, const std::string &out_dir,
-                               uint64_t max_points_per_file = kMaxPointsPerLaz)
+// Converts a points temp file into lidarNNNN.laz (session `index`) in out_dir. A trailing partial
+// record (from an interrupted write) is ignored. The LAZ is written to a .tmp
+// file and renamed when complete; the temp file is deleted only after that, so
+// an interrupted finalization is simply redone next time.
+inline bool FinalizePointsTemp(const std::string &temp_path, const std::string &out_dir, int index)
 {
     std::error_code ec;
     uint64_t bytes = std::filesystem::file_size(temp_path, ec);
@@ -283,51 +314,40 @@ inline bool FinalizePointsTemp(const std::string &temp_path, const std::string &
         return false;
     }
 
-    int files = (int)((total + max_points_per_file - 1) / max_points_per_file);
-    std::cout << "Packaging " << total << " points into " << files << " LAZ file(s) in " << out_dir << " ..." << std::endl;
-    for (int f = 0; f < files; f++)
+    std::string laz_path = JoinPath(out_dir, LazName(index));
+    std::string part_path = laz_path + ".tmp";
+    std::cout << "Packaging " << total << " points into " << laz_path << " ..." << std::endl;
+    if (!WriteLazChunk(in, 0, total, part_path))
     {
-        uint64_t first = (uint64_t)f * max_points_per_file;
-        uint64_t count = std::min<uint64_t>(max_points_per_file, total - first);
-        std::string laz_path = JoinPath(out_dir, LazChunkName(f + 1));
-        std::string part_path = laz_path + ".tmp";
-        if (!WriteLazChunk(in, first, count, part_path))
-        {
-            std::cerr << "Error: packaging " << laz_path << " failed; " << temp_path
-                      << " is kept and will be finalized on the next start." << std::endl;
-            std::filesystem::remove(part_path, ec);
-            return false;
-        }
-        std::filesystem::rename(part_path, laz_path, ec);
-        if (ec)
-        {
-            std::cerr << "Error: cannot rename " << part_path << ": " << ec.message() << std::endl;
-            return false;
-        }
-        std::cout << "  " << laz_path << ": " << count << " points" << std::endl;
+        std::cerr << "Error: packaging " << laz_path << " failed; " << temp_path
+                  << " is kept and will be finalized on the next start." << std::endl;
+        std::filesystem::remove(part_path, ec);
+        return false;
     }
     in.close();
+    std::filesystem::rename(part_path, laz_path, ec);
+    if (ec)
+    {
+        std::cerr << "Error: cannot rename " << part_path << ": " << ec.message() << std::endl;
+        return false;
+    }
 
-    RemoveStaleLazChunks(out_dir, files);
     std::filesystem::remove(temp_path, ec);
     return true;
 }
 
-// If the last recording in `dir` was not finalized (crash, kill, power loss),
-// trims the IMU CSV to its last complete row and converts the points temp
-// file into lidar*.laz. With move_aside the recovered recording is put in a
-// recovered_<time> subdirectory, so a new recording in `dir` does not
-// overwrite it. Returns false only if something was found and failed.
-inline bool RecoverInterruptedRecording(const std::string &dir, bool move_aside,
-                                        uint64_t max_points_per_file = kMaxPointsPerLaz)
+// Finalizes one unfinished recording (session `index`): trims the IMU CSV to
+// its last complete row and converts the points temp file into lidarNNNN.laz.
+// With move_aside both go into a recovered_<time> subdirectory.
+inline bool RecoverSession(const std::string &dir, int index, bool move_aside)
 {
-    std::string temp_path = JoinPath(dir, kPointsTempName);
-    std::string csv_path = JoinPath(dir, kImuCsvName);
+    std::string temp_path = JoinPath(dir, PointsTempName(index));
+    std::string csv_path = JoinPath(dir, ImuCsvName(index));
     struct stat st;
     if (stat(temp_path.c_str(), &st) != 0)
         return true;
 
-    std::cout << "Found an unfinished recording in " << dir << ", finalizing it." << std::endl;
+    std::cout << "Found an unfinished recording " << index << " in " << dir << ", finalizing it." << std::endl;
 
     if (access(csv_path.c_str(), F_OK) == 0)
     {
@@ -358,7 +378,7 @@ inline bool RecoverInterruptedRecording(const std::string &dir, bool move_aside,
         }
         if (access(csv_path.c_str(), F_OK) == 0)
         {
-            std::filesystem::rename(csv_path, JoinPath(target, kImuCsvName), ec);
+            std::filesystem::rename(csv_path, JoinPath(target, ImuCsvName(index)), ec);
             if (ec)
             {
                 std::cerr << "Error: cannot move " << csv_path << ": " << ec.message() << std::endl;
@@ -367,10 +387,22 @@ inline bool RecoverInterruptedRecording(const std::string &dir, bool move_aside,
         }
     }
 
-    if (!FinalizePointsTemp(temp_path, target, max_points_per_file))
+    if (!FinalizePointsTemp(temp_path, target, index))
         return false;
     std::cout << "Recovered recording is in " << target << std::endl;
     return true;
+}
+
+// Finalizes every recording in `dir` that was not finished (crash, kill, power
+// loss). With move_aside each recovered recording is put in a recovered_<time>
+// subdirectory, so a new recording in `dir` does not mix with it. Returns
+// false if something was found and failed.
+inline bool RecoverInterruptedRecording(const std::string &dir, bool move_aside)
+{
+    bool ok = true;
+    for (int index : LeftoverSessions(dir))
+        ok = RecoverSession(dir, index, move_aside) && ok;
+    return ok;
 }
 
 class ContinuousDataWriter
@@ -379,6 +411,7 @@ private:
     std::string out_dir;
     std::string csv_filename;
     std::string bin_filename;
+    int session = 0;
     int csv_fd = -1;
     int64_t csv_committed = 0; // size after the last complete row
     std::ofstream bin_file;
@@ -408,12 +441,16 @@ private:
 public:
     ~ContinuousDataWriter() { CloseCsv(); }
 
-    // Starts a recording in `dir`: imu.csv and the points temp file.
+    int SessionIndex() const { return session; }
+
+    // Starts a recording in `dir`: imuNNNN.csv and the points temp file, with
+    // NNNN the next free session number.
     bool Open(const std::string &dir)
     {
         out_dir = dir;
-        csv_filename = JoinPath(dir, kImuCsvName);
-        bin_filename = JoinPath(dir, kPointsTempName);
+        session = NextSessionIndex(dir);
+        csv_filename = JoinPath(dir, ImuCsvName(session));
+        bin_filename = JoinPath(dir, PointsTempName(session));
 
         // 1. IMU CSV, written with plain write() calls: every write is a
         // whole number of rows, and a failed one is cut back.
@@ -506,7 +543,7 @@ public:
         }
     }
 
-    // Closes both streams and converts the points into lidar*.laz. If that
+    // Closes both streams and converts the points into lidarNNNN.laz. If that
     // fails, the temp file stays and is finalized on the next start.
     bool CloseAndPackageLAZ()
     {
@@ -518,7 +555,7 @@ public:
                   << decreasing_points << " backward point times." << std::endl;
 
         std::cout << "\nCapture finished. " << total_points << " points recorded." << std::endl;
-        if (!FinalizePointsTemp(bin_filename, out_dir))
+        if (!FinalizePointsTemp(bin_filename, out_dir, session))
             return false;
 
         std::cout << "Packaging complete." << std::endl;

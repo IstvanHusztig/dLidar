@@ -1,7 +1,7 @@
 // Termination paths of ContinuousDataWriter:
 //   - a recording killed mid-write leaves no partial CSV row once recovered,
 //   - a crash (fatal signal) cuts the CSV back to its last complete row,
-//   - SIGINT stops gracefully and produces lidar*.laz,
+//   - SIGINT stops gracefully and produces points.laz,
 //   - a leftover points_temp.bin is converted to LAZ on the next start,
 //   - the CSV row format is unchanged.
 #include "datawriter.h"
@@ -135,15 +135,13 @@ bool CsvIsClean(const std::string &path, size_t *rows_out, std::string *why)
     return true;
 }
 
-// Reads all lidar*.laz in dir (in order) and checks them against Point(i).
+// Reads lidar0001.laz in dir and checks it against Point(i).
 uint64_t CheckLaz(const std::string &dir, uint64_t expected_total)
 {
     uint64_t index = 0;
-    for (int f = 1;; f++)
     {
-        std::string path = JoinPath(dir, LazChunkName(f));
-        if (!fs::exists(path))
-            break;
+        std::string path = JoinPath(dir, LazName(1));
+        CHECK(fs::exists(path), "no %s", path.c_str());
         laszip_POINTER reader;
         laszip_create(&reader);
         laszip_BOOL compressed = 0;
@@ -215,15 +213,15 @@ void TestKilledMidWrite()
         int status;
         waitpid(pid, &status, 0);
 
-        std::string text = ReadFile(JoinPath(dir, kImuCsvName));
+        std::string text = ReadFile(JoinPath(dir, ImuCsvName(1)));
         partial_before_recovery += !text.empty() && text.back() != '\n';
-        uint64_t temp_bytes = fs::file_size(JoinPath(dir, kPointsTempName));
+        uint64_t temp_bytes = fs::file_size(JoinPath(dir, PointsTempName(1)));
 
         CHECK(RecoverInterruptedRecording(dir, false), "run %d", run);
         size_t rows = 0;
         std::string why;
-        CHECK(CsvIsClean(JoinPath(dir, kImuCsvName), &rows, &why), "run %d: %s", run, why.c_str());
-        CHECK(!fs::exists(JoinPath(dir, kPointsTempName)), "temp file left in run %d", run);
+        CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why), "run %d: %s", run, why.c_str());
+        CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left in run %d", run);
         CheckLaz(dir, temp_bytes / sizeof(PointDLidar));
         fs::remove_all(dir);
     }
@@ -257,7 +255,7 @@ void TestCrashTruncatesCsv()
     CHECK(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT, "child did not abort");
     size_t rows = 0;
     std::string why;
-    CHECK(CsvIsClean(JoinPath(dir, kImuCsvName), &rows, &why), "%s", why.c_str());
+    CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why), "%s", why.c_str());
     CHECK(rows == 300, "%zu rows", rows);
 
     // Points of the crashed recording are finalized on the next start, in
@@ -270,11 +268,11 @@ void TestCrashTruncatesCsv()
     CHECK(!recovered.empty(), "no recovered_* directory");
     if (!recovered.empty())
     {
-        CHECK(CsvIsClean((recovered / kImuCsvName).string(), &rows, &why) && rows == 300, "%s", why.c_str());
+        CHECK(CsvIsClean((recovered / ImuCsvName(1)).string(), &rows, &why) && rows == 300, "%s", why.c_str());
         CheckLaz(recovered.string(), 30);
     }
-    CHECK(!fs::exists(JoinPath(dir, kPointsTempName)), "temp file left");
-    CHECK(!fs::exists(JoinPath(dir, kImuCsvName)), "CSV not moved");
+    CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left");
+    CHECK(!fs::exists(JoinPath(dir, ImuCsvName(1))), "CSV not moved");
     fs::remove_all(dir);
 }
 
@@ -303,52 +301,75 @@ void TestSigintFinalizes()
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0, "child status %d", status);
     size_t rows = 0;
     std::string why;
-    CHECK(CsvIsClean(JoinPath(dir, kImuCsvName), &rows, &why), "%s", why.c_str());
-    CHECK(!fs::exists(JoinPath(dir, kPointsTempName)), "temp file left");
-    CHECK(fs::exists(JoinPath(dir, LazChunkName(1))), "no lidar0001.laz");
+    CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why), "%s", why.c_str());
+    CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left");
+    CHECK(fs::exists(JoinPath(dir, LazName(1))), "no lidar0001.laz");
     CheckLaz(dir, rows / 200 * 2000);
     fs::remove_all(dir);
 }
 
 // A temp file left by an earlier build/crash, with a partial last point and
-// a partial CSV row, is split into LAZ chunks on the next start; chunks of
-// an even older recording in the same directory are removed.
+// a partial CSV row, is converted to lidar0001.laz on the next start.
 void TestLeftoverTempConverted()
 {
-    printf("leftover points_temp.bin -> lidar*.laz chunks on next start\n");
+    printf("leftover points_temp0001.bin -> lidar0001.laz on next start\n");
     std::string dir = MakeTempDir();
     {
-        std::ofstream bin(JoinPath(dir, kPointsTempName), std::ios::binary);
+        std::ofstream bin(JoinPath(dir, PointsTempName(1)), std::ios::binary);
         for (int64_t i = 0; i < 25000; i++)
         {
             PointDLidar p = Point(i);
             bin.write(reinterpret_cast<const char *>(&p), sizeof p);
         }
         bin.write("partial-point", 13);
-        std::ofstream csv(JoinPath(dir, kImuCsvName), std::ios::binary);
+        std::ofstream csv(JoinPath(dir, ImuCsvName(1)), std::ios::binary);
         std::string rows = kImuCsvHeader;
         for (int i = 0; i < 10; i++)
             AppendImuRow(rows, Imu(i));
         csv << rows << "0.0010000000474974 -0.2500000000";
-        std::ofstream stale(JoinPath(dir, LazChunkName(7)));
-        stale << "old";
     }
     CHECK(sizeof(PointDLidar) == 32, "PointDLidar is %zu bytes", sizeof(PointDLidar));
 
-    CHECK(RecoverInterruptedRecording(dir, false, 10000), "recovery");
+    CHECK(RecoverInterruptedRecording(dir, false), "recovery");
     size_t rows = 0;
     std::string why;
-    CHECK(CsvIsClean(JoinPath(dir, kImuCsvName), &rows, &why) && rows == 10, "%s rows %zu", why.c_str(), rows);
-    for (int f = 1; f <= 3; f++)
-        CHECK(fs::exists(JoinPath(dir, LazChunkName(f))), "missing %s", LazChunkName(f).c_str());
-    CHECK(!fs::exists(JoinPath(dir, LazChunkName(4))), "too many chunks");
-    CHECK(!fs::exists(JoinPath(dir, LazChunkName(7))), "stale chunk kept");
-    CHECK(!fs::exists(JoinPath(dir, kPointsTempName)), "temp file left");
+    CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why) && rows == 10, "%s rows %zu", why.c_str(), rows);
+    CHECK(fs::exists(JoinPath(dir, LazName(1))), "missing lidar0001.laz");
+    CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left");
     CheckLaz(dir, 25000);
 
     // Nothing left to recover: a second start does nothing.
     CHECK(RecoverInterruptedRecording(dir, true), "second recovery");
-    CHECK(fs::exists(JoinPath(dir, kImuCsvName)), "CSV moved without a temp file");
+    CHECK(fs::exists(JoinPath(dir, ImuCsvName(1))), "CSV moved without a temp file");
+    fs::remove_all(dir);
+}
+
+// Each recording takes the next free number; its IMU CSV and LAZ share it and
+// earlier recordings are never overwritten.
+void TestSessionNumbering()
+{
+    printf("recordings are numbered, imu and lidar files share the number\n");
+    std::string dir = MakeTempDir();
+    CHECK(NextSessionIndex(dir) == 1, "first session is not 1");
+    for (int expect = 1; expect <= 3; expect++)
+    {
+        ContinuousDataWriter w;
+        CHECK(w.Open(dir), "open %d", expect);
+        CHECK(w.SessionIndex() == expect, "session %d got %d", expect, w.SessionIndex());
+        int64_t imu = 0, pts = 0;
+        w.AppendChunk(Chunk(0, imu, pts, 10, 100));
+        CHECK(w.CloseAndPackageLAZ(), "close %d", expect);
+        CHECK(fs::exists(JoinPath(dir, ImuCsvName(expect))), "missing imu %d", expect);
+        CHECK(fs::exists(JoinPath(dir, LazName(expect))), "missing lidar %d", expect);
+    }
+    CHECK(ImuCsvName(2) == "imu0002.csv" && LazName(2) == "lidar0002.laz", "names");
+
+    // A leftover temp file of session 4 is finalized in place as lidar0004.laz.
+    { std::ofstream bin(JoinPath(dir, PointsTempName(4)), std::ios::binary); PointDLidar p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
+    CHECK(NextSessionIndex(dir) == 5, "next after leftover");
+    CHECK(RecoverInterruptedRecording(dir, false), "recovery");
+    CHECK(fs::exists(JoinPath(dir, LazName(4))), "no lidar0004.laz");
+    CHECK(NextSessionIndex(dir) == 5, "next after recovery");
     fs::remove_all(dir);
 }
 } // namespace
@@ -360,6 +381,7 @@ int main()
     TestCrashTruncatesCsv();
     TestSigintFinalizes();
     TestLeftoverTempConverted();
+    TestSessionNumbering();
     printf(g_failures ? "Data writer: %d checks FAILED\n" : "Data writer: all checks passed\n", g_failures);
     return g_failures ? 1 : 0;
 }

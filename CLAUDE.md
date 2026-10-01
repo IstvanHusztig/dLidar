@@ -25,9 +25,9 @@ cmake --build build           # binary goes to bin/dLidar
 ## Runtime Assumptions (hardcoded)
 
 - LiDAR at `192.168.0.62:6101`, host at `192.168.0.2:6201` (`src/dLidar.cpp`).
-- Output goes to `/home/$USER/PointCloudDump/`: `imu.csv` and `lidar0001.laz`, `lidar0002.laz`, ... (`kMaxPointsPerLaz` points each). `points_temp.bin` exists only while recording. The directory must already exist.
+- Output goes to `/home/$USER/PointCloudDump/`: `imuNNNN.csv` and `lidarNNNN.laz`, one pair per recording. Each recording takes the next free number NNNN in the directory (`NextSessionIndex`), so files group by number and earlier recordings are never overwritten. `points_tempNNNN.bin` exists only while recording. The directory must already exist.
 - Capture stops after `target_chunks` chunks of at least 14000 points each (`ProcessSensorData` in `include/pcd_manager.h`), or on SIGINT/SIGTERM/SIGHUP, which finalizes normally (`include/shutdown.h`). A second signal kills.
-- On start, a leftover `points_temp.bin` (kill, crash, power loss) is finalized into `recovered_<time>/` before the new recording. `./bin/dLidar --finalize` finalizes it in place and exits.
+- On start, each leftover `points_tempNNNN.bin` (kill, crash, power loss) is finalized into `recovered_<time>/` before the new recording. `./bin/dLidar --finalize` finalizes it in place and exits.
 
 ## Architecture
 
@@ -41,7 +41,7 @@ Nearly all of the logic is header-only. `src/dLidar.cpp` just initializes the re
   - `tools/repair_imu_timestamps.py` rewrites the timestamps of `imu*.csv` files recorded before this fix, and `tools/check_imu_timestamps.py` reports their ordering and rate.
   - `GetPointCloud` filters points at parse time via `kMinPointRangeM` (0.1 m, rejects housing self-reflection) and `kMinPointIntensity` (5/255, rejects low-reflectivity noise). Tune these two constants for point-cloud clarity.
   - `CheckDirtyPercentage` polls the lens dirty-index every 10 s during capture (non-blocking) and warns past `kDirtyPercentageWarnThreshold` (5%) — relevant for handheld cave/outdoor use where the lens can fog or collect dust mid-run.
-- **`include/datawriter.h`** (`ContinuousDataWriter`): writes IMU rows to CSV per chunk with one `write()` of whole rows (space-separated, with a header, format unchanged). A failed write is cut back, a fatal signal truncates the CSV to its last complete row, and recovery trims a partial last row. Points are dumped as raw 32-byte `PointDLidar` records to `points_temp.bin`. `FinalizePointsTemp` reads it twice per chunk (bounds, then points) and encodes LAS 1.2 / point format 1 LAZ through the LASzip DLL API (`laszip_api.h`) into `lidarNNNN.laz.tmp`, renamed when complete. The temp file is deleted last, so an interrupted finalization is redone on the next start (`RecoverInterruptedRecording`). Higher-numbered `lidar*.laz` from an earlier recording in the same directory are removed.
+- **`include/datawriter.h`** (`ContinuousDataWriter`): writes IMU rows to CSV per chunk with one `write()` of whole rows (space-separated, with a header, format unchanged). A failed write is cut back, a fatal signal truncates the CSV to its last complete row, and recovery trims a partial last row. Points are dumped as raw 32-byte `PointDLidar` records to `points_tempNNNN.bin`. `FinalizePointsTemp` reads it twice (bounds, then points) and encodes LAS 1.2 / point format 1 LAZ through the LASzip DLL API (`laszip_api.h`) into `lidarNNNN.laz.tmp`, renamed when complete. The temp file is deleted last, so an interrupted finalization is redone on the next start (`RecoverInterruptedRecording`).
 - **`include/unitree_lidar_utilities.h`**: vendor header that has been **heavily modified locally**. Changes to parsing and coordinate conventions belong here:
   - `PointDLidar` stores time as a `double`; the vendor `PointUnitree` uses `float`.
   - `GetSensorOrientation()` is a global switch. `dLidar.cpp` sets it to `VERTICAL`, which remaps both LiDAR points and IMU axes (physical +Z front, +X down → output +X front, +Y left, +Z up). Any change to one axis mapping must be mirrored in the other so points and IMU stay consistent.
