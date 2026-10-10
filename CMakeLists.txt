@@ -30,3 +30,12 @@ add_executable(test_datawriter tests/test_datawriter.cpp)
 set_target_properties(test_datawriter PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_datawriter laszip)
 add_test(NAME datawriter COMMAND test_datawriter)
+
+add_executable(test_time_alignment tests/test_time_alignment.cpp)
+set_target_properties(test_time_alignment PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_compile_options(test_time_alignment PRIVATE -O2)
+add_test(NAME time_alignment COMMAND test_time_alignment)
+
+# Replays a recording's packetsNNNN.bin through the IMU timestamping.
+add_executable(replay_packets tools/replay_packets.cpp)
+target_compile_options(replay_packets PRIVATE -O2)

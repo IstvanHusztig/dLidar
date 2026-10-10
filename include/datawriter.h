@@ -1,7 +1,7 @@
 #pragma once
 
 #include "unitree_lidar_sdk.h"
-#include "imu_timestamper.h"
+#include "time_alignment.h"
 #include "shutdown.h"
 #include <dll/laszip_api.h>
 #include <string>
@@ -24,13 +24,19 @@ using namespace unitree_lidar_sdk;
 
 // Files of a recording inside the output directory.
 // Every recording takes the next free session number N, so its files group:
-// imuNNNN.csv, lidarNNNN.laz and (while recording) points_tempNNNN.bin.
+// imuNNNN.csv, lidarNNNN.laz, timingNNNN.json (how the times were made),
+// packetsNNNN.bin (arrival and L2 stamp of every packet, for replay) and,
+// while recording, points_tempNNNN.bin.
 const char *const kImuCsvPrefix = "imu";
 const char *const kImuCsvSuffix = ".csv";
 const char *const kLazPrefix = "lidar";
 const char *const kLazSuffix = ".laz";
 const char *const kPointsTempPrefix = "points_temp"; // raw PointDLidar records while recording
 const char *const kPointsTempSuffix = ".bin";
+const char *const kTimingPrefix = "timing";
+const char *const kTimingSuffix = ".json";
+const char *const kPacketLogPrefix = "packets"; // kPacketLogMagic, then PacketTiming records
+const char *const kPacketLogSuffix = ".bin";
 const char *const kImuCsvHeader = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
 struct SensorChunk
@@ -38,6 +44,8 @@ struct SensorChunk
     int chunk_index;
     std::vector<PointDLidar> points;
     std::vector<OutputImuData> imu_data;
+    std::vector<PacketTiming> packets; // timing of the packets of this chunk
+    std::string timing_report;         // if set, (re)written as timingNNNN.json
 };
 
 inline std::string JoinPath(const std::string &dir, const std::string &name)
@@ -54,6 +62,8 @@ inline std::string SessionFileName(const char *prefix, int index, const char *su
 inline std::string ImuCsvName(int index) { return SessionFileName(kImuCsvPrefix, index, kImuCsvSuffix); }
 inline std::string LazName(int index) { return SessionFileName(kLazPrefix, index, kLazSuffix); }
 inline std::string PointsTempName(int index) { return SessionFileName(kPointsTempPrefix, index, kPointsTempSuffix); }
+inline std::string TimingName(int index) { return SessionFileName(kTimingPrefix, index, kTimingSuffix); }
+inline std::string PacketLogName(int index) { return SessionFileName(kPacketLogPrefix, index, kPacketLogSuffix); }
 
 // The session number in `name` if it is exactly prefix + 4 digits + suffix, else 0.
 inline int ParseSessionIndex(const std::string &name, const char *prefix, const char *suffix)
@@ -82,7 +92,9 @@ inline int NextSessionIndex(const std::string &dir)
         std::string name = entry.path().filename().string();
         highest = std::max({highest, ParseSessionIndex(name, kImuCsvPrefix, kImuCsvSuffix),
                             ParseSessionIndex(name, kLazPrefix, kLazSuffix),
-                            ParseSessionIndex(name, kPointsTempPrefix, kPointsTempSuffix)});
+                            ParseSessionIndex(name, kPointsTempPrefix, kPointsTempSuffix),
+                            ParseSessionIndex(name, kTimingPrefix, kTimingSuffix),
+                            ParseSessionIndex(name, kPacketLogPrefix, kPacketLogSuffix)});
     }
     return highest + 1;
 }
@@ -376,12 +388,15 @@ inline bool RecoverSession(const std::string &dir, int index, bool move_aside)
             std::cerr << "Error: cannot create " << target << ": " << ec.message() << std::endl;
             return false;
         }
-        if (access(csv_path.c_str(), F_OK) == 0)
+        for (const std::string &name : {ImuCsvName(index), TimingName(index), PacketLogName(index)})
         {
-            std::filesystem::rename(csv_path, JoinPath(target, ImuCsvName(index)), ec);
+            std::string from = JoinPath(dir, name);
+            if (access(from.c_str(), F_OK) != 0)
+                continue;
+            std::filesystem::rename(from, JoinPath(target, name), ec);
             if (ec)
             {
-                std::cerr << "Error: cannot move " << csv_path << ": " << ec.message() << std::endl;
+                std::cerr << "Error: cannot move " << from << ": " << ec.message() << std::endl;
                 return false;
             }
         }
@@ -415,6 +430,7 @@ private:
     int csv_fd = -1;
     int64_t csv_committed = 0; // size after the last complete row
     std::ofstream bin_file;
+    std::ofstream packet_file;
 
     uint64_t total_points = 0;
 
@@ -472,11 +488,46 @@ public:
             return false;
         }
 
+        // 3. Packet timing log (diagnostics only; a failure is not fatal)
+        packet_file.open(JoinPath(dir, PacketLogName(session)), std::ios::out | std::ios::binary | std::ios::trunc);
+        if (packet_file.is_open())
+            packet_file.write(kPacketLogMagic, sizeof kPacketLogMagic);
+        else
+            std::cerr << "WARNING: could not open " << PacketLogName(session) << ", packet timing not logged." << std::endl;
+
         return true;
+    }
+
+    // Writes timingNNNN.json (via a temp file, so it is never half written).
+    void WriteTimingReport(const std::string &json)
+    {
+        std::string path = JoinPath(out_dir, TimingName(session));
+        std::string part = path + ".tmp";
+        {
+            std::ofstream f(part, std::ios::out | std::ios::trunc);
+            f << json;
+            if (!f.good())
+            {
+                std::cerr << "WARNING: could not write " << part << std::endl;
+                return;
+            }
+        }
+        std::error_code ec;
+        std::filesystem::rename(part, path, ec);
+        if (ec)
+            std::cerr << "WARNING: could not rename " << part << ": " << ec.message() << std::endl;
     }
 
     void AppendChunk(const SensorChunk &chunk)
     {
+        if (packet_file.is_open() && !chunk.packets.empty())
+        {
+            packet_file.write(reinterpret_cast<const char *>(chunk.packets.data()), chunk.packets.size() * sizeof(PacketTiming));
+            packet_file.flush();
+        }
+        if (!chunk.timing_report.empty())
+            WriteTimingReport(chunk.timing_report);
+
         // Stream IMU Data
         if (csv_fd >= 0 && !chunk.imu_data.empty())
         {
@@ -550,6 +601,8 @@ public:
         CloseCsv();
         if (bin_file.is_open())
             bin_file.close();
+        if (packet_file.is_open())
+            packet_file.close();
 
         std::cout << "\nTimestamp check: " << non_increasing_imu << " non-increasing IMU timestamps, "
                   << decreasing_points << " backward point times." << std::endl;

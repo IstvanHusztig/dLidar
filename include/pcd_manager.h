@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datawriter.h"
+#include "capture_timing.h"
 
 #include <thread>
 #include <mutex>
@@ -73,60 +74,6 @@ void RestartLidar(UnitreeLidarReader *lreader)
 	sleep(3);
 }
 
-// Reads the IMU sample of the packet just parsed. Acceleration is in g and
-// angular velocity in rad/s. Timestamps are assigned later by ImuTimestamper.
-bool ReadImuSample(UnitreeLidarReader *lreader, OutputImuData &imuData, ParsedImuData &parsedImu)
-{
-	LidarImuData imu;
-	if (!lreader->getImuData(imu))
-	{
-		return false;
-	}
-
-	parseFromImuPacket(parsedImu, imu);
-
-	imuData.AccelerationX = parsedImu.accel[0];
-	imuData.AccelerationY = parsedImu.accel[1];
-	imuData.AccelerationZ = parsedImu.accel[2];
-
-	imuData.GyroX = parsedImu.gyro[0];
-	imuData.GyroY = parsedImu.gyro[1];
-	imuData.GyroZ = parsedImu.gyro[2];
-
-	imuData.ImuId = 0;
-	return true;
-}
-
-int64_t HostUnixTimeNs()
-{
-	return std::chrono::duration_cast<std::chrono::nanoseconds>(
-			   std::chrono::system_clock::now().time_since_epoch())
-		.count();
-}
-
-// Reject points inside the housing blind zone (spec: 0.05 m) to filter out
-// self-reflection off the sensor housing. Kept a bit past the blind zone
-// since accuracy degrades near it.
-const float kMinPointRangeM = 0.1f;
-
-// Reject low-reflectivity returns (0-255 scale) that are usually noise/
-// multipath rather than a real surface.
-const uint8_t kMinPointIntensity = 5;
-
-std::vector<PointDLidar> GetPointCloud(UnitreeLidarReader *lreader)
-{
-	LidarPointDataPacket lidarDataPacket = lreader->getLidarPointDataPacket();
-	PointCloudDLidar cloudOut;
-
-	if (lidarDataPacket.data.point_num == 0)
-	{
-		return {};
-	}
-
-	parseFromPacketToPointCloud(cloudOut, lidarDataPacket, kMinPointRangeM, 100, kMinPointIntensity);
-	return cloudOut.points;
-}
-
 std::string OutputDirectory()
 {
 	const char *linuxUser = getenv("USER");
@@ -135,7 +82,7 @@ std::string OutputDirectory()
 
 // The SDK buffers packets while nothing reads them (lidar restart, the
 // status queries above). Reading those out now instead of sleeping keeps a
-// burst of stale packets with compressed host stamps out of the recording.
+// burst of stale packets (late arrivals) out of the recording.
 void DrainPendingPackets(UnitreeLidarReader *lreader, std::chrono::milliseconds duration)
 {
 	auto until = std::chrono::steady_clock::now() + duration;
@@ -145,10 +92,30 @@ void DrainPendingPackets(UnitreeLidarReader *lreader, std::chrono::milliseconds 
 	}
 }
 
-void ProcessSensorData(UnitreeLidarReader *lreader)
+void PrintTimingSummary(const ImuTimeline &timeline)
+{
+	const ImuTimeline::Stats &st = timeline.GetStats();
+	ImuTimeline::Clocks c = timeline.MeasureClocks();
+	std::cout << "IMU time source: " << ImuTimeline::ModeName(timeline.ActiveMode()) << " (" << timeline.Decision() << ")\n"
+			  << "IMU: " << st.imu_out << " of " << st.imu_in << " samples written, dropped " << st.non_increasing_dropped
+			  << " non-increasing, " << st.duplicates_dropped << " duplicate, " << st.negative_dropped << " before t=0, "
+			  << st.unmapped_dropped << " unmapped; lost " << st.lost_samples << ", stamp jumps " << st.stamp_jumps
+			  << ", nudged " << st.nudged << std::endl;
+	if (c.valid)
+	{
+		std::cout << "Clocks over " << c.span_s << " s: IMU period " << c.imu_period_ns / 1e6 << " ms on the L2 clock ("
+				  << 1e9 / c.imu_period_ns << " Hz), L2 clock vs host " << c.lidar_rate_ppm << " ppm, IMU stamps vs host "
+				  << c.imu_rate_ppm << " ppm; IMU - point min latency " << c.min_latency_diff_start_ms << " -> "
+				  << c.min_latency_diff_end_ms << " ms; mean extra latency IMU " << c.imu_extra_latency_ms << " ms, points "
+				  << c.lidar_extra_latency_ms << " ms; the old host-stamped IMU would have lagged by "
+				  << c.old_lag_start_ms << " -> " << c.old_lag_end_ms << " ms" << std::endl;
+	}
+}
+
+void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &timing_config)
 {
 	const int max_points_per_chunk = 14000;
-	const int target_chunks = 1000;
+	const int target_chunks = 800; // ~1 min of data at 20 Hz, 18 scans per chunk
 
 	std::queue<SensorChunk> chunk_queue;
 	std::mutex queue_mutex;
@@ -196,7 +163,8 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	std::cout << ">>> STARTING CONTINUOUS DATA CAPTURE <<< (Ctrl-C to stop)" << std::endl;
 
 	int chunks_produced = 0;
-	ImuTimestamper imu_timestamper;
+	CaptureTiming timing(timing_config);
+	bool decision_reported = false;
 	std::vector<PointDLidar> current_ptCloudResult;
 	std::vector<OutputImuData> current_imuResult;
 
@@ -207,24 +175,16 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	{
 		int result = lreader->runParse();
 
+		// Both packet types keep the L2's own stamp (use_system_timestamp is
+		// off); the host arrival time is taken here for diagnostics and the
+		// fallback clock map.
 		switch (result)
 		{
 		case LIDAR_IMU_DATA_PACKET_TYPE:
-		{
-			OutputImuData imuData;
-			ParsedImuData parsedImu;
-			if (ReadImuSample(lreader, imuData, parsedImu))
-			{
-				imu_timestamper.Push(imuData, parsedImu.timestamp, parsedImu.seq, HostUnixTimeNs(), current_imuResult);
-			}
+			timing.OnImu(lreader->getLidarImuDataPacket().data, HostNow(), current_imuResult);
 			break;
-		}
 		case LIDAR_POINT_DATA_PACKET_TYPE:
-			std::vector<PointDLidar> ptCloud = GetPointCloud(lreader);
-			if (!ptCloud.empty())
-			{
-				current_ptCloudResult.insert(current_ptCloudResult.end(), ptCloud.begin(), ptCloud.end());
-			}
+			timing.OnPoints(lreader->getLidarPointDataPacket(), HostNow(), current_ptCloudResult, current_imuResult);
 			CheckDirtyPercentage(lreader);
 			break;
 		}
@@ -237,6 +197,13 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 			new_chunk.chunk_index = chunks_produced;
 			new_chunk.points = std::move(current_ptCloudResult);
 			new_chunk.imu_data = std::move(current_imuResult);
+			timing.TakePacketLog(new_chunk.packets);
+			if (!decision_reported && timing.Timeline().Decided())
+			{
+				// Written early as well, so a killed recording still says how its times were made.
+				new_chunk.timing_report = timing.Timeline().Report();
+				decision_reported = true;
+			}
 
 			{
 				std::lock_guard<std::mutex> lock(queue_mutex);
@@ -255,31 +222,19 @@ void ProcessSensorData(UnitreeLidarReader *lreader)
 	lreader->stopLidarRotation();
 	std::cout << "LiDAR stopped. Flushing final data to continuous streams..." << std::endl;
 
-	// The timestamper holds back the last ~0.5 s of IMU samples (and the
-	// first ~2 s until its clock fit settles); write them out with the
+	// Auto mode holds the first ~2 s of IMU samples until it has checked the
+	// L2 IMU stamps (the fallback holds ~0.5 s more); write them out with the
 	// remaining points as a final chunk.
-	imu_timestamper.Flush(current_imuResult);
+	timing.Flush(current_imuResult);
+	PrintTimingSummary(timing.Timeline());
 
-	const ImuTimestamper::Stats &imuStats = imu_timestamper.GetStats();
-	if (imuStats.samples_out > 0)
-	{
-		std::cout << "IMU timeline: " << imuStats.samples_out << " of " << imuStats.samples_in << " samples written, period "
-				  << imuStats.period_ns / 1e6 << " ms (" << 1e9 / imuStats.period_ns << " Hz), seq "
-				  << (imuStats.seq_used ? "used" : "not usable") << ", lost samples " << imuStats.lost_samples
-				  << " (" << imuStats.drop_events << " detected drops), index corrections " << imuStats.index_corrections
-				  << ", resyncs " << imuStats.resyncs << ", clock steps back " << imuStats.clock_steps_back
-				  << ", slew violations " << imuStats.slew_violations
-				  << ", dropped: " << imuStats.negative_dropped << " before t=0, " << imuStats.conflicts_dropped
-				  << " conflicting, " << imuStats.duplicates_dropped << " duplicate"
-				  << ", arrival lead mean " << imuStats.lead_sum_ns / imuStats.samples_out / 1e6
-				  << " ms / max " << imuStats.max_lead_ns / 1e6 << " ms" << std::endl;
-	}
-	if (!current_imuResult.empty() || !current_ptCloudResult.empty())
 	{
 		SensorChunk final_chunk;
 		final_chunk.chunk_index = chunks_produced + 1;
 		final_chunk.points = std::move(current_ptCloudResult);
 		final_chunk.imu_data = std::move(current_imuResult);
+		timing.TakePacketLog(final_chunk.packets);
+		final_chunk.timing_report = timing.Timeline().Report();
 
 		std::lock_guard<std::mutex> lock(queue_mutex);
 		chunk_queue.push(std::move(final_chunk));

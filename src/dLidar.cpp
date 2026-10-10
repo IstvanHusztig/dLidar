@@ -9,13 +9,16 @@ void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
 	sleep(1);
 }
 
-// true: the SDK overwrites every packet stamp (points and IMU) with the host
-// arrival time, so batched IMU samples need ImuTimestamper to rebuild their
-// spacing. false: packets keep the LiDAR's own clock, synced once to the
-// host clock at startup with syncLidarTimeStamp(). Both streams always share
-// whichever clock is chosen.
-const bool kUseSystemTimestamp = true;
+// false: the SDK leaves every packet with the L2's own stamp. Point packets
+// keep it either way; with true the SDK would overwrite only the IMU stamp
+// with the host arrival time, a different clock from the points'. IMU times
+// are put on the points' clock by ImuTimeline (include/time_alignment.h).
+const bool kUseSystemTimestamp = false;
 const uint16_t kCloudScanNum = 18; // SDK default
+
+// Added to every IMU timestamp. Leave 0 unless the field check
+// (docs/imu_lidar_time_alignment.md) measures a constant residual offset.
+const int64_t kImuOffsetNs = 0;
 
 UnitreeLidarReader *InitializeLidar()
 {
@@ -37,11 +40,6 @@ UnitreeLidarReader *InitializeLidar()
 		printf("Unilidar initialization succeed!\n");
 	}
 
-	if (!kUseSystemTimestamp)
-	{
-		lreader->syncLidarTimeStamp();
-	}
-
 	SetLidarWorkMode(lreader);
 
 	return lreader;
@@ -51,10 +49,27 @@ int main(int argc, char *argv[])
 {
 	InstallSignalHandlers();
 
-	// --finalize: only convert an interrupted recording in place, no capture.
-	if (argc > 1 && std::string(argv[1]) == "--finalize")
+	ImuTimeline::Config timing_config;
+	timing_config.imu_offset_ns = kImuOffsetNs;
+	for (int i = 1; i < argc; i++)
 	{
-		return RecoverInterruptedRecording(OutputDirectory(), false) ? 0 : 1;
+		std::string arg = argv[i];
+		if (arg == "--finalize")
+		{
+			// Only convert an interrupted recording in place, no capture.
+			return RecoverInterruptedRecording(OutputDirectory(), false) ? 0 : 1;
+		}
+		else if (arg == "--imu-time=auto")
+			timing_config.mode = ImuTimeline::Mode::Auto;
+		else if (arg == "--imu-time=sensor")
+			timing_config.mode = ImuTimeline::Mode::Sensor;
+		else if (arg == "--imu-time=host")
+			timing_config.mode = ImuTimeline::Mode::HostAligned;
+		else
+		{
+			std::cerr << "usage: dLidar [--finalize] [--imu-time=auto|sensor|host]" << std::endl;
+			return 2;
+		}
 	}
 
 	// A recording that was killed or lost power is finalized into its own
@@ -67,7 +82,7 @@ int main(int argc, char *argv[])
 
 	UnitreeLidarReader *lidarReader = InitializeLidar();
 
-	ProcessSensorData(lidarReader);
+	ProcessSensorData(lidarReader, timing_config);
 
 	lidarReader->stopLidarRotation();
 

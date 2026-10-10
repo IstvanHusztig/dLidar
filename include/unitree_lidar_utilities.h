@@ -35,7 +35,8 @@ namespace unitree_lidar_sdk
 {
     /**
      * @brief Shared zero-point for all sensor streams to preserve nanosecond precision
-     * when using 64-bit doubles in HDmapper.
+     * when using 64-bit doubles in HDmapper. The L2 stamp of the first point packet;
+     * point times and IMU timestamps are both L2 clock minus this value.
      */
     inline int64_t &GetGlobalTimeOffsetNs()
     {
@@ -105,8 +106,8 @@ namespace unitree_lidar_sdk
     {
         float gyro[3];
         float accel[3];
-        int64_t timestamp; // sensor stamp, ns relative to GetGlobalTimeOffsetNs() (may be < 0)
-        uint32_t seq;      // packet sequence id, one sample per packet
+        int64_t sensor_stamp_ns; // the packet's L2 stamp (DataInfo.stamp), absolute ns
+        uint32_t seq;            // packet sequence id, one sample per packet
     } ParsedImuData;
 
     /**
@@ -166,6 +167,11 @@ namespace unitree_lidar_sdk
         return ~crc;
     }
 
+    inline int64_t StampToNs(const TimeStamp &stamp)
+    {
+        return (int64_t)stamp.sec * 1000000000LL + (int64_t)stamp.nsec;
+    }
+
     /**
      * @brief Centralized IMU parsing and coordinate mapping.
      */
@@ -204,14 +210,9 @@ namespace unitree_lidar_sdk
             break;
         }
 
-        int64_t absolute_raw_time = ((int64_t)imu.info.stamp.sec * 1000000000LL) + (int64_t)imu.info.stamp.nsec;
-
-        if (GetGlobalTimeOffsetNs() == 0)
-        {
-            GetGlobalTimeOffsetNs() = absolute_raw_time;
-        }
-
-        out.timestamp = absolute_raw_time - GetGlobalTimeOffsetNs();
+        // The L2's own stamp of the sample. ImuTimeline puts it relative to
+        // GetGlobalTimeOffsetNs(); the zero is set by point packets only.
+        out.sensor_stamp_ns = StampToNs(imu.info.stamp);
         out.seq = imu.info.seq;
     }
 
@@ -246,17 +247,26 @@ namespace unitree_lidar_sdk
         auto &ranges = packet.data.ranges;
         auto &intensities = packet.data.intensities;
 
-        float time_relative = 0;
         float alpha_cur = packet.data.angle_min + packet.data.param.alpha_angle_bias;
         float alpha_step = packet.data.angle_increment;
         float theta_cur = packet.data.com_horizontal_angle_start + packet.data.param.theta_angle_bias;
         float theta_step = packet.data.com_horizontal_angle_step;
 
+        // L2 stamp of the packet = time of its first point; point j adds
+        // j * time_increment. Never the host arrival time (the SDK's
+        // use_system_timestamp does not touch this packet).
+        const int64_t packet_time_ns = StampToNs(packet.data.info.stamp);
+        if (GetGlobalTimeOffsetNs() == 0)
+        {
+            GetGlobalTimeOffsetNs() = packet_time_ns;
+        }
+        const double packet_base_time = (double)(packet_time_ns - GetGlobalTimeOffsetNs()) / 1.0e9;
+
         PointDLidar point3d;
         point3d.ring = 1;
 
         for (int j = 0; j < num_of_points; j += 1, alpha_cur += alpha_step,
-                 theta_cur += theta_step, time_relative += time_step)
+                 theta_cur += theta_step)
         {
             if (ranges[j] < 1)
                 continue;
@@ -310,17 +320,7 @@ namespace unitree_lidar_sdk
 
             point3d.intensity = intensities[j];
 
-            int64_t packet_time_ns = ((int64_t)packet.data.info.stamp.sec * 1000000000LL) + (int64_t)packet.data.info.stamp.nsec;
-
-            if (GetGlobalTimeOffsetNs() == 0)
-            {
-                GetGlobalTimeOffsetNs() = packet_time_ns;
-            }
-
-            int64_t relative_packet_time_ns = packet_time_ns - GetGlobalTimeOffsetNs();
-            double packet_base_time = (double)relative_packet_time_ns / 1.0e9;
-
-            point3d.time = packet_base_time + time_relative;
+            point3d.time = packet_base_time + (double)j * (double)time_step;
 
             cloudOut.points.push_back(point3d);
         }

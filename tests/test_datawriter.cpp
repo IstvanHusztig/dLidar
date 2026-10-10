@@ -5,6 +5,7 @@
 //   - a leftover points_temp.bin is converted to LAZ on the next start,
 //   - the CSV row format is unchanged.
 #include "datawriter.h"
+#include "packet_replay.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -372,6 +373,48 @@ void TestSessionNumbering()
     CHECK(NextSessionIndex(dir) == 5, "next after recovery");
     fs::remove_all(dir);
 }
+
+// The packet timing log and the timing report are written next to the IMU
+// CSV and LAZ, and a recovered recording takes them along.
+void TestTimingFiles()
+{
+    printf("packetsNNNN.bin and timingNNNN.json written and recovered\n");
+    std::string dir = MakeTempDir();
+    {
+        ContinuousDataWriter w;
+        CHECK(w.Open(dir), "open");
+        int64_t imu = 0, pts = 0;
+        SensorChunk c = Chunk(0, imu, pts, 10, 100);
+        for (uint32_t i = 0; i < 25; i++)
+            c.packets.push_back({1000 + i, 2000 + i, 3000 + i, i, i % 2 ? kPacketTypeImu : kPacketTypePoints, 1e-5f, 120});
+        c.timing_report = "{\n  \"imu_time_source\": \"sensor\"\n}\n";
+        w.AppendChunk(c);
+        CHECK(w.CloseAndPackageLAZ(), "close");
+    }
+    std::vector<PacketTiming> packets;
+    CHECK(ReadPacketLog(JoinPath(dir, PacketLogName(1)), packets) && packets.size() == 25 && packets[24].sensor_ns == 3024 &&
+              packets[1].type == kPacketTypeImu,
+          "packet log: %zu records", packets.size());
+    CHECK(ReadFile(JoinPath(dir, TimingName(1))).find("\"sensor\"") != std::string::npos, "timing report");
+    CHECK(NextSessionIndex(dir) == 2, "next session");
+
+    // Killed recording 2: everything of it moves to recovered_<time>/.
+    {
+        std::ofstream(JoinPath(dir, PointsTempName(2)), std::ios::binary);
+        std::ofstream(JoinPath(dir, ImuCsvName(2))) << kImuCsvHeader;
+        std::ofstream(JoinPath(dir, TimingName(2))) << "{}";
+        std::ofstream(JoinPath(dir, PacketLogName(2)), std::ios::binary).write(kPacketLogMagic, sizeof kPacketLogMagic);
+    }
+    CHECK(RecoverInterruptedRecording(dir, true), "recovery");
+    fs::path recovered;
+    for (const auto &e : fs::directory_iterator(dir))
+        if (e.is_directory())
+            recovered = e.path();
+    CHECK(!recovered.empty() && fs::exists(recovered / TimingName(2)) && fs::exists(recovered / PacketLogName(2)) &&
+              fs::exists(recovered / LazName(2)) && !fs::exists(JoinPath(dir, TimingName(2))),
+          "recovered files");
+    fs::remove_all(dir);
+}
 } // namespace
 
 int main()
@@ -382,6 +425,7 @@ int main()
     TestSigintFinalizes();
     TestLeftoverTempConverted();
     TestSessionNumbering();
+    TestTimingFiles();
     printf(g_failures ? "Data writer: %d checks FAILED\n" : "Data writer: all checks passed\n", g_failures);
     return g_failures ? 1 : 0;
 }
