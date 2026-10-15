@@ -1,11 +1,14 @@
 #include "pcd_manager.h"
 
+// Sent with setLidarWorkMode at start-up; recorded in timingNNNN.json.
+const uint32_t kLidarWorkMode = 0;
+
 void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
 {
 	unitree_lidar_sdk::GetSensorOrientation() = unitree_lidar_sdk::SensorOrientation::VERTICAL;
 
-	std::cout << "set Lidar work mode to: " << 0 << std::endl;
-	lidarReader->setLidarWorkMode(0);
+	std::cout << "set Lidar work mode to: " << kLidarWorkMode << std::endl;
+	lidarReader->setLidarWorkMode(kLidarWorkMode);
 	sleep(1);
 }
 
@@ -82,7 +85,7 @@ int main(int argc, char *argv[])
 
 	UnitreeLidarReader *lidarReader = InitializeLidar();
 
-	ProcessSensorData(lidarReader, timing_config);
+	ProcessSensorData(lidarReader, timing_config, kLidarWorkMode);
 
 	lidarReader->stopLidarRotation();
 

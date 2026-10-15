@@ -2,8 +2,11 @@
 //   - a recording killed mid-write leaves no partial CSV row once recovered,
 //   - a crash (fatal signal) cuts the CSV back to its last complete row,
 //   - SIGINT stops gracefully and produces points.laz,
-//   - a leftover points_temp.bin is converted to LAZ on the next start,
-//   - the CSV row format is unchanged.
+//   - a leftover points_temp.bin is converted to LAZ on the next start, both
+//     the current layout and the header-less one of older builds,
+//   - the CSV row format is unchanged,
+//   - recording format 2: LAZ extra bytes, packetstateNNNN.tsv and the
+//     recording keys in timingNNNN.json.
 #include "datawriter.h"
 #include "packet_replay.h"
 
@@ -77,8 +80,23 @@ PointDLidar Point(int64_t i)
     p.intensity = (float)(i % 256);
     p.time = 1e-5 * (double)i;
     p.ring = 1;
+    p.range = 0.5f + 0.001f * (float)(i % 5000);
+    p.alpha = -1.5f + 1e-4f * (float)(i % 30000);
+    p.theta = 1e-3f * (float)(i % 6283);
+    p.packet_seq = (uint32_t)(i / 300);
+    p.raw_range = (uint16_t)(500 + i % 5000);
+    p.sample_index = (uint16_t)(i % 300);
     return p;
 }
+
+PointDLidarV1 PointV1(int64_t i)
+{
+    PointDLidar p = Point(i);
+    return PointDLidarV1{p.x, p.y, p.z, p.intensity, p.time, p.ring};
+}
+
+// Points in a points temp file of `bytes` bytes in the current layout.
+uint64_t TempPoints(uint64_t bytes) { return bytes < kPointsTempHeaderSize ? 0 : (bytes - kPointsTempHeaderSize) / sizeof(PointDLidar); }
 
 SensorChunk Chunk(int index, int64_t &imu_next, int64_t &point_next, int imu_rows, int points)
 {
@@ -136,8 +154,9 @@ bool CsvIsClean(const std::string &path, size_t *rows_out, std::string *why)
     return true;
 }
 
-// Reads lidar0001.laz in dir and checks it against Point(i).
-uint64_t CheckLaz(const std::string &dir, uint64_t expected_total)
+// Reads lidar0001.laz in dir and checks it against Point(i): the standard
+// fields always, the format 2 extra bytes if `extra`.
+uint64_t CheckLaz(const std::string &dir, uint64_t expected_total, bool extra = true)
 {
     uint64_t index = 0;
     {
@@ -152,6 +171,13 @@ uint64_t CheckLaz(const std::string &dir, uint64_t expected_total)
         laszip_point *pt;
         laszip_get_point_pointer(reader, &pt);
         CHECK(compressed, "%s not compressed", path.c_str());
+        CHECK(header->version_major == 1 && header->version_minor == 2 && header->point_data_format == 1,
+              "LAS %d.%d format %d", header->version_major, header->version_minor, header->point_data_format);
+        CHECK(header->point_data_record_length == (extra ? 48 : 28), "record length %d", header->point_data_record_length);
+        CHECK(pt->num_extra_bytes == (extra ? 20 : 0), "%d extra bytes", pt->num_extra_bytes);
+        if (extra)
+            CHECK(std::string(header->generating_software).find("format 2") != std::string::npos, "generating_software '%.32s'",
+                  header->generating_software);
         for (laszip_U32 i = 0; i < header->number_of_point_records; i++, index++)
         {
             laszip_read_point(reader);
@@ -159,7 +185,14 @@ uint64_t CheckLaz(const std::string &dir, uint64_t expected_total)
             laszip_get_coordinates(reader, c);
             PointDLidar e = Point((int64_t)index);
             bool ok = std::fabs(c[0] - e.x) < 1e-4 && std::fabs(c[1] - e.y) < 1e-4 && std::fabs(c[2] - e.z) < 1e-4 &&
-                      pt->gps_time == e.time && pt->intensity == (laszip_U16)e.intensity;
+                      pt->gps_time == e.time && pt->intensity == (laszip_U16)e.intensity && pt->user_data == 1 &&
+                      pt->classification == 0 && pt->point_source_ID == 0 && pt->return_number == 0;
+            if (ok && extra)
+            {
+                laszip_U8 expect[20];
+                PackLazExtraBytes(e, expect);
+                ok = memcmp(pt->extra_bytes, expect, sizeof expect) == 0;
+            }
             if (!ok)
             {
                 CHECK(ok, "point %llu of %s differs", (unsigned long long)index, path.c_str());
@@ -223,7 +256,7 @@ void TestKilledMidWrite()
         std::string why;
         CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why), "run %d: %s", run, why.c_str());
         CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left in run %d", run);
-        CheckLaz(dir, temp_bytes / sizeof(PointDLidar));
+        CheckLaz(dir, TempPoints(temp_bytes));
         fs::remove_all(dir);
     }
     printf("  (%d of 12 kills had left a partial row before recovery)\n", partial_before_recovery);
@@ -309,18 +342,29 @@ void TestSigintFinalizes()
     fs::remove_all(dir);
 }
 
-// A temp file left by an earlier build/crash, with a partial last point and
-// a partial CSV row, is converted to lidar0001.laz on the next start.
-void TestLeftoverTempConverted()
+// A temp file left by an earlier build (recording format 1: no header, 32-byte
+// records) or by a crash of this one, with a partial last point and a partial
+// CSV row, is converted to lidar0001.laz on the next start.
+void TestLeftoverTempConverted(bool format1)
 {
-    printf("leftover points_temp0001.bin -> lidar0001.laz on next start\n");
+    printf("leftover points_temp0001.bin (%s) -> lidar0001.laz on next start\n", format1 ? "format 1" : "format 2");
     std::string dir = MakeTempDir();
     {
         std::ofstream bin(JoinPath(dir, PointsTempName(1)), std::ios::binary);
+        if (!format1)
+            WritePointsTempHeader(bin);
         for (int64_t i = 0; i < 25000; i++)
         {
-            PointDLidar p = Point(i);
-            bin.write(reinterpret_cast<const char *>(&p), sizeof p);
+            if (format1)
+            {
+                PointDLidarV1 p = PointV1(i);
+                bin.write(reinterpret_cast<const char *>(&p), sizeof p);
+            }
+            else
+            {
+                PointDLidar p = Point(i);
+                bin.write(reinterpret_cast<const char *>(&p), sizeof p);
+            }
         }
         bin.write("partial-point", 13);
         std::ofstream csv(JoinPath(dir, ImuCsvName(1)), std::ios::binary);
@@ -329,7 +373,7 @@ void TestLeftoverTempConverted()
             AppendImuRow(rows, Imu(i));
         csv << rows << "0.0010000000474974 -0.2500000000";
     }
-    CHECK(sizeof(PointDLidar) == 32, "PointDLidar is %zu bytes", sizeof(PointDLidar));
+    CHECK(sizeof(PointDLidar) == 48 && sizeof(PointDLidarV1) == 32, "PointDLidar is %zu bytes", sizeof(PointDLidar));
 
     CHECK(RecoverInterruptedRecording(dir, false), "recovery");
     size_t rows = 0;
@@ -337,7 +381,7 @@ void TestLeftoverTempConverted()
     CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why) && rows == 10, "%s rows %zu", why.c_str(), rows);
     CHECK(fs::exists(JoinPath(dir, LazName(1))), "missing lidar0001.laz");
     CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left");
-    CheckLaz(dir, 25000);
+    CheckLaz(dir, 25000, !format1);
 
     // Nothing left to recover: a second start does nothing.
     CHECK(RecoverInterruptedRecording(dir, true), "second recovery");
@@ -366,7 +410,7 @@ void TestSessionNumbering()
     CHECK(ImuCsvName(2) == "imu0002.csv" && LazName(2) == "lidar0002.laz", "names");
 
     // A leftover temp file of session 4 is finalized in place as lidar0004.laz.
-    { std::ofstream bin(JoinPath(dir, PointsTempName(4)), std::ios::binary); PointDLidar p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
+    { std::ofstream bin(JoinPath(dir, PointsTempName(4)), std::ios::binary); WritePointsTempHeader(bin); PointDLidar p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
     CHECK(NextSessionIndex(dir) == 5, "next after leftover");
     CHECK(RecoverInterruptedRecording(dir, false), "recovery");
     CHECK(fs::exists(JoinPath(dir, LazName(4))), "no lidar0004.laz");
@@ -415,6 +459,157 @@ void TestTimingFiles()
           "recovered files");
     fs::remove_all(dir);
 }
+
+// The parser fills the format 2 fields with the values it used for the point,
+// and keeps the index of filtered points out of the others.
+void TestParseFillsExtraFields()
+{
+    printf("parse fills range, raw_range, sample_index, packet_seq, alpha, theta\n");
+    LidarPointDataPacket pkt{};
+    LidarPointData &d = pkt.data;
+    d.info.seq = 777;
+    d.info.stamp = TimeStamp{100, 0};
+    d.param.range_scale = 0.001f;
+    d.param.range_bias = 3.0f;
+    d.param.alpha_angle_bias = 0.01f;
+    d.param.theta_angle_bias = -0.02f;
+    d.range_min = 0;
+    d.range_max = 100;
+    d.angle_min = -0.5f;
+    d.angle_increment = 0.002f;
+    d.com_horizontal_angle_start = 1.0f;
+    d.com_horizontal_angle_step = 0.0003f;
+    d.time_increment = 7.7e-6f;
+    d.point_num = 300;
+    for (int j = 0; j < 300; j++)
+    {
+        d.ranges[j] = (uint16_t)(j % 7 == 0 ? 0 : 1000 + 10 * j); // every 7th point has no return
+        d.intensities[j] = (uint8_t)(j % 11 == 0 ? 2 : 100);      // every 11th is below the intensity floor
+    }
+    GetGlobalTimeOffsetNs() = 0;
+    PointCloudDLidar cloud;
+    parseFromPacketToPointCloud(cloud, pkt, 0.1f, 100, 5);
+    GetGlobalTimeOffsetNs() = 0;
+
+    size_t expected = 0;
+    for (int j = 0; j < 300; j++)
+        expected += j % 7 != 0 && j % 11 != 0;
+    CHECK(cloud.points.size() == expected, "%zu points, expected %zu", cloud.points.size(), expected);
+    float alpha = d.angle_min + d.param.alpha_angle_bias, theta = d.com_horizontal_angle_start + d.param.theta_angle_bias;
+    size_t k = 0;
+    for (int j = 0; j < 300 && k < cloud.points.size(); j++, alpha += d.angle_increment, theta += d.com_horizontal_angle_step)
+    {
+        if (j % 7 == 0 || j % 11 == 0)
+            continue;
+        const PointDLidar &p = cloud.points[k++];
+        float range = d.param.range_scale * ((float)d.ranges[j] + d.param.range_bias);
+        CHECK(p.sample_index == j && p.raw_range == d.ranges[j] && p.packet_seq == 777 && p.range == range &&
+                  p.alpha == alpha && p.theta == theta && p.ring == 1,
+              "point j=%d: index %u raw %u seq %u range %g alpha %g theta %g", j, p.sample_index, p.raw_range,
+              p.packet_seq, p.range, p.alpha, p.theta);
+        CHECK(p.time == (double)j * (double)d.time_increment, "point j=%d time %.12f", j, p.time);
+    }
+}
+
+// packetstateNNNN.tsv: header, one row per point packet with stamp_ns on the
+// recording zero, the received values, and recovery trims and moves it.
+void TestPacketStateFile()
+{
+    printf("packetstateNNNN.tsv written, trimmed and recovered\n");
+    std::string dir = MakeTempDir();
+    LidarPointData d{};
+    d.info.seq = 41;
+    d.info.stamp = TimeStamp{1791547057, 725000000};
+    d.state.apd_temperature = 41.25f;
+    d.state.sys_rotation_period = 180123;
+    d.param.range_scale = 0.001f;
+    d.param.beta_angle = 0.0123456789f;
+    d.time_increment = 7.732e-6f;
+    d.point_num = 300;
+    d.com_horizontal_angle_step = 2.7e-4f;
+    const int64_t zero = 1791547057721602864;
+    {
+        ContinuousDataWriter w;
+        CHECK(w.Open(dir), "open");
+        int64_t imu = 0, pts = 0;
+        SensorChunk c = Chunk(0, imu, pts, 10, 100);
+        c.zero_ns = zero;
+        for (int i = 0; i < 3; i++)
+        {
+            c.packet_states.push_back(MakePointPacketState(d));
+            d.info.seq++;
+        }
+        w.AppendChunk(c);
+        CHECK(w.CloseAndPackageLAZ(), "close");
+    }
+    std::string text = ReadFile(JoinPath(dir, PacketStateName(1)));
+    std::istringstream in(text);
+    std::string line;
+    std::getline(in, line);
+    CHECK(line + "\n" == kPacketStateHeader, "header");
+    std::vector<std::string> rows;
+    while (std::getline(in, line))
+        rows.push_back(line);
+    CHECK(rows.size() == 3, "%zu rows", rows.size());
+    if (rows.size() == 3)
+    {
+        std::vector<std::string> f;
+        std::istringstream fields(rows[2]);
+        for (std::string v; std::getline(fields, v, '\t');)
+            f.push_back(v);
+        CHECK(f.size() == 29, "%zu columns", f.size());
+        if (f.size() == 29)
+        {
+            int64_t l2 = 1791547057725000000LL;
+            CHECK(std::stoll(f[0]) == l2 - zero && std::stoll(f[1]) == l2, "stamps %s %s", f[0].c_str(), f[1].c_str());
+            CHECK(f[2] == "43" && f[3] == "300", "seq %s point_num %s", f[2].c_str(), f[3].c_str());
+            CHECK(std::stof(f[4]) == d.time_increment && std::stof(f[8]) == 41.25f && f[15] == "180123" &&
+                      std::stof(f[17]) == 0.001f && std::stof(f[23]) == d.param.beta_angle && std::stof(f[28]) == 2.7e-4f,
+                  "values %s %s %s %s %s %s", f[4].c_str(), f[8].c_str(), f[15].c_str(), f[17].c_str(), f[23].c_str(),
+                  f[28].c_str());
+        }
+    }
+    CHECK(NextSessionIndex(dir) == 2, "next session");
+
+    // Killed recording 2 with a partial packet state row.
+    {
+        std::ofstream(JoinPath(dir, PointsTempName(2)), std::ios::binary);
+        std::ofstream(JoinPath(dir, PacketStateName(2))) << kPacketStateHeader << "123\t456\t7";
+    }
+    CHECK(RecoverInterruptedRecording(dir, true), "recovery");
+    fs::path recovered;
+    for (const auto &e : fs::directory_iterator(dir))
+        if (e.is_directory())
+            recovered = e.path();
+    CHECK(!recovered.empty() && ReadFile((recovered / PacketStateName(2)).string()) == kPacketStateHeader,
+          "packet state not trimmed/moved");
+    // No file of a recording may look like a point cloud or IMU file to dMapper.
+    for (const auto &e : fs::directory_iterator(dir))
+    {
+        std::string ext = e.path().extension().string();
+        std::string stem = e.path().stem().string();
+        bool ours = stem.rfind("imu", 0) == 0 || stem.rfind("lidar", 0) == 0;
+        CHECK(ours || (ext != ".csv" && ext != ".las" && ext != ".laz"), "unexpected %s", e.path().c_str());
+    }
+    fs::remove_all(dir);
+}
+
+// The recording keys go at the top of timingNNNN.json, the existing keys stay.
+void TestRecordingInfo()
+{
+    printf("timingNNNN.json gets the recording keys\n");
+    RecordingInfo info;
+    info.lidar_firmware_version = "2.3.\"4\"";
+    info.sdk_version = "2.0.4";
+    info.work_mode = 0;
+    std::string report = "{\n  \"format_version\": 1,\n  \"imu_time_source\": \"sensor\"\n}\n";
+    std::string j = AddRecordingInfo(report, info);
+    CHECK(j.find("\"recording_format_version\": 2,") != std::string::npos, "%s", j.c_str());
+    CHECK(j.find("\"lidar_firmware_version\": \"2.3.\\\"4\\\"\",") != std::string::npos, "%s", j.c_str());
+    CHECK(j.find("\"lidar_hardware_version\": \"unknown\",") != std::string::npos, "%s", j.c_str());
+    CHECK(j.find("\"work_mode\": 0,") != std::string::npos, "%s", j.c_str());
+    CHECK(j.find("\"format_version\": 1,\n  \"imu_time_source\": \"sensor\"\n}\n") != std::string::npos, "%s", j.c_str());
+}
 } // namespace
 
 int main()
@@ -423,9 +618,13 @@ int main()
     TestKilledMidWrite();
     TestCrashTruncatesCsv();
     TestSigintFinalizes();
-    TestLeftoverTempConverted();
+    TestLeftoverTempConverted(true);
+    TestLeftoverTempConverted(false);
     TestSessionNumbering();
     TestTimingFiles();
+    TestParseFillsExtraFields();
+    TestPacketStateFile();
+    TestRecordingInfo();
     printf(g_failures ? "Data writer: %d checks FAILED\n" : "Data writer: all checks passed\n", g_failures);
     return g_failures ? 1 : 0;
 }

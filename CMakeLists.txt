@@ -39,3 +39,9 @@ add_test(NAME time_alignment COMMAND test_time_alignment)
 # Replays a recording's packetsNNNN.bin through the IMU timestamping.
 add_executable(replay_packets tools/replay_packets.cpp)
 target_compile_options(replay_packets PRIVATE -O2)
+
+# Replays a recording's packetsNNNN.bin with synthetic packet contents into a
+# new recording (tools/compare_recording_formats.sh compares formats with it).
+add_executable(replay_capture tools/replay_capture.cpp)
+target_compile_options(replay_capture PRIVATE -O2)
+target_link_libraries(replay_capture laszip)

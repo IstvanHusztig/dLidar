@@ -2,6 +2,7 @@
 
 #include "unitree_lidar_utilities.h"
 #include "time_alignment.h"
+#include "packet_state.h"
 
 #include <time.h>
 #include <vector>
@@ -69,6 +70,7 @@ public:
         const LidarPointData &data = packet.data;
         int64_t stamp = StampToNs(data.info.stamp);
         log_.push_back({now.mono_ns, now.unix_ns, stamp, data.info.seq, kPacketTypePoints, data.time_increment, data.point_num});
+        packet_states_.push_back(MakePointPacketState(data));
         if (data.point_num == 0)
             return;
 
@@ -89,10 +91,18 @@ public:
         log_.clear();
     }
 
+    // Moves the point packet states collected since the last call into `out`.
+    void TakePacketStates(std::vector<PointPacketState> &out)
+    {
+        out.insert(out.end(), packet_states_.begin(), packet_states_.end());
+        packet_states_.clear();
+    }
+
     const ImuTimeline &Timeline() const { return timeline_; }
 
 private:
     ImuTimeline timeline_;
     PointCloudDLidar cloud_;
     std::vector<PacketTiming> log_;
+    std::vector<PointPacketState> packet_states_;
 };

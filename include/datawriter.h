@@ -2,6 +2,7 @@
 
 #include "unitree_lidar_sdk.h"
 #include "time_alignment.h"
+#include "packet_state.h"
 #include "shutdown.h"
 #include <dll/laszip_api.h>
 #include <string>
@@ -22,11 +23,19 @@
 
 using namespace unitree_lidar_sdk;
 
+// Version of what a recording contains (docs/l2-recording-format.md). Written
+// to timingNNNN.json and the LAZ generating_software. 1: everything before
+// the LAZ extra bytes; 2: LAZ extra bytes, packetstateNNNN.tsv, sensor
+// versions in timingNNNN.json.
+const int kRecordingFormatVersion = 2;
+
 // Files of a recording inside the output directory.
 // Every recording takes the next free session number N, so its files group:
 // imuNNNN.csv, lidarNNNN.laz, timingNNNN.json (how the times were made),
-// packetsNNNN.bin (arrival and L2 stamp of every packet, for replay) and,
-// while recording, points_tempNNNN.bin.
+// packetsNNNN.bin (arrival and L2 stamp of every packet, for replay),
+// packetstateNNNN.tsv (state and calibration of every point packet) and,
+// while recording, points_tempNNNN.bin. dMapper reads every .csv/.las/.laz
+// in the directory, so no other file may use those extensions.
 const char *const kImuCsvPrefix = "imu";
 const char *const kImuCsvSuffix = ".csv";
 const char *const kLazPrefix = "lidar";
@@ -37,6 +46,8 @@ const char *const kTimingPrefix = "timing";
 const char *const kTimingSuffix = ".json";
 const char *const kPacketLogPrefix = "packets"; // kPacketLogMagic, then PacketTiming records
 const char *const kPacketLogSuffix = ".bin";
+const char *const kPacketStatePrefix = "packetstate"; // kPacketStateHeader, then one row per point packet
+const char *const kPacketStateSuffix = ".tsv";
 const char *const kImuCsvHeader = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
 struct SensorChunk
@@ -45,8 +56,45 @@ struct SensorChunk
     std::vector<PointDLidar> points;
     std::vector<OutputImuData> imu_data;
     std::vector<PacketTiming> packets; // timing of the packets of this chunk
+    std::vector<PointPacketState> packet_states; // the point packets of this chunk
+    int64_t zero_ns = 0;               // GetGlobalTimeOffsetNs(), for packetstate stamp_ns
     std::string timing_report;         // if set, (re)written as timingNNNN.json
 };
+
+// Sensor and software versions of a recording, added to timingNNNN.json.
+struct RecordingInfo
+{
+    std::string lidar_firmware_version = "unknown";
+    std::string lidar_hardware_version = "unknown";
+    std::string sdk_version = "unknown";
+    int64_t work_mode = -1;
+};
+
+inline std::string JsonEscape(const std::string &v)
+{
+    std::string e;
+    for (char ch : v)
+    {
+        if (ch == '"' || ch == '\\')
+            e += '\\';
+        if ((unsigned char)ch >= 0x20)
+            e += ch;
+    }
+    return e;
+}
+
+// Adds the recording keys at the top of a timing report ("{\n...}").
+inline std::string AddRecordingInfo(const std::string &report, const RecordingInfo &info)
+{
+    if (report.compare(0, 2, "{\n") != 0)
+        return report;
+    std::string keys = "  \"recording_format_version\": " + std::to_string(kRecordingFormatVersion) + ",\n" +
+                       "  \"lidar_firmware_version\": \"" + JsonEscape(info.lidar_firmware_version) + "\",\n" +
+                       "  \"lidar_hardware_version\": \"" + JsonEscape(info.lidar_hardware_version) + "\",\n" +
+                       "  \"sdk_version\": \"" + JsonEscape(info.sdk_version) + "\",\n" +
+                       "  \"work_mode\": " + std::to_string(info.work_mode) + ",\n";
+    return "{\n" + keys + report.substr(2);
+}
 
 inline std::string JoinPath(const std::string &dir, const std::string &name)
 {
@@ -64,6 +112,7 @@ inline std::string LazName(int index) { return SessionFileName(kLazPrefix, index
 inline std::string PointsTempName(int index) { return SessionFileName(kPointsTempPrefix, index, kPointsTempSuffix); }
 inline std::string TimingName(int index) { return SessionFileName(kTimingPrefix, index, kTimingSuffix); }
 inline std::string PacketLogName(int index) { return SessionFileName(kPacketLogPrefix, index, kPacketLogSuffix); }
+inline std::string PacketStateName(int index) { return SessionFileName(kPacketStatePrefix, index, kPacketStateSuffix); }
 
 // The session number in `name` if it is exactly prefix + 4 digits + suffix, else 0.
 inline int ParseSessionIndex(const std::string &name, const char *prefix, const char *suffix)
@@ -94,7 +143,8 @@ inline int NextSessionIndex(const std::string &dir)
                             ParseSessionIndex(name, kLazPrefix, kLazSuffix),
                             ParseSessionIndex(name, kPointsTempPrefix, kPointsTempSuffix),
                             ParseSessionIndex(name, kTimingPrefix, kTimingSuffix),
-                            ParseSessionIndex(name, kPacketLogPrefix, kPacketLogSuffix)});
+                            ParseSessionIndex(name, kPacketLogPrefix, kPacketLogSuffix),
+                            ParseSessionIndex(name, kPacketStatePrefix, kPacketStateSuffix)});
     }
     return highest + 1;
 }
@@ -143,9 +193,10 @@ inline bool WriteAll(int fd, const char *data, size_t size)
     return true;
 }
 
-// Cuts a CSV back to its last complete line (a crash or power loss can leave
-// a partial one). Returns the number of bytes removed, or -1 on error.
-inline int64_t TrimPartialCsvLine(const std::string &csv_path)
+// Cuts a text file back to its last complete line (a crash or power loss can
+// leave a partial one); an empty result gets `header`. Returns the number of
+// bytes removed, or -1 on error.
+inline int64_t TrimPartialLine(const std::string &csv_path, const char *header)
 {
     int fd = open(csv_path.c_str(), O_RDWR | O_CLOEXEC);
     if (fd < 0)
@@ -181,27 +232,154 @@ inline int64_t TrimPartialCsvLine(const std::string &csv_path)
     int64_t removed = st.st_size - keep;
     bool ok = removed == 0 || ftruncate(fd, keep) == 0;
     if (ok && keep == 0)
-        ok = WriteAll(fd, kImuCsvHeader, strlen(kImuCsvHeader));
+        ok = WriteAll(fd, header, strlen(header));
     close(fd);
     return ok ? removed : -1;
 }
 
+inline int64_t TrimPartialCsvLine(const std::string &csv_path) { return TrimPartialLine(csv_path, kImuCsvHeader); }
+
+// points_tempNNNN.bin since recording format 2: kPointsTempMagic, the record
+// size (uint32) and 4 reserved bytes, then PointDLidar records. A temp file
+// without the magic is from an older build: bare 32-byte PointDLidarV1 records.
+const char kPointsTempMagic[8] = {'d', 'L', 'p', 't', 's', 'v', '2', '\n'};
+const uint64_t kPointsTempHeaderSize = 16;
+static_assert(sizeof(PointDLidar) == 48, "points temp record layout (format 2)");
+
+// The point record of format 1 temp files.
+struct PointDLidarV1
+{
+    float x;
+    float y;
+    float z;
+    float intensity;
+    double time;
+    uint32_t ring;
+};
+static_assert(sizeof(PointDLidarV1) == 32, "points temp record layout (format 1)");
+
+struct PointsTempLayout
+{
+    bool extra = true;        // format 2 records, with the extra-bytes fields
+    uint64_t data_offset = 0; // first record
+    size_t record_size = sizeof(PointDLidar);
+};
+
+inline void WritePointsTempHeader(std::ostream &out)
+{
+    char header[kPointsTempHeaderSize] = {};
+    memcpy(header, kPointsTempMagic, sizeof kPointsTempMagic);
+    uint32_t record_size = sizeof(PointDLidar);
+    memcpy(header + 8, &record_size, sizeof record_size);
+    out.write(header, sizeof header);
+}
+
+// Layout of a points temp file of `bytes` bytes. A file shorter than the
+// header that starts like it was cut while writing the header: no points.
+inline bool DetectPointsTempLayout(std::ifstream &in, uint64_t bytes, PointsTempLayout &layout)
+{
+    char header[kPointsTempHeaderSize] = {};
+    size_t n = (size_t)std::min<uint64_t>(bytes, kPointsTempHeaderSize);
+    in.clear();
+    in.seekg(0);
+    if (n > 0 && !in.read(header, (std::streamsize)n))
+        return false;
+    size_t m = std::min(n, sizeof kPointsTempMagic);
+    if (memcmp(header, kPointsTempMagic, m) == 0 && (n == kPointsTempHeaderSize || n == bytes))
+    {
+        layout.extra = true;
+        layout.data_offset = std::min<uint64_t>(bytes, kPointsTempHeaderSize);
+        uint32_t record_size = sizeof(PointDLidar);
+        if (n == kPointsTempHeaderSize)
+            memcpy(&record_size, header + 8, sizeof record_size);
+        if (record_size != sizeof(PointDLidar))
+        {
+            std::cerr << "Error: points temp file has " << record_size << "-byte records, this build reads "
+                      << sizeof(PointDLidar) << "." << std::endl;
+            return false;
+        }
+        layout.record_size = record_size;
+        return true;
+    }
+    layout.extra = false;
+    layout.data_offset = 0;
+    layout.record_size = sizeof(PointDLidarV1);
+    return true;
+}
+
+// Reads `n` records of `layout` into `out` (format 1 records get zero extra fields).
+inline bool ReadPointsTempRecords(std::ifstream &in, const PointsTempLayout &layout, size_t n, PointDLidar *out,
+                                  std::vector<PointDLidarV1> &v1)
+{
+    if (layout.extra)
+        return (bool)in.read(reinterpret_cast<char *>(out), (std::streamsize)(n * sizeof(PointDLidar)));
+    v1.resize(n);
+    if (!in.read(reinterpret_cast<char *>(v1.data()), (std::streamsize)(n * sizeof(PointDLidarV1))))
+        return false;
+    for (size_t i = 0; i < n; i++)
+    {
+        PointDLidar p{};
+        p.x = v1[i].x;
+        p.y = v1[i].y;
+        p.z = v1[i].z;
+        p.intensity = v1[i].intensity;
+        p.time = v1[i].time;
+        p.ring = v1[i].ring;
+        out[i] = p;
+    }
+    return true;
+}
+
+// The LAZ extra bytes of recording format 2, in record order. LASzip writes
+// the standard Extra Bytes VLR; readers that don't know them see the plain
+// LAS 1.2 / point format 1 fields unchanged. Names and descriptions are at
+// most 31 characters.
+struct LazExtraAttribute
+{
+    laszip_U32 type; // LASzip attribute type: 2 = uint16, 4 = uint32, 8 = float32
+    const char *name;
+    const char *description;
+};
+const LazExtraAttribute kLazExtraAttributes[] = {
+    {8, "range", "range_scale*(raw+bias) [m]"},
+    {2, "raw_range", "range as sent by the L2 [mm]"},
+    {2, "sample_index", "index of point in packet"},
+    {4, "packet_seq", "point packet info.seq"},
+    {8, "alpha", "alpha scan angle incl bias, rad"},
+    {8, "theta", "theta scan angle incl bias, rad"},
+};
+const laszip_U16 kLazExtraBytes = 20;
+
+inline void PackLazExtraBytes(const PointDLidar &pt, laszip_U8 *out)
+{
+    memcpy(out + 0, &pt.range, 4);
+    memcpy(out + 4, &pt.raw_range, 2);
+    memcpy(out + 6, &pt.sample_index, 2);
+    memcpy(out + 8, &pt.packet_seq, 4);
+    memcpy(out + 12, &pt.alpha, 4);
+    memcpy(out + 16, &pt.theta, 4);
+}
+
 // Encodes `count` points starting at record `first` of the temp file into a
-// LAS 1.2 / point format 1 LAZ file. The header needs the bounds before any
-// point is written, so the range is read twice.
-inline bool WriteLazChunk(std::ifstream &in, uint64_t first, uint64_t count, const std::string &laz_path)
+// LAS 1.2 / point format 1 LAZ file, with the format 2 extra bytes if the
+// temp file has them. The header needs the bounds before any point is
+// written, so the range is read twice.
+inline bool WriteLazChunk(std::ifstream &in, const PointsTempLayout &layout, uint64_t first, uint64_t count,
+                          const std::string &laz_path)
 {
     const size_t kBlock = 65536;
     std::vector<PointDLidar> block(kBlock);
+    std::vector<PointDLidarV1> v1;
+    const std::streamoff start = (std::streamoff)(layout.data_offset + first * layout.record_size);
 
     double min_x = std::numeric_limits<double>::max(), max_x = std::numeric_limits<double>::lowest();
     double min_y = min_x, max_y = max_x, min_z = min_x, max_z = max_x;
     in.clear();
-    in.seekg((std::streamoff)(first * sizeof(PointDLidar)));
+    in.seekg(start);
     for (uint64_t done = 0; done < count;)
     {
         size_t n = (size_t)std::min<uint64_t>(kBlock, count - done);
-        if (!in.read(reinterpret_cast<char *>(block.data()), n * sizeof(PointDLidar)))
+        if (!ReadPointsTempRecords(in, layout, n, block.data(), v1))
             return false;
         for (size_t i = 0; i < n; i++)
         {
@@ -248,6 +426,24 @@ inline bool WriteLazChunk(std::ifstream &in, uint64_t first, uint64_t count, con
     header->max_z = max_z;
     header->min_z = min_z;
 
+    if (layout.extra)
+    {
+        for (const LazExtraAttribute &a : kLazExtraAttributes)
+        {
+            if (laszip_add_attribute(laszip_writer, a.type, a.name, a.description, 1.0, 0.0))
+            {
+                std::cerr << "DLL ERROR: adding extra bytes attribute " << a.name << "\n";
+                laszip_destroy(laszip_writer);
+                return false;
+            }
+        }
+        header->point_data_record_length = 28 + kLazExtraBytes;
+        memset(header->generating_software, 0, sizeof header->generating_software);
+        snprintf(header->generating_software, sizeof header->generating_software, "dLidar recording format %d",
+                 kRecordingFormatVersion);
+        laszip_preserve_generating_software(laszip_writer, 1);
+    }
+
     if (laszip_open_writer(laszip_writer, laz_path.c_str(), 1))
     {
         std::cerr << "DLL ERROR: opening laszip writer for " << laz_path << "\n";
@@ -257,14 +453,20 @@ inline bool WriteLazChunk(std::ifstream &in, uint64_t first, uint64_t count, con
 
     laszip_point *laszipPoint;
     bool ok = !laszip_get_point_pointer(laszip_writer, &laszipPoint);
+    if (ok && layout.extra && laszipPoint->num_extra_bytes != kLazExtraBytes)
+    {
+        std::cerr << "DLL ERROR: LAZ point has " << laszipPoint->num_extra_bytes << " extra bytes, expected "
+                  << kLazExtraBytes << "\n";
+        ok = false;
+    }
 
     in.clear();
-    in.seekg((std::streamoff)(first * sizeof(PointDLidar)));
+    in.seekg(start);
     laszip_F64 coordinates[3];
     for (uint64_t done = 0; ok && done < count;)
     {
         size_t n = (size_t)std::min<uint64_t>(kBlock, count - done);
-        if (!in.read(reinterpret_cast<char *>(block.data()), n * sizeof(PointDLidar)))
+        if (!ReadPointsTempRecords(in, layout, n, block.data(), v1))
         {
             ok = false;
             break;
@@ -275,6 +477,8 @@ inline bool WriteLazChunk(std::ifstream &in, uint64_t first, uint64_t count, con
             laszipPoint->intensity = pt.intensity;
             laszipPoint->gps_time = pt.time;
             laszipPoint->user_data = pt.ring;
+            if (layout.extra)
+                PackLazExtraBytes(pt, laszipPoint->extra_bytes);
 
             coordinates[0] = pt.x;
             coordinates[1] = pt.y;
@@ -312,12 +516,6 @@ inline bool FinalizePointsTemp(const std::string &temp_path, const std::string &
         std::cerr << "Error: cannot read " << temp_path << ": " << ec.message() << std::endl;
         return false;
     }
-    uint64_t total = bytes / sizeof(PointDLidar);
-    if (bytes % sizeof(PointDLidar))
-    {
-        std::cerr << "WARNING: ignoring " << bytes % sizeof(PointDLidar)
-                  << " trailing bytes (partial point) in " << temp_path << std::endl;
-    }
 
     std::ifstream in(temp_path, std::ios::in | std::ios::binary);
     if (!in.is_open())
@@ -325,11 +523,26 @@ inline bool FinalizePointsTemp(const std::string &temp_path, const std::string &
         std::cerr << "Error: cannot open " << temp_path << std::endl;
         return false;
     }
+    PointsTempLayout layout;
+    if (!DetectPointsTempLayout(in, bytes, layout))
+    {
+        std::cerr << "Error: cannot read the header of " << temp_path << std::endl;
+        return false;
+    }
+    if (!layout.extra)
+        std::cout << temp_path << " is from an older dLidar (recording format 1): no extra bytes in the LAZ." << std::endl;
+
+    uint64_t total = (bytes - layout.data_offset) / layout.record_size;
+    if ((bytes - layout.data_offset) % layout.record_size)
+    {
+        std::cerr << "WARNING: ignoring " << (bytes - layout.data_offset) % layout.record_size
+                  << " trailing bytes (partial point) in " << temp_path << std::endl;
+    }
 
     std::string laz_path = JoinPath(out_dir, LazName(index));
     std::string part_path = laz_path + ".tmp";
     std::cout << "Packaging " << total << " points into " << laz_path << " ..." << std::endl;
-    if (!WriteLazChunk(in, 0, total, part_path))
+    if (!WriteLazChunk(in, layout, 0, total, part_path))
     {
         std::cerr << "Error: packaging " << laz_path << " failed; " << temp_path
                   << " is kept and will be finalized on the next start." << std::endl;
@@ -348,8 +561,9 @@ inline bool FinalizePointsTemp(const std::string &temp_path, const std::string &
     return true;
 }
 
-// Finalizes one unfinished recording (session `index`): trims the IMU CSV to
-// its last complete row and converts the points temp file into lidarNNNN.laz.
+// Finalizes one unfinished recording (session `index`): trims the IMU CSV and
+// the packet state TSV to their last complete rows and converts the points
+// temp file into lidarNNNN.laz.
 // With move_aside both go into a recovered_<time> subdirectory.
 inline bool RecoverSession(const std::string &dir, int index, bool move_aside)
 {
@@ -369,6 +583,9 @@ inline bool RecoverSession(const std::string &dir, int index, bool move_aside)
         else if (removed > 0)
             std::cout << "Removed a partial last row (" << removed << " bytes) from " << csv_path << std::endl;
     }
+    std::string state_path = JoinPath(dir, PacketStateName(index));
+    if (access(state_path.c_str(), F_OK) == 0 && TrimPartialLine(state_path, kPacketStateHeader) < 0)
+        std::cerr << "WARNING: could not check " << state_path << " for a partial last row." << std::endl;
 
     std::string target = dir;
     if (move_aside)
@@ -388,7 +605,7 @@ inline bool RecoverSession(const std::string &dir, int index, bool move_aside)
             std::cerr << "Error: cannot create " << target << ": " << ec.message() << std::endl;
             return false;
         }
-        for (const std::string &name : {ImuCsvName(index), TimingName(index), PacketLogName(index)})
+        for (const std::string &name : {ImuCsvName(index), TimingName(index), PacketLogName(index), PacketStateName(index)})
         {
             std::string from = JoinPath(dir, name);
             if (access(from.c_str(), F_OK) != 0)
@@ -431,6 +648,7 @@ private:
     int64_t csv_committed = 0; // size after the last complete row
     std::ofstream bin_file;
     std::ofstream packet_file;
+    std::ofstream state_file;
 
     uint64_t total_points = 0;
 
@@ -487,6 +705,8 @@ public:
             std::cerr << "Error: Could not open temporary binary file.\n";
             return false;
         }
+        WritePointsTempHeader(bin_file);
+        bin_file.flush();
 
         // 3. Packet timing log (diagnostics only; a failure is not fatal)
         packet_file.open(JoinPath(dir, PacketLogName(session)), std::ios::out | std::ios::binary | std::ios::trunc);
@@ -494,6 +714,16 @@ public:
             packet_file.write(kPacketLogMagic, sizeof kPacketLogMagic);
         else
             std::cerr << "WARNING: could not open " << PacketLogName(session) << ", packet timing not logged." << std::endl;
+
+        // 4. Point packet state and calibration (not fatal either)
+        state_file.open(JoinPath(dir, PacketStateName(session)), std::ios::out | std::ios::binary | std::ios::trunc);
+        if (state_file.is_open())
+        {
+            state_file << kPacketStateHeader;
+            state_file.flush();
+        }
+        else
+            std::cerr << "WARNING: could not open " << PacketStateName(session) << ", packet state not logged." << std::endl;
 
         return true;
     }
@@ -527,6 +757,16 @@ public:
         }
         if (!chunk.timing_report.empty())
             WriteTimingReport(chunk.timing_report);
+
+        if (state_file.is_open() && !chunk.packet_states.empty())
+        {
+            std::string rows;
+            rows.reserve(chunk.packet_states.size() * 320);
+            for (const PointPacketState &st : chunk.packet_states)
+                AppendPacketStateRow(rows, st, chunk.zero_ns);
+            state_file.write(rows.data(), (std::streamsize)rows.size());
+            state_file.flush();
+        }
 
         // Stream IMU Data
         if (csv_fd >= 0 && !chunk.imu_data.empty())
@@ -603,6 +843,8 @@ public:
             bin_file.close();
         if (packet_file.is_open())
             packet_file.close();
+        if (state_file.is_open())
+            state_file.close();
 
         std::cout << "\nTimestamp check: " << non_increasing_imu << " non-increasing IMU timestamps, "
                   << decreasing_points << " backward point times." << std::endl;

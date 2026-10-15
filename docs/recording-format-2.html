@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dLidar Recording Format 2</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1d1f21; --muted: #5c6166; --line: #dcdfe2;
+    --card: #ffffff; --accent: #1f6feb; --code-bg: #f1f3f5; --ok: #1a7f37; --warn: #9a6700;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171a; --fg: #e6e8ea; --muted: #9aa1a8; --line: #2c3036;
+      --card: #1c1f23; --accent: #6ea8fe; --code-bg: #23272d; --ok: #4ac26b; --warn: #d29922;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171a; --fg: #e6e8ea; --muted: #9aa1a8; --line: #2c3036;
+    --card: #1c1f23; --accent: #6ea8fe; --code-bg: #23272d; --ok: #4ac26b; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.3rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+  p, li { max-width: 72ch; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td code { white-space: nowrap; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 12px 0; }
+  .card.rule { border-left: 4px solid var(--accent); }
+  .card.caveat { border-left: 4px solid var(--warn); }
+  .ok { color: var(--ok); font-weight: 600; }
+  ul { padding-left: 22px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>dLidar recording format 2</h1>
+  <p class="sub">What changed in dLidar's Unitree L2 recordings, so dMapper can later add an intensity normalization (range and incidence-angle correction). The full field reference is <code>docs/l2-recording-format.md</code>.</p>
+
+  <div class="card rule">
+    <strong>This change only adds data.</strong> Every format 1 field keeps its value, type and position. The IMU CSV is byte-identical. No new file in a recording folder ends in <code>.csv</code>, <code>.las</code> or <code>.laz</code>. Today's dMapper therefore reads a format 2 recording exactly as it read a format 1 recording.
+  </div>
+
+  <h2>Summary of changes</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Where</th><th>Change</th></tr>
+    <tr><td><code>lidarNNNN.laz</code></td><td>Six per-point attributes in LAS extra bytes. The record grows from 28 to 48 bytes; it stays LAS 1.2, point format 1. <code>generating_software</code> becomes <code>dLidar recording format 2</code>.</td></tr>
+    <tr><td><code>packetstateNNNN.tsv</code></td><td>New file: one row per point packet with the sensor state, calibration and angle parameters as received.</td></tr>
+    <tr><td><code>timingNNNN.json</code></td><td>New keys: <code>recording_format_version</code>, <code>lidar_firmware_version</code>, <code>lidar_hardware_version</code>, <code>sdk_version</code>, <code>work_mode</code>. Existing keys unchanged.</td></tr>
+    <tr><td><code>points_tempNNNN.bin</code></td><td>A 16-byte header and 48-byte records. Header-less temp files from older builds are still recovered.</td></tr>
+    <tr><td><code>imuNNNN.csv</code>, <code>packetsNNNN.bin</code></td><td>Unchanged.</td></tr>
+  </table></div>
+
+  <h2>LAZ: what stays the same</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Field</th><th>Value (formats 1 and 2)</th></tr>
+    <tr><td>Version / point format</td><td>LAS 1.2 / 1</td></tr>
+    <tr><td>Scale / offset</td><td>0.0001 / 0 on all axes</td></tr>
+    <tr><td><code>number_of_point_records</code></td><td>Filled (legacy 32-bit count)</td></tr>
+    <tr><td>X, Y, Z</td><td>The L2 sensor frame with the vertical-mount remap (+X front, +Y left, +Z up). No mounting transform.</td></tr>
+    <tr><td><code>gps_time</code></td><td>Seconds since the L2 stamp of the first point packet. Same clock and zero as the IMU <code>timestamp</code> (ns).</td></tr>
+    <tr><td><code>intensity</code></td><td>The raw 0–255 byte, not scaled</td></tr>
+    <tr><td><code>user_data</code></td><td>Always 1</td></tr>
+    <tr><td>classification, point_source_ID, return_number, scan angle</td><td>Always 0</td></tr>
+    <tr><td>Which points are written</td><td>Unchanged filters: no return, outside the packet's range limits, range &lt; 0.1 m or &gt; 100 m, intensity &lt; 5</td></tr>
+  </table></div>
+
+  <h2>LAZ: new extra bytes</h2>
+  <p>The attributes are stored after the 28 standard bytes, in this order, and are described by the standard Extra Bytes VLR. Scale is 1 and offset is 0 for every attribute, so the stored numbers are in the units shown.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Name</th><th>Type</th><th>Byte</th><th>Unit</th><th>Meaning</th></tr>
+    <tr><td><code>range</code></td><td>float32</td><td>0</td><td>m</td><td><code>range_scale * (ranges[j] + range_bias)</code>, the exact float the parser used for xyz</td></tr>
+    <tr><td><code>raw_range</code></td><td>uint16</td><td>4</td><td>mm</td><td><code>ranges[j]</code> as sent by the L2</td></tr>
+    <tr><td><code>sample_index</code></td><td>uint16</td><td>6</td><td>–</td><td><code>j</code>, the point's index in its packet (0..299). Filtered points leave gaps.</td></tr>
+    <tr><td><code>packet_seq</code></td><td>uint32</td><td>8</td><td>–</td><td>The packet's <code>info.seq</code> (wraps at 1024 on the L2)</td></tr>
+    <tr><td><code>alpha</code></td><td>float32</td><td>12</td><td>rad</td><td>The alpha angle used for the point, bias included, accumulated as in the parser</td></tr>
+    <tr><td><code>theta</code></td><td>float32</td><td>16</td><td>rad</td><td>The theta angle used for the point, bias included, accumulated as in the parser. Not wrapped to [0, 2π).</td></tr>
+  </table></div>
+  <h3>Using them</h3>
+  <ul>
+    <li><strong>Beam direction:</strong> computed from <code>alpha</code>, <code>theta</code> and the packet's <code>beta_angle</code>, <code>xi_angle</code>, <code>a_axis_dist</code> and <code>b_axis_dist</code> (from <code>packetstateNNNN.tsv</code>), using the sensor-model formula in <code>docs/l2-recording-format.md</code>. <code>|xyz|</code> differs from <code>range</code> by at most <code>hypot(a_axis_dist, b_axis_dist)</code>.</li>
+    <li><strong>Finding a point's packet row:</strong> points are written packet by packet. A new packet starts where <code>packet_seq</code> changes or <code>sample_index</code> does not increase. With that row, <code>gps_time = stamp_ns/1e9 + sample_index · time_increment</code> holds exactly.</li>
+  </ul>
+
+  <h2>New file: <code>packetstateNNNN.tsv</code></h2>
+  <p>Tab-separated with one header line. It has one row per point packet received while recording, in arrival order, including packets that yielded no point. Floats have 9 significant digits, which gives back the float32 exactly. A partial last row from a crash is trimmed on recovery.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Column</th><th>Unit</th><th>Meaning</th></tr>
+    <tr><td><code>stamp_ns</code></td><td>ns</td><td>The packet stamp minus the recording zero (the LAZ/IMU zero). It is the time of the packet's first point.</td></tr>
+    <tr><td><code>l2_stamp_ns</code></td><td>ns</td><td>Absolute L2 stamp. <code>stamp_ns = l2_stamp_ns − zero_l2_ns</code></td></tr>
+    <tr><td><code>seq</code>, <code>point_num</code></td><td>–</td><td>Packet sequence id (= <code>packet_seq</code>) and point count. A seq step of n &gt; 1 (mod 1024) means n−1 lost packets.</td></tr>
+    <tr><td><code>time_increment</code>, <code>scan_period</code></td><td>s</td><td>Time between points; scan period as sent</td></tr>
+    <tr><td><code>range_min</code>, <code>range_max</code></td><td>m</td><td>The packet's valid range limits</td></tr>
+    <tr><td><code>apd_temperature</code>, <code>imu_temperature</code></td><td>undocumented (°C likely)</td><td>Sensor state</td></tr>
+    <tr><td><code>apd_voltage</code>, <code>laser_voltage</code></td><td>undocumented (V likely)</td><td>Sensor state</td></tr>
+    <tr><td><code>dirty_index</code>, <code>packet_lost_up</code>, <code>packet_lost_down</code></td><td>undocumented</td><td>Sensor state</td></tr>
+    <tr><td><code>sys_rotation_period</code>, <code>com_rotation_period</code></td><td>undocumented</td><td>Motor rotation periods</td></tr>
+    <tr><td><code>range_scale</code>, <code>range_bias</code></td><td>1, mm</td><td>Range calibration</td></tr>
+    <tr><td><code>a_axis_dist</code>, <code>b_axis_dist</code></td><td>m</td><td>Sensor-model axis offsets</td></tr>
+    <tr><td><code>theta_angle_bias</code>, <code>alpha_angle_bias</code>, <code>beta_angle</code>, <code>xi_angle</code></td><td>rad</td><td>Angle calibration</td></tr>
+    <tr><td><code>angle_min</code>, <code>angle_increment</code></td><td>rad</td><td>Alpha of the first sample and its per-sample step</td></tr>
+    <tr><td><code>com_horizontal_angle_start</code>, <code>com_horizontal_angle_step</code></td><td>rad</td><td>Theta of the first sample and its per-sample step</td></tr>
+  </table></div>
+  <p class="sub">Units marked "likely" are guesses from the field names; Unitree documents none of them.</p>
+
+  <h2>New keys in <code>timingNNNN.json</code></h2>
+  <div class="table-wrap"><table>
+    <tr><th>Key</th><th>Value</th></tr>
+    <tr><td><code>recording_format_version</code></td><td>2. A file without this key is format 1.</td></tr>
+    <tr><td><code>lidar_firmware_version</code></td><td>From the L2 (waits up to 3 s before recording), else <code>"unknown"</code></td></tr>
+    <tr><td><code>lidar_hardware_version</code></td><td>From the L2 (waits up to 1 s), else <code>"unknown"</code></td></tr>
+    <tr><td><code>sdk_version</code></td><td>Unitree SDK version (2.0.4)</td></tr>
+    <tr><td><code>work_mode</code></td><td>The value sent with <code>setLidarWorkMode</code> (0)</td></tr>
+  </table></div>
+
+  <h2>Crash recovery</h2>
+  <p><code>points_tempNNNN.bin</code> now starts with the magic <code>dLptsv2\n</code>, the record size as uint32 (48) and 4 reserved bytes. A temp file without the magic comes from an older build: bare 32-byte records. It is still recovered, into a format 1 LAZ without extra bytes. Recovery also trims <code>packetstateNNNN.tsv</code> and moves it to <code>recovered_&lt;time&gt;/</code> with the rest of the recording.</p>
+
+  <h2>Verification</h2>
+  <p>The sensor was not reachable, so the same packets were replayed through the previous code (commit <code>d68191b</code>) and the new code. The replay used the real packet sequence of recording 0001 (L2 stamps, seq, host arrival times, <code>time_increment</code>) with synthetic packet contents. Over 190 s and 11 286 510 points, checked with laspy 2.7:</p>
+  <div class="table-wrap"><table>
+    <tr><th>Check</th><th>Result</th></tr>
+    <tr><td>Point count, legacy count, scale, offset, bounds</td><td class="ok">identical</td></tr>
+    <tr><td>X/Y/Z, <code>gps_time</code>, <code>intensity</code>, <code>user_data</code>, all other standard fields</td><td class="ok">identical point for point</td></tr>
+    <tr><td><code>imu0001.csv</code>, <code>packets0001.bin</code></td><td class="ok">byte-identical</td></tr>
+    <tr><td>Existing <code>timing0001.json</code> keys</td><td class="ok">same values</td></tr>
+    <tr><td>New <code>.csv</code>/<code>.las</code>/<code>.laz</code> files</td><td class="ok">none</td></tr>
+    <tr><td>Extra bytes names and types in laspy</td><td class="ok">as documented</td></tr>
+    <tr><td><code>|xyz| − range</code></td><td class="ok">−0.00008 … 0.0076 m (axis-offset bound 0.0079 m)</td></tr>
+    <tr><td><code>range = range_scale·(raw_range + range_bias)</code></td><td class="ok">exact</td></tr>
+    <tr><td><code>sample_index</code></td><td class="ok">0..299</td></tr>
+    <tr><td><code>packet_seq</code> and <code>gps_time</code> vs the point's sidecar row</td><td class="ok">exact for every point</td></tr>
+    <tr><td>Sidecar rows vs point packets; seq gaps vs packet log</td><td class="ok">38 400 = 38 400; 18 gaps match</td></tr>
+    <tr><td>Unit tests (<code>ctest</code>)</td><td class="ok">3 / 3 pass</td></tr>
+  </table></div>
+  <p>Sample folders for a bit-identical dMapper run (30 s, same packets, synthetic stationary scene):
+    <code>/home/vs2022/dLidar_format_samples/format1_old/</code> and <code>/home/vs2022/dLidar_format_samples/format2_new/</code>.</p>
+
+  <h3>Repeating the check</h3>
+  <p>Run <code>tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</code> (defaults: <code>d68191b</code>, <code>~/PointCloudDump/packets0001.bin</code>, the whole log, a temp directory). It builds <code>tools/replay_capture.cpp</code> against the old commit and against the working tree, replays the same packets through both, and runs <code>tools/verify_recording_format.py</code>. Set <code>PYTHON</code> to an interpreter that has <code>laspy[lazrs]</code> and numpy. <code>bin/replay_capture packetsNNNN.bin out_dir [seconds]</code> writes a single replayed recording.</p>
+
+  <h2>Known differences and limits</h2>
+  <div class="card caveat">
+    <ul>
+      <li><strong>Header differences that dMapper doesn't read:</strong> record length (48), <code>generating_software</code>, the Extra Bytes VLR, and the offset to the point data.</li>
+      <li><strong>LAZ size grows about 2.4×</strong> (46 MB to 109 MB for 190 s), because the float extra bytes compress poorly.</li>
+      <li><strong>laspy returns integer attributes as floats.</strong> LASzip always sets the scale/offset option bits, so laspy returns <code>raw_range</code>, <code>sample_index</code> and <code>packet_seq</code> as floats with the same values.</li>
+      <li><strong>The firmware and hardware version query has not been tested on a real L2.</strong></li>
+      <li><strong>The live capture loop was not exercised.</strong> Chunk assembly moved into <code>ChunkAssembler</code>, which the replay exercises. The live <code>ProcessSensorData</code> loop was only compiled.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

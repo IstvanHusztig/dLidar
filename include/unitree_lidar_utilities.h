@@ -88,6 +88,8 @@ namespace unitree_lidar_sdk
 
     /*
      * @brief Point Type DLidar
+     * The fields from `range` on were added in recording format 2
+     * (docs/l2-recording-format.md); they go into the LAZ extra bytes.
      */
     typedef struct
     {
@@ -97,6 +99,12 @@ namespace unitree_lidar_sdk
         float intensity;
         double time;
         uint32_t ring;
+        float range;           // m, range_scale * (ranges[j] + range_bias)
+        float alpha;           // rad, the alpha angle used for the point (bias included)
+        float theta;           // rad, the theta angle used for the point (bias included)
+        uint32_t packet_seq;   // the packet's info.seq
+        uint16_t raw_range;    // mm, ranges[j] as sent
+        uint16_t sample_index; // j, index of the point in its packet
     } PointDLidar;
 
     /**
@@ -321,6 +329,13 @@ namespace unitree_lidar_sdk
             point3d.intensity = intensities[j];
 
             point3d.time = packet_base_time + (double)j * (double)time_step;
+
+            point3d.range = range_float;
+            point3d.alpha = alpha_cur;
+            point3d.theta = theta_cur;
+            point3d.packet_seq = packet.data.info.seq;
+            point3d.raw_range = ranges[j];
+            point3d.sample_index = (uint16_t)j;
 
             cloudOut.points.push_back(point3d);
         }

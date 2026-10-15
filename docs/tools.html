@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dLidar Tools</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1d1f21; --muted: #5c6166; --line: #dcdfe2;
+    --card: #ffffff; --accent: #1f6feb; --code-bg: #f1f3f5; --warn: #9a6700;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171a; --fg: #e6e8ea; --muted: #9aa1a8; --line: #2c3036;
+      --card: #1c1f23; --accent: #6ea8fe; --code-bg: #23272d; --warn: #d29922;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171a; --fg: #e6e8ea; --muted: #9aa1a8; --line: #2c3036;
+    --card: #1c1f23; --accent: #6ea8fe; --code-bg: #23272d; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.3rem; margin: 44px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.02rem; margin: 22px 0 8px; }
+  p, li { max-width: 72ch; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 10px 0; }
+  pre code { background: none; padding: 0; font-size: 0.86rem; line-height: 1.5; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td code { white-space: nowrap; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  .card.caveat { border-left: 4px solid var(--warn); }
+  .tag { display: inline-block; font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; margin-left: 6px; vertical-align: middle; font-weight: 500; }
+  nav ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>dLidar tools</h1>
+  <p class="sub">Offline helpers in <code>tools/</code>. None of them needs the sensor. Build the C++ tools with <code>cmake --build build</code>; they end up in <code>bin/</code>.</p>
+
+  <nav><ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#compare">compare_recording_formats.sh</a></li>
+    <li><a href="#replay-capture">replay_capture</a></li>
+    <li><a href="#verify">verify_recording_format.py</a></li>
+    <li><a href="#replay-packets">replay_packets</a></li>
+    <li><a href="#check-imu">check_imu_timestamps.py</a></li>
+    <li><a href="#repair-imu">repair_imu_timestamps.py</a></li>
+  </ul></nav>
+
+  <h2 id="overview">Overview</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Tool</th><th>Use it to</th><th>Input</th><th>Writes</th></tr>
+    <tr><td><code>tools/compare_recording_formats.sh</code></td><td>Prove that a recording format change keeps the standard content identical</td><td><code>packetsNNNN.bin</code>, a git revision</td><td>two recordings + a pass/fail report</td></tr>
+    <tr><td><code>bin/replay_capture</code></td><td>Produce a recording from a packet log without the sensor</td><td><code>packetsNNNN.bin</code></td><td>a full recording</td></tr>
+    <tr><td><code>tools/verify_recording_format.py</code></td><td>Compare an old-format and a new-format recording of the same packets</td><td>two recording folders</td><td>report only</td></tr>
+    <tr><td><code>bin/replay_packets</code></td><td>Re-run the IMU time alignment on a recording's packet timing</td><td><code>packetsNNNN.bin</code></td><td>report only</td></tr>
+    <tr><td><code>tools/check_imu_timestamps.py</code></td><td>Check the order and rate of IMU timestamps</td><td><code>imuNNNN.csv</code></td><td>report only</td></tr>
+    <tr><td><code>tools/repair_imu_timestamps.py</code></td><td>Fix the IMU timestamps of recordings made before the timestamp fix</td><td>old <code>imu*.csv</code></td><td>a new CSV</td></tr>
+  </table></div>
+
+  <h2 id="compare">compare_recording_formats.sh <span class="tag">shell</span></h2>
+  <p>Replays the same packets through an older dLidar commit and the working tree. It then checks that the standard recording content is identical and the newer additions are consistent. Run it after any change to what a recording contains. The rule is that changes only add data and dMapper must read new recordings exactly as old ones.</p>
+  <pre><code>cmake --build build                      # LASzip is linked from build/3rd/lib
+tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</code></pre>
+  <div class="table-wrap"><table>
+    <tr><th>Argument</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>OLD_REV</code></td><td><code>d68191b</code></td><td>The commit whose <code>include/</code> writes the reference recording (<code>d68191b</code> is the last recording format 1 commit)</td></tr>
+    <tr><td><code>PACKETS_BIN</code></td><td><code>~/PointCloudDump/packets0001.bin</code></td><td>The packet timing log to replay</td></tr>
+    <tr><td><code>SECONDS</code></td><td>whole log</td><td>Replay only the first N seconds. The 800-chunk capture limit still applies.</td></tr>
+    <tr><td><code>OUT_DIR</code></td><td>a new temp directory</td><td>Gets <code>old/</code>, <code>new/</code>, <code>old.log</code> and <code>new.log</code>. <code>old/</code> and <code>new/</code> must be empty.</td></tr>
+    <tr><td><code>PYTHON</code> (env)</td><td><code>python3</code></td><td>An interpreter with <code>laspy[lazrs]</code> and numpy</td></tr>
+  </table></div>
+  <p>The script:</p>
+  <ol>
+    <li>Extracts <code>include/</code> of <code>OLD_REV</code> with <code>git archive</code> into a temp directory.</li>
+    <li>Builds <code>tools/replay_capture.cpp</code> twice, against the old headers and against the working tree.</li>
+    <li>Replays the packet log through both into <code>OUT_DIR/old</code> and <code>OUT_DIR/new</code>.</li>
+    <li>Runs <code>tools/verify_recording_format.py</code> on the two folders and exits with its status.</li>
+  </ol>
+  <pre><code>python3 -m venv ~/venv-laspy &amp;&amp; ~/venv-laspy/bin/pip install "laspy[lazrs]" numpy
+PYTHON=~/venv-laspy/bin/python tools/compare_recording_formats.sh d68191b ~/PointCloudDump/packets0001.bin 30</code></pre>
+
+  <h2 id="replay-capture">replay_capture <span class="tag">C++</span></h2>
+  <p>Replays the packet sequence of a recording's <code>packetsNNNN.bin</code> into a new recording, without the sensor. The input is the L2 stamps, seq, host arrival times, <code>time_increment</code> and <code>point_num</code>. The output goes through the real capture code: <code>CaptureTiming</code>, <code>ChunkAssembler</code> and <code>ContinuousDataWriter</code>.</p>
+  <pre><code>bin/replay_capture ~/PointCloudDump/packets0001.bin OUT_DIR [SECONDS]</code></pre>
+  <ul>
+    <li><code>OUT_DIR</code> must exist. The recording takes the next free session number in it, as a real capture does.</li>
+    <li>The packet log holds only timing, so <strong>packet contents are synthetic</strong>. The rays of the L2 sensor model, with the same formula as the parser, hit a box room around a stationary sensor. Ranges carry ±3 mm of noise and 2 % have no return. Intensity depends on wall reflectivity, incidence and range. The IMU is at rest (1 g on +Z). Calibration and state values are fixed plausible numbers.</li>
+    <li>Everything is deterministic. Host times come from the log, so two builds fed the same log write byte-identical files wherever their formats agree.</li>
+    <li>The output is not a measurement: odometry on it gives a stationary trajectory. Use it for format and pipeline checks, not for tuning.</li>
+    <li>Built against an older commit's headers (no <code>packet_state.h</code>), it mirrors that commit's <code>ProcessSensorData</code> loop. The compare script relies on this.</li>
+  </ul>
+
+  <h2 id="verify">verify_recording_format.py <span class="tag">Python</span></h2>
+  <p>Compares a format 1 and a format 2 recording made from the same packets. Each folder must hold one recording with session number 0001, as the compare script produces.</p>
+  <pre><code>python3 tools/verify_recording_format.py OLD_DIR NEW_DIR</code></pre>
+  <p>It needs laspy with a LAZ backend (<code>pip install "laspy[lazrs]" numpy</code>). It prints one PASS/FAIL line per check, ends with <code>ALL PASSED</code>, and exits non-zero if any check fails.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Group</th><th>Checks</th></tr>
+    <tr><td>Same standard content</td><td>LAS 1.2 / format 1; same scale, offset, bounds and point count; the legacy count is filled. X/Y/Z, <code>gps_time</code>, <code>intensity</code>, <code>user_data</code>, classification, returns, point source, scan angle and flags are identical point for point. <code>user_data</code> is 1. <code>imu0001.csv</code> and <code>packets0001.bin</code> are byte-identical. Every old <code>timing0001.json</code> key keeps its value. No new <code>.csv</code>/<code>.las</code>/<code>.laz</code> file.</td></tr>
+    <tr><td>Extra bytes</td><td>Names and types are <code>range</code>, <code>raw_range</code>, <code>sample_index</code>, <code>packet_seq</code>, <code>alpha</code>, <code>theta</code>. <code>|xyz| − range</code> is within the a/b axis offsets. <code>sample_index</code> is in 0..299. <code>range</code> equals <code>range_scale·(raw_range+range_bias)</code> in float32.</td></tr>
+    <tr><td>Sidecar</td><td>One <code>packetstate0001.tsv</code> row per point packet in <code>packets0001.bin</code>, with the same seq and stamp. <code>stamp_ns = l2_stamp_ns − zero_l2_ns</code>. Each point's <code>packet_seq</code> and <code>gps_time</code> match its packet row exactly. The seq gaps match the packet log.</td></tr>
+  </table></div>
+
+  <h2 id="replay-packets">replay_packets <span class="tag">C++</span></h2>
+  <p>Replays a recording's packet timing log through the IMU timestamping: <code>ImuTimeline</code> in auto, sensor and host_aligned mode, and the old host-stamped method.</p>
+  <pre><code>bin/replay_packets ~/PointCloudDump/packets0001.bin [imu_offset_ns]</code></pre>
+  <p>It prints the auto-mode timing report (as in <code>timingNNNN.json</code>). For every 60 s it also prints how far the host_aligned fallback and the old method are from the L2 IMU stamps. See <code>docs/imu_lidar_time_alignment.md</code>.</p>
+
+  <h2 id="check-imu">check_imu_timestamps.py <span class="tag">Python</span></h2>
+  <p>Reports the row count, time span, rate, non-increasing <code>timestamp</code>/<code>timestampUnix</code> steps, and the median, minimum and maximum spacing of an IMU CSV.</p>
+  <pre><code>python3 tools/check_imu_timestamps.py ~/PointCloudDump/imu0001.csv</code></pre>
+
+  <h2 id="repair-imu">repair_imu_timestamps.py <span class="tag">Python</span></h2>
+  <p>Rewrites the timestamps of an <code>imu*.csv</code> recorded before the IMU timestamp fix. The measurement columns are copied unchanged, and the original file is never modified.</p>
+  <pre><code>python3 tools/repair_imu_timestamps.py OLD.csv [-o OUT.csv] [--mode anchored|uniform] [--force]</code></pre>
+  <ul>
+    <li><code>anchored</code> (default): keeps each batch's first real sensor stamp and spreads the batch's samples evenly up to the next one. It falls back to <code>uniform</code> if the anchors don't increase.</li>
+    <li><code>uniform</code>: keeps the first and last value and spaces all rows evenly between them.</li>
+    <li>It only evens out the spacing. The IMU stays on the host clock, so the 50–80 ms lag of those old recordings remains.</li>
+  </ul>
+  <div class="card caveat">
+    The default output is <code>&lt;input&gt;_fixed.csv</code>, next to the input. dMapper reads <strong>every</strong> <code>.csv</code> in a recording folder, so write the output elsewhere with <code>-o</code>, or move the original out, before running dMapper on that folder.
+  </div>
+</main>
+</body>
+</html>
