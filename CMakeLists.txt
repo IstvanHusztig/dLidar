@@ -36,6 +36,12 @@ set_target_properties(test_time_alignment PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${
 target_compile_options(test_time_alignment PRIVATE -O2)
 add_test(NAME time_alignment COMMAND test_time_alignment)
 
+# dLidar's points vs the vendor SDK's own conversion (loopback UDP, ports 16101/16201).
+add_executable(test_sdk_conversion tests/test_sdk_conversion.cpp)
+set_target_properties(test_sdk_conversion PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_sdk_conversion ${PROJECT_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR}/libunitree_lidar_sdk.a pthread)
+add_test(NAME sdk_conversion COMMAND test_sdk_conversion)
+
 # Replays a recording's packetsNNNN.bin through the IMU timestamping.
 add_executable(replay_packets tools/replay_packets.cpp)
 target_compile_options(replay_packets PRIVATE -O2)
