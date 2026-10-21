@@ -54,6 +54,13 @@ add_executable(replay_capture tools/replay_capture.cpp)
 target_compile_options(replay_capture PRIVATE -O2)
 target_link_libraries(replay_capture laszip)
 
+# Domain unit tests (src/domain only).
+foreach(t axis_map point_filter)
+add_executable(test_${t} tests/domain/test_${t}.cpp)
+set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+add_test(NAME ${t} COMMAND test_${t})
+endforeach()
+
 # Layer dependency rule (docs/architecture.md); --self-test checks the checker.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
