@@ -219,7 +219,7 @@ private:
 
 void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &timing_config, uint32_t work_mode)
 {
-	const int target_chunks = 800; // ~1 min of data at 20 Hz, 18 scans per chunk
+	const int target_chunks = 200; // ~1 min of data at 20 Hz, 18 scans per chunk
 
 	std::queue<SensorChunk> chunk_queue;
 	std::mutex queue_mutex;
