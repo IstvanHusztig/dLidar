@@ -5,10 +5,13 @@
 // Prints the auto-mode timing report (as in timingNNNN.json) and, per 60 s,
 // how far the fallback (host_aligned) and the old host-stamped method are
 // from the L2 IMU stamps. No sensor needed.
-#include "packet_replay.h"
+#include "adapters/storage/packet_log.h"
+#include "application/analysis/packet_timing_replay.h"
 
 #include <cstdlib>
 #include <iostream>
+
+using namespace dlidar;
 
 int main(int argc, char *argv[])
 {

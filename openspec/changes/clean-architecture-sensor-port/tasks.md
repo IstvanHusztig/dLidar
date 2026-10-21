@@ -50,8 +50,8 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 8. Enforce the boundaries
 
-- [ ] 8.1 Create CMake targets `dlidar_core` (include path `src/` only), `dlidar_l2` and `dlidar_storage`; delete `include/`; verify the core tests build in a target without the vendor or `3rd/` include paths
-- [ ] 8.2 Switch `check_architecture.py` to strict mode; verify ctest `architecture` passes and the 2.2 negative check still fails as expected
+- [x] 8.1 Create CMake targets `dlidar_core` (include path `src/` only), `dlidar_l2` and `dlidar_storage`; delete `include/`; verify the core tests build in a target without the vendor or `3rd/` include paths
+- [x] 8.2 Switch `check_architecture.py` to strict mode; verify ctest `architecture` passes and the 2.2 negative check still fails as expected
 - [ ] 8.3 Update `tools/compare_recording_formats.sh` for the new layout (build the old revision in a worktree like `golden_replay.sh`); verify it runs against `d68191b` and `verify_recording_format.py` passes
 
 ## 9. Documentation

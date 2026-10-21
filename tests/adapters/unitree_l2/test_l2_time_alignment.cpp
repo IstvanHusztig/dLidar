@@ -15,11 +15,13 @@
 // times, timestampUnix - timestamp constant. The old host-stamped method is
 // replayed on the same data to show the lag it produced.
 #include "l2_feed.h"
-#include "packet_replay.h"
+#include "application/analysis/packet_timing_replay.h"
+#include "adapters/storage/packet_log.h"
 
 using namespace unitree_lidar_sdk;
-using dlidar::HostTime;
+using namespace dlidar;
 using PointDLidar = dlidar::PointRecord;
+using OutputImuData = dlidar::ImuSample;
 
 #include <cstdio>
 #include <functional>

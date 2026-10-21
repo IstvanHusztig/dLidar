@@ -1,7 +1,9 @@
 #pragma once
 
-#include "time_alignment.h"
-#include "adapters/storage/packet_log.h"
+#include "domain/recording/imu_sample.h"
+#include "domain/recording/packet_timing.h"
+#include "domain/timing/imu_timestamper.h"
+#include "domain/timing/time_alignment.h"
 
 #include <cstdio>
 #include <fstream>
@@ -10,6 +12,8 @@
 #include <string>
 #include <vector>
 
+namespace dlidar
+{
 // Replays the packet timing log of a recording (packetsNNNN.bin) through the
 // IMU timestamping: ImuTimeline in auto, sensor and host_aligned mode, and the
 // old method (ImuTimestamper on the host Unix arrival time, as before the
@@ -17,7 +21,6 @@
 // difference of each method from the L2 IMU stamps (the sensor mode).
 // Only the timing is logged, so IMU values are zero.
 
-using dlidar::ReadPacketLog;
 
 struct ReplaySegment
 {
@@ -49,9 +52,9 @@ inline ReplayResult ReplayPackets(const std::vector<PacketTiming> &packets, int6
 
     // Written times by packet seq (the replay has no other sample identity).
     std::map<uint32_t, int64_t> t_sensor, t_host, t_old;
-    std::vector<OutputImuData> out;
+    std::vector<ImuSample> out;
     auto collect = [&](std::map<uint32_t, int64_t> &into) {
-        for (const OutputImuData &s : out)
+        for (const ImuSample &s : out)
             into[(uint32_t)s.ImuId] = s.LidarTimestamp;
         out.clear();
     };
@@ -157,3 +160,5 @@ inline void PrintReplay(const ReplayResult &r, std::ostream &os)
         os << line;
     }
 }
+
+} // namespace dlidar

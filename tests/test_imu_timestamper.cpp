@@ -6,7 +6,7 @@
 //   - after the first 2 s, |t_k - true_k| < 0.2 ms
 //   - every step within T +- 2% (across real drops: missing samples * T)
 //   - strictly increasing, never later than arrival, never negative
-#include "imu_timestamper.h"
+#include "domain/timing/imu_timestamper.h"
 
 #include <cstdio>
 #include <functional>
@@ -14,6 +14,9 @@
 #include <random>
 #include <string>
 #include <vector>
+
+using dlidar::ImuTimestamper;
+using OutputImuData = dlidar::ImuSample;
 
 namespace
 {
