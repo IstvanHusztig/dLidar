@@ -1,5 +1,5 @@
-// IMU / LiDAR time alignment, driven through CaptureTiming (the same code as
-// the capture loop) with synthetic L2 packets.
+// IMU / LiDAR time alignment, driven through the L2 adapter (UnitreeL2Sensor)
+// and CaptureTiming (the same code as the capture loop) with synthetic L2 packets.
 //
 // A simulated L2 has its own clock: L2(tau) = l2_0 + tau * (1 + kL2RatePpm),
 // the host has CLOCK_MONOTONIC = mono_0 + tau and CLOCK_REALTIME = unix_0 + tau,
@@ -14,14 +14,19 @@
 // below 1 ms everywhere over 10 minutes, no drift, strictly increasing IMU
 // times, timestampUnix - timestamp constant. The old host-stamped method is
 // replayed on the same data to show the lag it produced.
-#include "capture_timing.h"
+#include "l2_feed.h"
 #include "packet_replay.h"
+
+using namespace unitree_lidar_sdk;
+using dlidar::HostTime;
+using PointDLidar = dlidar::PointRecord;
 
 #include <cstdio>
 #include <functional>
 #include <random>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 namespace
 {
@@ -209,7 +214,7 @@ Result Run(const Sim &sim, ImuTimeline::Mode mode, std::vector<PacketTiming> *lo
     cfg.mode = mode;
     cfg.log = false;
     cfg.host.log = false;
-    CaptureTiming timing(cfg);
+    dlidar::test::L2Feed timing(cfg);
     ImuTimestamper old_method(cfg.host); // IMU stamped with host Unix arrival, as before
     std::vector<OutputImuData> imu_out, old_out;
     std::vector<PointDLidar> points_out;
@@ -313,7 +318,7 @@ void TestPacketConversion()
     ImuTimeline::Config cfg;
     cfg.mode = ImuTimeline::Mode::Sensor;
     cfg.log = false;
-    CaptureTiming timing(cfg);
+    dlidar::test::L2Feed timing(cfg);
     std::vector<OutputImuData> imu;
     std::vector<PointDLidar> pts;
 

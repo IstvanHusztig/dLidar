@@ -8,7 +8,8 @@
 # Defaults: OLD_REV d68191b (last recording format 1 commit),
 # PACKETS_BIN ~/PointCloudDump/packets0001.bin, SECONDS 1e9 (whole log, up to
 # the 800-chunk limit), OUT_DIR a new temp directory. Writes OUT_DIR/old and
-# OUT_DIR/new. Run `cmake --build build` first (for LASzip). Set PYTHON to an
+# OUT_DIR/new. Configure build/ first (cmake --preset ninja; LASzip and the
+# working-tree replay come from it). Set PYTHON to an
 # interpreter that has laspy[lazrs] and numpy (default python3).
 set -euo pipefail
 
@@ -30,13 +31,13 @@ fi
 git -C "$repo" archive "$old_rev" include | tar -x -C "$work/old"
 
 laszip_lib="$repo/build/3rd/lib"
-build() { # include_dirs output
-    g++ -O2 -std=c++17 -ffp-contract=off $1 -I"$repo/3rd/include" -I"$repo/3rd" "$repo/tools/replay_capture.cpp" \
-        -L"$laszip_lib" -llaszip -Wl,-rpath,"$laszip_lib" -o "$2"
-}
-echo "building replay against $old_rev and the working tree ..."
-build "-I$work/old/include" "$work/replay_old"
-build "-I$repo/include -I$repo/src" "$work/replay_new"
+echo "building the format 1 replay against $old_rev and bin/replay_capture of the working tree ..."
+# tools/replay_capture_format1.cpp is frozen and compiles against an old
+# revision's header-only include/ (it mirrors that revision's capture loop).
+g++ -O2 -std=c++17 -ffp-contract=off -I"$work/old/include" -I"$repo/3rd/include" -I"$repo/3rd" \
+    "$repo/tools/replay_capture_format1.cpp" -L"$laszip_lib" -llaszip -Wl,-rpath,"$laszip_lib" -o "$work/replay_old"
+cmake --build "$repo/build" --target replay_capture > /dev/null
+cp "$repo/bin/replay_capture" "$work/replay_new"
 
 echo "replaying $packets ($seconds s) ..."
 "$work/replay_old" "$packets" "$out/old" "$seconds" > "$out/old.log" 2>&1

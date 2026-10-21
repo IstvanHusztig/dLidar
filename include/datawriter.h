@@ -1,10 +1,9 @@
 #pragma once
 
-#include "unitree_lidar_sdk.h"
 #include "domain/recording/recording_info.h"
 #include "domain/recording/sensor_chunk.h"
 #include "time_alignment.h"
-#include "packet_state.h"
+#include "adapters/unitree_l2/l2_packet_state.h" // kPacketStateHeader, until the storage gets it from the sensor
 #include "shutdown.h"
 #include <dll/laszip_api.h>
 #include <string>
@@ -24,7 +23,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-using namespace unitree_lidar_sdk;
+using PointDLidar = dlidar::PointRecord;
+using dlidar::l2::kPacketStateHeader;
 
 
 // Files of a recording inside the output directory.

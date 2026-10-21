@@ -30,11 +30,11 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 5. Sensor port and Unitree L2 adapter
 
-- [ ] 5.1 Define `src/application/ports/lidar_sensor.h` (design D3) and `stop_token.h`; add `tests/application/fake_sensor.h` (a scripted sensor with no L2 code); verify a test runs `CaptureTiming`/`ChunkAssembler` from `FakeSensor` only
-- [ ] 5.2 Create `src/adapters/unitree_l2/`: `L2PacketSource` (live `UnitreeLidarReader`, which stamps host time right after `runParse()`), `l2_conversion` (dLidar parts of `unitree_lidar_utilities.h`), `l2_packet_state` (header + `TakeRows(zero)`), and `UnitreeL2Sensor` (`Prepare` = restart, dirty/time-delay prints, version queries, 2 s drain; `Stop`; cached `LensDirtiness`); verify the build passes and `test_sdk_conversion` passes against the adapter
-- [ ] 5.3 Move the vendor headers into `src/adapters/unitree_l2/vendor/`; reduce `unitree_lidar_utilities.h` to vendor content; verify `test_sdk_conversion` passes (the prebuilt `.a` still links and agrees)
-- [ ] 5.4 Add `SyntheticL2Source` (packet synthesis moved from `tools/replay_capture.cpp`, logged host times); verify golden is identical when `replay_capture` uses it
-- [ ] 5.5 Move the L2 conversion tests out of `test_time_alignment.cpp` into `tests/adapters/unitree_l2/`; make the remaining time-alignment tests sensor-neutral (`FakeSensor`); verify all pass and coverage is the same (same scenario list)
+- [x] 5.1 Define `src/application/ports/lidar_sensor.h` (design D3) and `stop_token.h`; add `tests/application/fake_sensor.h` (a scripted sensor with no L2 code); verify a test runs `CaptureTiming`/`ChunkAssembler` from `FakeSensor` only
+- [x] 5.2 Create `src/adapters/unitree_l2/`: `L2PacketSource` (live `UnitreeLidarReader`, which stamps host time right after `runParse()`), `l2_conversion` (dLidar parts of `unitree_lidar_utilities.h`), `l2_packet_state` (header + `TakeRows(zero)`), and `UnitreeL2Sensor` (`Prepare` = restart, dirty/time-delay prints, version queries, 2 s drain; `Stop`; cached `LensDirtiness`); verify the build passes and `test_sdk_conversion` passes against the adapter
+- [x] 5.3 Move the vendor headers into `src/adapters/unitree_l2/vendor/`; reduce `unitree_lidar_utilities.h` to vendor content; verify `test_sdk_conversion` passes (the prebuilt `.a` still links and agrees)
+- [x] 5.4 Add `SyntheticL2Source` (packet synthesis moved from `tools/replay_capture.cpp`, logged host times); verify golden is identical when `replay_capture` uses it
+- [x] 5.5 Move the L2 tests to `tests/adapters/unitree_l2/` (`test_l2_time_alignment.cpp`, `test_sdk_conversion.cpp`, `test_l2_conversion.cpp`), driven through `UnitreeL2Sensor` with a queued packet source (`l2_feed.h`); the 10-minute L2 clock simulation stays an L2 test because it models the L2 specifically, and sensor independence is proven by the `FakeSensor` tests (`tests/application/`); verify all pass with the same scenario list
 
 ## 6. Storage port and adapter
 

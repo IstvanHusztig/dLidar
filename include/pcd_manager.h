@@ -1,7 +1,9 @@
 #pragma once
 
 #include "datawriter.h"
-#include "capture_timing.h"
+#include "application/capture/chunk_assembler.h"
+#include "application/ports/lidar_sensor.h"
+#include "application/ports/stop_token.h"
 
 #include <thread>
 #include <mutex>
@@ -11,29 +13,23 @@
 #include <chrono>
 #include <unistd.h>
 
-using namespace unitree_lidar_sdk;
-
-void PrintDirtyPercentage(UnitreeLidarReader *lreader)
-{
-	float dirtyPercentage;
-	while (!lreader->getDirtyPercentage(dirtyPercentage))
-	{
-		lreader->runParse();
-	}
-	printf("dirty percentage = %f %%\n", dirtyPercentage);
-	sleep(1);
-}
+using dlidar::CaptureSetup;
+using dlidar::ChunkAssembler;
+using dlidar::LidarSensor;
+using dlidar::PacketKind;
+using dlidar::Polled;
+using dlidar::StopToken;
 
 // Lens dirtiness above which we warn during capture. A dirty lens
 // attenuates/scatters returns and quietly degrades the whole run
 // (fogging, dust - relevant for handheld cave/outdoor use).
 const float kDirtyPercentageWarnThreshold = 5.0f;
 
-// Non-blocking: reuses whatever dirty_index was cached from the most
+// Non-blocking: reuses whatever dirtiness the sensor cached from the most
 // recently parsed packet, so it is safe to call every loop iteration
 // without consuming extra data. Warns at most once per interval so a
 // persistently dirty lens doesn't spam the console.
-void CheckDirtyPercentage(UnitreeLidarReader *lreader)
+void CheckDirtyPercentage(LidarSensor &sensor)
 {
 	static auto last_check = std::chrono::steady_clock::now() - std::chrono::seconds(10);
 	auto now = std::chrono::steady_clock::now();
@@ -43,84 +39,19 @@ void CheckDirtyPercentage(UnitreeLidarReader *lreader)
 	}
 	last_check = now;
 
-	float dirtyPercentage;
-	if (lreader->getDirtyPercentage(dirtyPercentage) && dirtyPercentage > kDirtyPercentageWarnThreshold)
+	std::optional<float> dirtyPercentage = sensor.LensDirtiness();
+	if (dirtyPercentage && *dirtyPercentage > kDirtyPercentageWarnThreshold)
 	{
-		std::cerr << "WARNING: lens dirty percentage = " << dirtyPercentage
+		std::cerr << "WARNING: lens dirty percentage = " << *dirtyPercentage
 				  << " % (threshold " << kDirtyPercentageWarnThreshold
 				  << " %) - clean the sensor housing, points may be degraded." << std::endl;
 	}
-}
-
-void PrintTimeDelay(UnitreeLidarReader *lreader)
-{
-	double timeDelay;
-	while (!lreader->getTimeDelay(timeDelay))
-	{
-		lreader->runParse();
-	}
-	printf("time delay (second) = %f\n", timeDelay);
-	sleep(1);
-}
-
-void RestartLidar(UnitreeLidarReader *lreader)
-{
-	std::cout << "stop lidar rotation ..." << std::endl;
-	lreader->stopLidarRotation();
-	sleep(3);
-
-	std::cout << "start lidar rotation ..." << std::endl;
-	lreader->startLidarRotation();
-	sleep(3);
 }
 
 std::string OutputDirectory()
 {
 	const char *linuxUser = getenv("USER");
 	return std::string("/home/") + (linuxUser ? linuxUser : "") + "/PointCloudDump/";
-}
-
-// The SDK buffers packets while nothing reads them (lidar restart, the
-// status queries above). Reading those out now instead of sleeping keeps a
-// burst of stale packets (late arrivals) out of the recording.
-void DrainPendingPackets(UnitreeLidarReader *lreader, std::chrono::milliseconds duration)
-{
-	auto until = std::chrono::steady_clock::now() + duration;
-	while (std::chrono::steady_clock::now() < until && !StopRequested())
-	{
-		lreader->runParse();
-	}
-}
-
-// Calls `get` (a getVersionOf... of the reader) while parsing packets, for at
-// most `timeout`. The SDK fills the version from the L2's version packet.
-template <typename Get>
-std::string QueryVersion(UnitreeLidarReader *lreader, Get get, std::chrono::milliseconds timeout)
-{
-	std::string version;
-	auto until = std::chrono::steady_clock::now() + timeout;
-	while (!get(version))
-	{
-		if (std::chrono::steady_clock::now() >= until || StopRequested())
-			return "unknown";
-		lreader->runParse();
-	}
-	return version;
-}
-
-RecordingInfo QueryRecordingInfo(UnitreeLidarReader *lreader, uint32_t work_mode)
-{
-	RecordingInfo info;
-	info.work_mode = work_mode;
-	info.lidar_firmware_version = QueryVersion(lreader, [&](std::string &v) { return lreader->getVersionOfLidarFirmware(v); },
-											   std::chrono::seconds(3));
-	info.lidar_hardware_version = QueryVersion(lreader, [&](std::string &v) { return lreader->getVersionOfLidarHardware(v); },
-											   std::chrono::seconds(1));
-	if (!lreader->getVersionOfSDK(info.sdk_version))
-		info.sdk_version = unitree_lidar_sdk_VERSION;
-	std::cout << "L2 firmware " << info.lidar_firmware_version << ", hardware " << info.lidar_hardware_version
-			  << ", SDK " << info.sdk_version << ", work mode " << work_mode << std::endl;
-	return info;
 }
 
 void PrintTimingSummary(const ImuTimeline &timeline)
@@ -143,84 +74,10 @@ void PrintTimingSummary(const ImuTimeline &timeline)
 	}
 }
 
-// Collects the parsed packets of a recording into SensorChunks for the writer:
-// a chunk is ready once it holds kMaxPointsPerChunk points. Used by the
-// capture loop and by replays of synthetic packets.
-class ChunkAssembler
+void ProcessSensorData(LidarSensor &sensor, const ImuTimeline::Config &timing_config, const CaptureSetup &setup,
+					   const StopToken &stop, int target_chunks = 200)
 {
-public:
-	static const int kMaxPointsPerChunk = 14000;
-
-	ChunkAssembler(const ImuTimeline::Config &config, const RecordingInfo &info, const CaptureSetup &setup = CaptureSetup())
-		: timing_(config, setup), info_(info)
-	{
-		Reserve();
-	}
-
-	void OnImu(const LidarImuData &imu, HostTime now) { timing_.OnImu(imu, now, imu_); }
-	void OnPoints(const LidarPointDataPacket &packet, HostTime now) { timing_.OnPoints(packet, now, points_, imu_); }
-
-	bool ChunkReady() const { return points_.size() >= kMaxPointsPerChunk; }
-	int ChunksProduced() const { return chunks_produced_; }
-	const ImuTimeline &Timeline() const { return timing_.Timeline(); }
-
-	SensorChunk TakeChunk()
-	{
-		chunks_produced_++;
-		SensorChunk chunk = Collect(chunks_produced_);
-		if (!decision_reported_ && timing_.Timeline().Decided())
-		{
-			// Written early as well, so a killed recording still says how its times were made.
-			chunk.timing_report = AddRecordingInfo(timing_.Timeline().Report(), info_);
-			decision_reported_ = true;
-		}
-		Reserve();
-		return chunk;
-	}
-
-	// Auto mode holds the first ~2 s of IMU samples until it has checked the
-	// L2 IMU stamps (the fallback holds ~0.5 s more); they go out with the
-	// remaining points as the final chunk.
-	SensorChunk Finish()
-	{
-		timing_.Flush(imu_);
-		SensorChunk chunk = Collect(chunks_produced_ + 1);
-		chunk.timing_report = AddRecordingInfo(timing_.Timeline().Report(), info_);
-		return chunk;
-	}
-
-private:
-	CaptureTiming timing_;
-	RecordingInfo info_;
-	std::vector<PointDLidar> points_;
-	std::vector<OutputImuData> imu_;
-	int chunks_produced_ = 0;
-	bool decision_reported_ = false;
-
-	void Reserve()
-	{
-		points_ = std::vector<PointDLidar>();
-		points_.reserve(kMaxPointsPerChunk + 2000);
-		imu_ = std::vector<OutputImuData>();
-		imu_.reserve((kMaxPointsPerChunk / 10) + 100);
-	}
-
-	SensorChunk Collect(int index)
-	{
-		SensorChunk chunk;
-		chunk.chunk_index = index;
-		chunk.points = std::move(points_);
-		chunk.imu_data = std::move(imu_);
-		timing_.TakePacketLog(chunk.packets);
-		timing_.TakePacketStateRows(timing_.ZeroNs(), chunk.packet_state_rows);
-		return chunk;
-	}
-};
-
-void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &timing_config, uint32_t work_mode,
-					   const CaptureSetup &setup)
-{
-	const int target_chunks = 200; // ~1 min of data at 20 Hz, 18 scans per chunk
+	// target_chunks: 200 is ~1 min of data at 20 Hz, 18 scans per chunk.
 
 	std::queue<SensorChunk> chunk_queue;
 	std::mutex queue_mutex;
@@ -260,33 +117,22 @@ void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &t
 
         stream_writer.CloseAndPackageLAZ(); });
 
-	RestartLidar(lreader);
-	PrintDirtyPercentage(lreader);
-	PrintTimeDelay(lreader);
-	RecordingInfo info = QueryRecordingInfo(lreader, work_mode);
-
-	DrainPendingPackets(lreader, std::chrono::seconds(2));
+	sensor.Prepare(stop);
+	dlidar::SensorInfo sensor_info = sensor.Info();
 	std::cout << ">>> STARTING CONTINUOUS DATA CAPTURE <<< (Ctrl-C to stop)" << std::endl;
 
-	ChunkAssembler assembler(timing_config, info, setup);
+	ChunkAssembler assembler(sensor, timing_config, sensor_info.versions, setup.mount,
+							 setup.filter.value_or(sensor_info.default_filter));
 
-	while (assembler.ChunksProduced() < target_chunks && !StopRequested())
+	while (assembler.ChunksProduced() < target_chunks && !stop.StopRequested())
 	{
-		int result = lreader->runParse();
-
-		// Both packet types keep the L2's own stamp (use_system_timestamp is
-		// off); the host arrival time is taken here for diagnostics and the
-		// fallback clock map.
-		switch (result)
-		{
-		case LIDAR_IMU_DATA_PACKET_TYPE:
-			assembler.OnImu(lreader->getLidarImuDataPacket().data, HostNow());
+		Polled p = sensor.Poll();
+		if (p.kind == PacketKind::EndOfStream)
 			break;
-		case LIDAR_POINT_DATA_PACKET_TYPE:
-			assembler.OnPoints(lreader->getLidarPointDataPacket(), HostNow());
-			CheckDirtyPercentage(lreader);
-			break;
-		}
+		if (p.kind == PacketKind::Imu || p.kind == PacketKind::Points)
+			assembler.OnPacket(p);
+		if (p.kind == PacketKind::Points)
+			CheckDirtyPercentage(sensor);
 
 		if (assembler.ChunkReady())
 		{
@@ -299,7 +145,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &t
 		}
 	}
 
-	lreader->stopLidarRotation();
+	sensor.Stop();
 	std::cout << "LiDAR stopped. Flushing final data to continuous streams..." << std::endl;
 
 	{

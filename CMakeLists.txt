@@ -17,8 +17,19 @@ link_directories(${PROJECT_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR})
 SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR})
 
+set(UNITREE_SDK_LIB ${PROJECT_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR}/libunitree_lidar_sdk.a)
+
+# Unitree L2 adapter (src/adapters/unitree_l2): the only code that sees the vendor SDK.
+add_library(dlidar_l2 STATIC
+    src/adapters/unitree_l2/l2_conversion.cpp
+    src/adapters/unitree_l2/live_l2_source.cpp
+    src/adapters/unitree_l2/synthetic_l2_source.cpp
+    src/adapters/unitree_l2/unitree_l2_sensor.cpp)
+set_target_properties(dlidar_l2 PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_l2 PUBLIC ${UNITREE_SDK_LIB} pthread)
+
 add_executable(dLidar src/dLidar.cpp)
-target_link_libraries(dLidar laszip  ${PROJECT_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR}/libunitree_lidar_sdk.a)
+target_link_libraries(dLidar dlidar_l2 laszip)
 
 # Tests (no sensor needed): ctest --test-dir build
 enable_testing()
@@ -30,18 +41,19 @@ add_test(NAME imu_timestamper COMMAND test_imu_timestamper)
 
 add_executable(test_datawriter tests/test_datawriter.cpp)
 set_target_properties(test_datawriter PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
-target_link_libraries(test_datawriter laszip)
+target_link_libraries(test_datawriter dlidar_l2 laszip)
 add_test(NAME datawriter COMMAND test_datawriter)
 
-add_executable(test_time_alignment tests/test_time_alignment.cpp)
+add_executable(test_time_alignment tests/adapters/unitree_l2/test_l2_time_alignment.cpp)
 set_target_properties(test_time_alignment PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_compile_options(test_time_alignment PRIVATE -O2)
+target_link_libraries(test_time_alignment dlidar_l2)
 add_test(NAME time_alignment COMMAND test_time_alignment)
 
 # dLidar's points vs the vendor SDK's own conversion (loopback UDP, ports 16101/16201).
-add_executable(test_sdk_conversion tests/test_sdk_conversion.cpp)
+add_executable(test_sdk_conversion tests/adapters/unitree_l2/test_sdk_conversion.cpp)
 set_target_properties(test_sdk_conversion PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
-target_link_libraries(test_sdk_conversion ${PROJECT_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR}/libunitree_lidar_sdk.a pthread)
+target_link_libraries(test_sdk_conversion dlidar_l2)
 add_test(NAME sdk_conversion COMMAND test_sdk_conversion)
 
 # Replays a recording's packetsNNNN.bin through the IMU timestamping.
@@ -52,12 +64,16 @@ target_compile_options(replay_packets PRIVATE -O2)
 # new recording (tools/compare_recording_formats.sh compares formats with it).
 add_executable(replay_capture tools/replay_capture.cpp)
 target_compile_options(replay_capture PRIVATE -O2)
-target_link_libraries(replay_capture laszip)
+target_link_libraries(replay_capture dlidar_l2 laszip)
 
-add_executable(test_capture_timing tests/test_capture_timing.cpp)
+add_executable(test_capture_timing tests/application/test_capture_timing.cpp)
 set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
-target_link_libraries(test_capture_timing laszip)
 add_test(NAME capture_timing COMMAND test_capture_timing)
+
+add_executable(test_l2_conversion tests/adapters/unitree_l2/test_l2_conversion.cpp)
+set_target_properties(test_l2_conversion PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_l2_conversion dlidar_l2)
+add_test(NAME l2_conversion COMMAND test_l2_conversion)
 
 # Domain unit tests (src/domain only).
 foreach(t axis_map point_filter)

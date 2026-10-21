@@ -1,12 +1,16 @@
 #pragma once
 
-#include "unitree_lidar_protocol.h"
+#include "adapters/unitree_l2/vendor/unitree_lidar_protocol.h"
 
 #include <cinttypes>
 #include <cstdio>
 #include <string>
 
-using namespace unitree_lidar_sdk;
+namespace dlidar::l2
+{
+using unitree_lidar_sdk::LidarCalibParam;
+using unitree_lidar_sdk::LidarInsideState;
+using unitree_lidar_sdk::LidarPointData;
 
 // One row of packetstateNNNN.tsv: the fields of a point packet other than its
 // ranges and intensities, as received (recording format 2,
@@ -78,3 +82,5 @@ inline void AppendPacketStateRow(std::string &out, const PointPacketState &s, in
     if (n > 0 && n < (int)sizeof row)
         out.append(row, (size_t)n);
 }
+
+} // namespace dlidar::l2

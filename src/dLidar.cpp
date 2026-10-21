@@ -1,51 +1,11 @@
 #include "pcd_manager.h"
 #include "app/device_config.h"
-
-// Sent with setLidarWorkMode at start-up; recorded in timingNNNN.json.
-const uint32_t kLidarWorkMode = 0;
-
-void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
-{
-	std::cout << "set Lidar work mode to: " << kLidarWorkMode << std::endl;
-	lidarReader->setLidarWorkMode(kLidarWorkMode);
-	sleep(1);
-}
-
-// false: the SDK leaves every packet with the L2's own stamp. Point packets
-// keep it either way; with true the SDK would overwrite only the IMU stamp
-// with the host arrival time, a different clock from the points'. IMU times
-// are put on the points' clock by ImuTimeline (include/time_alignment.h).
-const bool kUseSystemTimestamp = false;
-const uint16_t kCloudScanNum = 18; // SDK default
+#include "adapters/unitree_l2/live_l2_source.h"
+#include "adapters/unitree_l2/unitree_l2_sensor.h"
 
 // Added to every IMU timestamp. Leave 0 unless the field check
 // (docs/imu_lidar_time_alignment.md) measures a constant residual offset.
 const int64_t kImuOffsetNs = 0;
-
-UnitreeLidarReader *InitializeLidar()
-{
-	UnitreeLidarReader *lreader = createUnitreeLidarReader();
-
-	std::string lidar_ip = "192.168.0.62";
-	std::string local_ip = "192.168.0.2";
-
-	unsigned short lidar_port = 6101;
-	unsigned short local_port = 6201;
-
-	if (lreader->initializeUDP(lidar_port, lidar_ip, local_port, local_ip, kCloudScanNum, kUseSystemTimestamp))
-	{
-		printf("Unilidar initialization failed! Exit here!\n");
-		exit(-1);
-	}
-	else
-	{
-		printf("Unilidar initialization succeed!\n");
-	}
-
-	SetLidarWorkMode(lreader);
-
-	return lreader;
-}
 
 int main(int argc, char *argv[])
 {
@@ -90,11 +50,20 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	UnitreeLidarReader *lidarReader = InitializeLidar();
+	dlidar::LiveL2Config l2;
+	l2.lidar_ip = kLidarIp;
+	l2.lidar_port = kLidarPort;
+	l2.local_ip = kLocalIp;
+	l2.local_port = kLocalPort;
+	l2.work_mode = kLidarWorkMode;
+	std::unique_ptr<dlidar::LiveL2Source> source = dlidar::LiveL2Source::Open(l2);
+	if (!source)
+		exit(-1);
+	dlidar::UnitreeL2Sensor sensor(std::move(source));
 
-	ProcessSensorData(lidarReader, timing_config, kLidarWorkMode, setup);
+	ProcessSensorData(sensor, timing_config, setup, StopToken(&StopRequested()));
 
-	lidarReader->stopLidarRotation();
+	sensor.Stop();
 
 	return 0;
 }
