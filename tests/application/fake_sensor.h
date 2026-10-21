@@ -9,6 +9,8 @@
 #include "application/ports/lidar_sensor.h"
 
 #include <deque>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,12 @@ namespace dlidar::test
 
         bool with_diagnostics = false;
         bool prepared = false, stopped = false;
+        bool prepare_ok = true;
+        std::function<void()> on_prepare; // runs inside Prepare (e.g. to hold the start-up)
+        // When the queue is empty: endless point packets of 300 points, 3 ms
+        // apart, instead of EndOfStream.
+        bool endless = false;
+        std::optional<float> dirtiness;
         RecordingInfo versions;
         PointFilter default_filter{0.1f, 100.0f, 5.0f};
 
@@ -61,14 +69,21 @@ namespace dlidar::test
 
         bool Prepare(const StopToken &) override
         {
+            if (on_prepare)
+                on_prepare();
             prepared = true;
-            return true;
+            return prepare_ok;
         }
         SensorInfo Info() override { return {versions, default_filter}; }
 
         Polled Poll() override
         {
             Polled out;
+            if (queue_.empty() && endless)
+            {
+                endless_n_++;
+                AddPoints(endless_n_ * 3000000, 1000000000000LL + endless_n_ * 3000000, (uint32_t)endless_n_, 300);
+            }
             if (queue_.empty())
             {
                 out.kind = PacketKind::EndOfStream;
@@ -106,12 +121,14 @@ namespace dlidar::test
             }
         }
 
+        std::optional<float> LensDirtiness() override { return dirtiness; }
         PacketDiagnostics *Diagnostics() override { return with_diagnostics ? this : nullptr; }
         void Stop() override { stopped = true; }
 
     private:
         std::deque<Packet> queue_;
         Packet current_;
+        int64_t endless_n_ = 0;
         std::vector<int64_t> stamps_;
 
         const char *Header() const override { return "stamp_ns\n"; }

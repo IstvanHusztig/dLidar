@@ -10,7 +10,7 @@
 #include "adapters/storage/recording_writer.h"
 #include "adapters/storage/recovery.h"
 #include "adapters/storage/file_recording_storage.h"
-#include "shutdown.h"
+#include "app/signals.h"
 #include "domain/recording/recording_info.h"
 #include <dll/laszip_api.h>
 #include "packet_replay.h"

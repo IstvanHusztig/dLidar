@@ -35,8 +35,13 @@ add_library(dlidar_storage STATIC
 set_target_properties(dlidar_storage PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_storage PUBLIC laszip)
 
-add_executable(dLidar src/dLidar.cpp)
-target_link_libraries(dLidar dlidar_l2 dlidar_storage)
+# Console output channel (src/adapters/console).
+add_library(dlidar_console STATIC src/adapters/console/console_events.cpp)
+set_target_properties(dlidar_console PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+# The device application: composition root in src/app.
+add_executable(dLidar src/app/main.cpp)
+target_link_libraries(dLidar dlidar_l2 dlidar_storage dlidar_console pthread)
 
 # Tests (no sensor needed): ctest --test-dir build
 enable_testing()
@@ -76,6 +81,13 @@ target_link_libraries(replay_capture dlidar_l2 dlidar_storage)
 add_executable(test_capture_timing tests/application/test_capture_timing.cpp)
 set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 add_test(NAME capture_timing COMMAND test_capture_timing)
+
+foreach(t record_session device_control)
+add_executable(test_${t} tests/application/test_${t}.cpp)
+set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_${t} pthread)
+add_test(NAME ${t} COMMAND test_${t})
+endforeach()
 
 add_executable(test_l2_conversion tests/adapters/unitree_l2/test_l2_conversion.cpp)
 set_target_properties(test_l2_conversion PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)

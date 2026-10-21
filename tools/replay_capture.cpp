@@ -2,19 +2,23 @@
 // seq, host arrival times, time_increment, point_num) through the capture
 // code into a new recording in out_dir (which must exist). No sensor needed.
 //
-//   bin/replay_capture ~/PointCloudDump/packets0001.bin out_dir [seconds]
+//   bin/replay_capture ~/PointCloudDump/packets0001.bin out_dir [seconds] [target_chunks]
 //
-// The packets come from SyntheticL2Source (synthetic, deterministic contents)
-// through UnitreeL2Sensor, the same L2 adapter a live capture uses, with the
-// device's mount. Host times come from the log, so two builds fed the same log
-// write the same recording (tools/golden_replay.sh).
-#include "pcd_manager.h"
-#include "packet_replay.h"
+// Production path: SyntheticL2Source (synthetic, deterministic packet
+// contents) -> UnitreeL2Sensor (the L2 adapter) -> ScannerController /
+// RecordSession -> FileRecordingStorage, with the device's mount. No console
+// channel is registered, so only the adapters print. Host times come from the
+// log, so two builds fed the same log write the same recording
+// (tools/golden_replay.sh).
+#include "adapters/storage/file_recording_storage.h"
+#include "adapters/storage/packet_log.h"
 #include "adapters/unitree_l2/synthetic_l2_source.h"
 #include "adapters/unitree_l2/unitree_l2_sensor.h"
 #include "app/device_config.h"
-#include "adapters/storage/recording_writer.h"
+#include "application/device/event_hub.h"
+#include "application/device/scanner_controller.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 
@@ -22,34 +26,26 @@ int main(int argc, char **argv)
 {
     if (argc < 3)
     {
-        fprintf(stderr, "usage: replay_capture packetsNNNN.bin out_dir [seconds]\n");
+        fprintf(stderr, "usage: replay_capture packetsNNNN.bin out_dir [seconds] [target_chunks]\n");
         return 2;
     }
-    std::vector<PacketTiming> log;
-    if (!ReadPacketLog(argv[1], log) || log.empty())
+    std::vector<dlidar::PacketTiming> log;
+    if (!dlidar::ReadPacketLog(argv[1], log) || log.empty())
         return 1;
     double seconds = argc > 3 ? atof(argv[3]) : 1e9;
-    ImuTimeline::Config cfg;
-    cfg.log = false;
-    cfg.host.log = false;
+
+    dlidar::SessionConfig config;
+    config.timing.log = false;
+    config.timing.host.log = false;
+    config.setup.mount = kMount;
+    config.target_chunks = argc > 4 ? atoi(argv[4]) : 800;
 
     dlidar::UnitreeL2Sensor sensor(std::make_unique<dlidar::SyntheticL2Source>(std::move(log), seconds));
-    dlidar::SensorInfo info = sensor.Info();
+    dlidar::FileRecordingStorage storage(argv[2], dlidar::l2::kPacketStateHeader);
+    dlidar::EventHub hub; // no output channels
 
-    dlidar::ContinuousDataWriter writer(dlidar::l2::kPacketStateHeader);
-    if (!writer.Open(argv[2]))
-        return 1;
-    const int target_chunks = 800;
-    ChunkAssembler as(sensor, cfg, info.versions, kMount, info.default_filter);
-    while (as.ChunksProduced() < target_chunks)
-    {
-        Polled p = sensor.Poll();
-        if (p.kind == PacketKind::EndOfStream)
-            break;
-        as.OnPacket(p);
-        if (as.ChunkReady())
-            writer.AppendChunk(as.TakeChunk());
-    }
-    writer.AppendChunk(as.Finish());
-    return writer.CloseAndPackageLAZ() ? 0 : 1;
+    dlidar::ScannerController controller(sensor, storage, hub, config);
+    controller.StartRecording();
+    controller.WaitIdle();
+    return controller.Status().last_ok ? 0 : 1;
 }

@@ -43,10 +43,10 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 7. Use case, device control and app
 
-- [ ] 7.1 Create `RecordSession` (was `ProcessSensorData`: queue, consumer thread, storage opened in parallel with `Prepare`, target chunks, finish) depending only on ports; `LensMonitor` without statics; verify a core test records a full session from `FakeSensor` into a memory storage fake
-- [ ] 7.2 Create `DeviceEvents`, `EventHub` (sync and async registration; async = bounded queue, own thread, exceptions caught) and the console channel reproducing today's texts (banner, dirty-lens warning, timing summary, completion); verify a test where a blocking and a throwing channel do not change a `FakeSensor` recording, and golden console logs are identical
-- [ ] 7.3 Create `ScannerController` (state machine, `StartRecording`/`StopRecording`/`Status`/`WaitIdle`, start rejected outside Idle, `StopToken` = command or signal flag); verify tests for every scenario in `specs/device-control/spec.md` with fake input/output channels
-- [ ] 7.4 Rewrite `src/app/main.cpp` as the composition root (`device_config.h`: endpoints, work mode, mount, constants; flags and exit codes unchanged; `--finalize` opens no sensor) and move the signal installation to `src/app/signals.cpp`; `replay_capture` uses `ScannerController` + `RecordSession` with `target_chunks` as a parameter; verify golden is identical, and `bin/dLidar --finalize` plus a bad flag give today's output and exit codes
+- [x] 7.1 Create `RecordSession` (was `ProcessSensorData`: queue, consumer thread, storage opened in parallel with `Prepare`, target chunks, finish) depending only on ports; `LensMonitor` without statics; verify a core test records a full session from `FakeSensor` into a memory storage fake
+- [x] 7.2 Create `DeviceEvents`, `EventHub` (sync and async registration; async = bounded queue, own thread, exceptions caught) and the console channel reproducing today's texts (banner, dirty-lens warning, timing summary, completion); verify a test where a blocking and a throwing channel do not change a `FakeSensor` recording, and golden console logs are identical
+- [x] 7.3 Create `ScannerController` (state machine, `StartRecording`/`StopRecording`/`Status`/`WaitIdle`, start rejected outside Idle, `StopToken` = command or signal flag); verify tests for every scenario in `specs/device-control/spec.md` with fake input/output channels
+- [x] 7.4 Rewrite `src/app/main.cpp` as the composition root (`device_config.h`: endpoints, work mode, mount, constants; flags and exit codes unchanged; `--finalize` opens no sensor) and move the signal installation to `src/app/signals.h` (header-only, async-signal-safe handlers); `replay_capture` uses `ScannerController` + `RecordSession` with `target_chunks` as a parameter; verify golden is identical, and `bin/dLidar --finalize` plus a bad flag give today's output and exit codes
 
 ## 8. Enforce the boundaries
 

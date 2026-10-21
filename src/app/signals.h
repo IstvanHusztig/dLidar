@@ -14,7 +14,7 @@
 // SIGINT / SIGTERM / SIGHUP request a stop: the capture loop ends and the
 // normal shutdown path writes the remaining data and finalizes the LAZ
 // files. A second such signal kills the process; the next start then
-// finalizes what was left behind (RecoverInterruptedRecording).
+// finalizes what was left behind (RecordingStorage::RecoverLeftovers).
 //
 // On a crash (SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT) the IMU CSV is
 // truncated to its last complete row before the process dies, so no partial
