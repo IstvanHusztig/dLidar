@@ -46,4 +46,5 @@ Clean Architecture; read `docs/architecture.md` first (layers, ports, data flow,
 
 ## Reference Docs
 
+- `docs/how-dlidar-works.html`: overview for readers new to dLidar: what a recording does step by step, the files, failure handling, and how the functionality spreads across the layers. Keep it in step with `docs/architecture.md`.
 - `docs/unitree_l2_slam_tuning.md`: L2 hardware specs, the SLAM tuning targets, and how dLidar's output units, frames and timestamps match the SLAM config.

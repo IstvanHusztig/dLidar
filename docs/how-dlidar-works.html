@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How dLidar Works</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1d1f21; --muted: #5c6166; --line: #dcdfe2;
+    --card: #ffffff; --accent: #1f6feb; --code-bg: #f1f3f5; --warn: #9a6700;
+    --l-domain: #e8f1ff; --l-app: #eaf7ee; --l-adapt: #fff5e0; --l-root: #f3eefb;
+    --b-domain: #8bb3f0; --b-app: #8ccb9c; --b-adapt: #e2b65c; --b-root: #b9a3e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171a; --fg: #e6e8ea; --muted: #9aa1a8; --line: #2c3036;
+      --card: #1c1f23; --accent: #6ea8fe; --code-bg: #23272d; --warn: #d29922;
+      --l-domain: #16253b; --l-app: #16301f; --l-adapt: #352a12; --l-root: #2a2138;
+      --b-domain: #3d6aa8; --b-app: #3f7d50; --b-adapt: #8a6a26; --b-root: #6c5a91;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171a; --fg: #e6e8ea; --muted: #9aa1a8; --line: #2c3036;
+    --card: #1c1f23; --accent: #6ea8fe; --code-bg: #23272d; --warn: #d29922;
+    --l-domain: #16253b; --l-app: #16301f; --l-adapt: #352a12; --l-root: #2a2138;
+    --b-domain: #3d6aa8; --b-app: #3f7d50; --b-adapt: #8a6a26; --b-root: #6c5a91;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.3rem; margin: 44px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.02rem; margin: 22px 0 8px; }
+  p, li { max-width: 72ch; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 10px 0; }
+  pre code { background: none; padding: 0; font-size: 0.86rem; line-height: 1.5; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td code { white-space: nowrap; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  .card.caveat { border-left: 4px solid var(--warn); }
+  nav ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  a { color: var(--accent); }
+
+  /* The device chain: L2 -> Pi -> files -> dMapper */
+  .chain { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 16px 0; }
+  .chain .box { flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 0.9rem; }
+  .chain .box b { display: block; margin-bottom: 2px; }
+  .chain .arrow { align-self: center; color: var(--muted); font-size: 1.2rem; }
+
+  /* The recording pipeline */
+  .pipe { display: grid; grid-template-columns: 1fr; gap: 0; margin: 16px 0; }
+  .stage { display: grid; grid-template-columns: 150px 1fr; gap: 12px; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .stage .who { font-weight: 600; font-size: 0.9rem; }
+  .stage .who small { display: block; font-weight: 400; color: var(--muted); }
+  .stage .what { font-size: 0.92rem; }
+  .down { text-align: center; color: var(--muted); line-height: 1.6; font-size: 0.85rem; }
+  .stage.domain { border-left: 5px solid var(--b-domain); }
+  .stage.app { border-left: 5px solid var(--b-app); }
+  .stage.adapt { border-left: 5px solid var(--b-adapt); }
+  .stage.root { border-left: 5px solid var(--b-root); }
+  @media (max-width: 560px) { .stage { grid-template-columns: 1fr; gap: 4px; } }
+
+  /* The layers, as nested rings */
+  .ring { border: 2px solid; border-radius: 14px; padding: 10px 12px 12px; margin-top: 6px; }
+  .ring > .label { font-weight: 700; font-size: 0.9rem; }
+  .ring > .label small { font-weight: 400; color: var(--muted); }
+  .ring > .items { font-size: 0.86rem; color: var(--muted); margin: 2px 0 6px; }
+  .ring.root { background: var(--l-root); border-color: var(--b-root); }
+  .ring.adapt { background: var(--l-adapt); border-color: var(--b-adapt); }
+  .ring.app { background: var(--l-app); border-color: var(--b-app); }
+  .ring.domain { background: var(--l-domain); border-color: var(--b-domain); }
+
+  .states { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0; font-size: 0.9rem; }
+  .states span.s { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 2px 12px; }
+  .states span.s.err { border-color: var(--warn); }
+  .states span.a { color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.85rem; color: var(--muted); margin: 6px 0 0; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>How dLidar works</h1>
+  <p class="sub">What the device records, how a recording flows from the sensor to the files, and how the code is split into layers. For the details behind each part, follow the links to the other documents in <code>docs/</code>.</p>
+
+  <nav><ul>
+    <li><a href="#what">What it does</a></li>
+    <li><a href="#recording">A recording, step by step</a></li>
+    <li><a href="#time">Time, axes and units</a></li>
+    <li><a href="#files">The files</a></li>
+    <li><a href="#safety">Stops, crashes and failures</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#where">Where each function lives</a></li>
+    <li><a href="#threads">Threads and states</a></li>
+    <li><a href="#extend">Adding features</a></li>
+    <li><a href="#more">More documents</a></li>
+  </ul></nav>
+
+  <h2 id="what">What it does</h2>
+  <p>dLidar is the application of a handheld scanning device. It reads a Unitree L2 LiDAR, which also contains an IMU, and writes everything into files. Our SLAM solution <a href="https://github.com/IstvanHusztig/dMapper">dMapper</a> then turns those files into a trajectory and a map. dLidar itself does no mapping: it records the raw data as accurately as possible, with points and IMU samples on one common clock.</p>
+
+  <div class="chain">
+    <div class="box"><b>Unitree L2</b>~64,000 points/s in packets of 300, plus IMU samples (acceleration, rotation rate), sent over Ethernet (UDP).</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Raspberry Pi running dLidar</b>A Pi Zero 2 W on the device; development and tests on a Pi 5. Converts, timestamps and writes.</div>
+    <div class="arrow">→</div>
+    <div class="box"><b><code>~/PointCloudDump/</code></b>One numbered set of files per recording: <code>lidarNNNN.laz</code>, <code>imuNNNN.csv</code> and diagnostics.</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>dMapper</b>Reads every <code>.laz</code> and <code>.csv</code> in the folder and runs SLAM.</div>
+  </div>
+
+  <p>The L2 is mounted vertically: its own +Z axis points forward and its cable outlet points up. dLidar rotates every point and IMU sample into the device frame: <b>+X forward, +Y left, +Z up</b>.</p>
+  <p>Today a recording is started by launching <code>./bin/dLidar</code>. It ends after 200 chunks (about a minute) or on Ctrl-C. Push buttons, status LEDs and a Bluetooth link to a phone are planned, and the architecture is prepared for them.</p>
+
+  <h2 id="recording">A recording, step by step</h2>
+  <p>The colour on the left of each step shows which layer does the work (see <a href="#architecture">Architecture</a>).</p>
+  <div class="legend">
+    <span><i style="background:var(--b-root)"></i>app (wiring)</span>
+    <span><i style="background:var(--b-adapt)"></i>adapters (L2, files, console)</span>
+    <span><i style="background:var(--b-app)"></i>application (use cases)</span>
+    <span><i style="background:var(--b-domain)"></i>domain (rules)</span>
+  </div>
+
+  <div class="pipe">
+    <div class="stage root"><div class="who">1. Start<small>main.cpp</small></div>
+      <div class="what">Installs the signal handlers. Finishes any recording a crash or power loss left behind (into <code>recovered_&lt;time&gt;/</code>). Connects to the L2 at <code>192.168.0.62</code>, builds the parts and asks the <code>ScannerController</code> to start a recording.</div></div>
+    <div class="down">↓</div>
+    <div class="stage adapt"><div class="who">2. Sensor start-up<small>Preparing · LiveL2Source</small></div>
+      <div class="what">Restarts the L2's rotation, then prints its lens dirtiness, time delay and firmware/hardware versions. Then reads away the packets that piled up meanwhile for 2 s, so stale packets don't enter the recording. If the L2 does not answer within 10 s, the recording ends in Error and no files are written.</div></div>
+    <div class="down">↓</div>
+    <div class="stage app"><div class="who">3. Capture loop<small>Recording · RecordSession</small></div>
+      <div class="what">The storage opens now, which creates the next free file number NNNN. Then one packet is read at a time: <code>sensor.Poll()</code> returns an IMU packet or a point packet, plus the host time it arrived.</div></div>
+    <div class="down">↓</div>
+    <div class="stage adapt"><div class="who">4. Decode<small>UnitreeL2Sensor · l2_conversion</small></div>
+      <div class="what">Turns the L2's packet into points in the <i>sensor</i> frame: x, y, z in metres, intensity, measured range, scan angles, and each point's time. Also turns IMU packets into acceleration (m/s²) and rotation rate (rad/s) with the L2's own timestamp.</div></div>
+    <div class="down">↓</div>
+    <div class="stage app"><div class="who">5. Timing, mount, filter<small>CaptureTiming</small></div>
+      <div class="what">
+        <ul style="margin:0;padding-left:18px">
+          <li>The first point packet with points sets the <b>time zero</b>.</li>
+          <li>Points get times relative to it.</li>
+          <li>Points outside 0.1–100 m or with intensity below 5 are dropped.</li>
+          <li>The mount rotation is applied, and IMU acceleration becomes g.</li>
+          <li><code>ImuTimeline</code> gives the IMU samples their times on the same clock.</li>
+        </ul>
+      </div></div>
+    <div class="down">↓</div>
+    <div class="stage app"><div class="who">6. Chunks<small>ChunkAssembler · LensMonitor</small></div>
+      <div class="what">Collects points (and the IMU samples released with them) into chunks of at least 14,000 points. Each full chunk goes into a queue. Every 10 s the lens dirtiness is checked; above 5% a warning is shown.</div></div>
+    <div class="down">↓ queue (a separate writer thread, so a slow SD card never delays reading packets)</div>
+    <div class="stage adapt"><div class="who">7. Writing<small>FileRecordingStorage</small></div>
+      <div class="what">IMU rows are appended to <code>imuNNNN.csv</code>. Points go in raw form to <code>points_tempNNNN.bin</code>, and the packet log and packet state rows are written alongside. Everything on disk is always in a state that can be recovered.</div></div>
+    <div class="down">↓ after 200 chunks or Ctrl-C</div>
+    <div class="stage adapt"><div class="who">8. Finishing<small>Finalizing · laz_encoder</small></div>
+      <div class="what">The L2 stops rotating. The last chunk, the IMU timing summary and <code>timingNNNN.json</code> are written. The temporary point file is compressed into <code>lidarNNNN.laz</code> (written as <code>.laz.tmp</code>, renamed when complete) and is deleted last. The state returns to Idle.</div></div>
+  </div>
+
+  <h2 id="time">Time, axes and units</h2>
+  <p>SLAM needs points and IMU samples on <b>one clock</b>, to well under a millisecond. This is the most delicate part of dLidar.</p>
+  <ul>
+    <li><b>The clock is the L2's own.</b> Both point packets and IMU packets carry the L2's timestamp. Host arrival times are not used for the data: the L2 sends IMU samples in bursts, and stamping them on arrival (as the SDK does by default) made the IMU lag the points by 50–80 ms.</li>
+    <li><b>Time zero</b> is the stamp of the first point packet that has points. LAZ <code>gps_time</code> is in seconds since the zero, and the IMU CSV <code>timestamp</code> in nanoseconds since the same zero.</li>
+    <li><b>Checking the IMU clock.</b> <code>ImuTimeline</code> watches the first 2 s. It checks that the IMU stamps increase, are evenly spaced, run at the host's rate and share the points' clock. If not, it switches to a fallback (<code>host_aligned</code>) that rebuilds even IMU times from the arrival times and maps them onto the L2 clock. The choice and its evidence go into <code>timingNNNN.json</code>. Details: <a href="imu_lidar_time_alignment.md">imu_lidar_time_alignment.md</a>.</li>
+    <li><b>Axes:</b> the device frame is +X forward, +Y left, +Z up. The mount (<code>kMount</code>) only selects and negates axes, never multiplies, so values keep their exact bits.</li>
+    <li><b>Units:</b> metres, seconds, radians, rad/s; IMU acceleration in g. Intensity is the L2's raw 0–255 value.</li>
+  </ul>
+
+  <h2 id="files">The files of a recording</h2>
+  <p>Each recording takes the next free number NNNN, so earlier recordings are never overwritten. dMapper reads every <code>.csv</code>, <code>.las</code> and <code>.laz</code> in the folder, so no other file may use those extensions. Field by field: <a href="l2-recording-format.md">l2-recording-format.md</a>.</p>
+  <div class="table-wrap"><table>
+    <tr><th>File</th><th>Content</th><th>Used by</th></tr>
+    <tr><td><code>lidarNNNN.laz</code></td><td>The point cloud (LAS 1.2, point format 1): x, y, z, intensity, time, plus extra bytes (range, raw range, sample index, packet seq, scan angles).</td><td>dMapper</td></tr>
+    <tr><td><code>imuNNNN.csv</code></td><td>One row per IMU sample: gyro x/y/z (rad/s), accel x/y/z (g), id, timestamp (ns since zero), Unix timestamp.</td><td>dMapper</td></tr>
+    <tr><td><code>timingNNNN.json</code></td><td>How the IMU times were made, clock rates, latencies, drops, sensor and software versions.</td><td>diagnostics</td></tr>
+    <tr><td><code>packetsNNNN.bin</code></td><td>Arrival time and L2 stamp of every packet; can be replayed offline (<code>bin/replay_packets</code>, <code>bin/replay_capture</code>).</td><td>diagnostics, tests</td></tr>
+    <tr><td><code>packetstateNNNN.tsv</code></td><td>One row per point packet: L2 temperatures, voltages, dirtiness, calibration.</td><td>diagnostics</td></tr>
+    <tr><td><code>points_tempNNNN.bin</code></td><td>Raw points while recording; the source for crash recovery. Gone after a normal end.</td><td>dLidar only</td></tr>
+  </table></div>
+  <p>Files are created only once the sensor has started. A failed start or a stop during the start-up writes nothing.</p>
+
+  <h2 id="safety">Stops, crashes and failures</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Event</th><th>What happens</th></tr>
+    <tr><td>Ctrl-C (or SIGTERM / SIGHUP) once</td><td>Normal stop: the recording is finished and all files are complete.</td></tr>
+    <tr><td>Ctrl-C twice</td><td>The process is killed at once. The next start finishes the leftover recording into <code>recovered_&lt;time&gt;/</code>, or run <code>./bin/dLidar --finalize</code> to finish it in place.</td></tr>
+    <tr><td>Crash or power loss</td><td>Like a kill. A crash also cuts the CSV back to its last complete row. On the next start the points are recovered and a partial last CSV row is trimmed.</td></tr>
+    <tr><td>L2 does not answer</td><td>Error after 10 s of waiting; no files.</td></tr>
+    <tr><td>Storage cannot open or fails</td><td>The capture stops at once (rather than filling the memory), what was written is closed, Error.</td></tr>
+    <tr><td>Any internal exception</td><td>The chunks already captured are written, the files closed, the L2 stopped, Error. The process keeps running and accepts a new start.</td></tr>
+    <tr><td>SD card slower than the sensor</td><td>Chunks wait in memory; past 50 waiting chunks a warning is shown. Chunks are never dropped.</td></tr>
+  </table></div>
+
+  <h2 id="architecture">Architecture</h2>
+  <p>The code follows <b>Clean Architecture</b> (Robert C. Martin): the rules of recording sit in the middle and know nothing about the L2, files or the console; those sit outside and plug in through interfaces (<i>ports</i>). That way the LiDAR can be replaced and buttons, LEDs or a phone link can be added without touching the recording logic.</p>
+
+  <div class="ring root"><div class="label">app <small>· composition root · <code>src/app/</code></small></div>
+    <div class="items">main.cpp (command line, wiring), device_config.h (IPs, mount, chunk limit), signals.h</div>
+    <div class="ring adapt"><div class="label">adapters <small>· the outside world · <code>src/adapters/</code></small></div>
+      <div class="items">unitree_l2/ (the sensor, Unitree SDK), storage/ (files, LAZ via LASzip, recovery), console/ (texts)</div>
+      <div class="ring app"><div class="label">application <small>· use cases and ports · <code>src/application/</code></small></div>
+        <div class="items">ports/ (LidarSensor, RecordingStorage, DeviceEvents), capture/ (RecordSession, CaptureTiming, ChunkAssembler, LensMonitor), device/ (ScannerController, EventHub)</div>
+        <div class="ring domain"><div class="label">domain <small>· data and pure rules · <code>src/domain/</code></small></div>
+          <div class="items">recording/ (PointRecord, ImuSample, file records), timing/ (ImuTimeline, ImuTimestamper), geometry/ (AxisMap, PointFilter)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>The dependency rule</h3>
+  <p>Code may only include code of its own layer or of layers <b>further in</b>. The domain sees only the C++ standard library; the application sees the domain; an adapter sees the core and its own folder, never another adapter; only <code>app/</code> sees everything. The build enforces this: the core library (<code>dlidar_core</code>) has neither the Unitree SDK nor LASzip on its path. The test <code>tools/check_architecture.py</code> (ctest <code>architecture</code>) checks every <code>#include</code>.</p>
+
+  <h3>The three ports</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Port (interface)</th><th>What the core asks of it</th><th>Implemented by</th></tr>
+    <tr><td><code>LidarSensor</code></td><td>Start up, hand out one packet at a time with its arrival time, give the IMU samples and the points in the sensor frame and SI units, stop.</td><td><code>UnitreeL2Sensor</code> (live L2 or a replayed packet log); <code>FakeSensor</code> in tests</td></tr>
+    <tr><td><code>RecordingStorage</code></td><td>Open a recording, append chunks, close, recover leftovers.</td><td><code>FileRecordingStorage</code>; <code>MemoryStorage</code> in tests</td></tr>
+    <tr><td><code>DeviceEvents</code></td><td>Receive state changes, warnings, progress and the end-of-recording summary.</td><td><code>ConsoleEvents</code>; later LEDs and the phone link</td></tr>
+  </table></div>
+
+  <h2 id="where">Where each function lives</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Function</th><th>Layer</th><th>Files</th></tr>
+    <tr><td>Talking to the L2, start-up sequence, versions</td><td>adapter</td><td><code>adapters/unitree_l2/live_l2_source.cpp</code></td></tr>
+    <tr><td>Decoding L2 packets (point math, IMU units)</td><td>adapter</td><td><code>adapters/unitree_l2/l2_conversion.cpp</code></td></tr>
+    <tr><td>L2 diagnostics columns (<code>packetstate</code>)</td><td>adapter</td><td><code>adapters/unitree_l2/l2_packet_state.h</code></td></tr>
+    <tr><td>Time zero, mount, g conversion, point filter</td><td>application</td><td><code>application/capture/capture_timing.h</code></td></tr>
+    <tr><td>IMU time alignment</td><td>domain</td><td><code>domain/timing/</code></td></tr>
+    <tr><td>Axis rotation, range/intensity rule</td><td>domain</td><td><code>domain/geometry/</code></td></tr>
+    <tr><td>Chunking, lens warning</td><td>application</td><td><code>application/capture/chunk_assembler.h</code>, <code>lens_monitor.h</code></td></tr>
+    <tr><td>One recording (loop, writer thread, failures)</td><td>application</td><td><code>application/capture/record_session.h</code></td></tr>
+    <tr><td>Start/stop commands, device state</td><td>application</td><td><code>application/device/scanner_controller.h</code></td></tr>
+    <tr><td>Sending events to output channels</td><td>application</td><td><code>application/device/event_hub.h</code></td></tr>
+    <tr><td>CSV and temp file writing, crash safety</td><td>adapter</td><td><code>adapters/storage/recording_writer.h</code>, <code>crash_guard.h</code></td></tr>
+    <tr><td>LAZ encoding, recovery</td><td>adapter</td><td><code>adapters/storage/laz_encoder.cpp</code>, <code>recovery.cpp</code></td></tr>
+    <tr><td>Console texts</td><td>adapter</td><td><code>adapters/console/console_events.cpp</code></td></tr>
+    <tr><td>Configuration, command line, signals</td><td>app</td><td><code>app/device_config.h</code>, <code>main.cpp</code>, <code>signals.h</code></td></tr>
+  </table></div>
+
+  <h2 id="threads">Threads and states</h2>
+  <div class="states">
+    <span class="s">Idle</span><span class="a">→</span><span class="s">Preparing</span><span class="a">→</span><span class="s">Recording</span><span class="a">→</span><span class="s">Finalizing</span><span class="a">→</span><span class="s">Idle</span>
+    <span class="a">&nbsp;or&nbsp;</span><span class="s err">Error</span>
+  </div>
+  <p>The <code>ScannerController</code> holds the state. It accepts a start only in Idle or Error and runs one recording at a time. Each input channel (today the Ctrl-C signal; later buttons and the phone) calls <code>StartRecording</code> / <code>StopRecording</code> from its own thread.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Thread</th><th>Does</th></tr>
+    <tr><td>main</td><td>Wiring, then waits for the recording to end.</td></tr>
+    <tr><td>controller worker</td><td>Runs the recordings: sensor start-up, packet loop, timing, chunking, and sends the events.</td></tr>
+    <tr><td>writer (one per recording)</td><td>Hands the chunks to the storage, so a slow SD card never delays packet reading.</td></tr>
+    <tr><td>one per async output channel</td><td>Delivers events to that channel (LEDs, phone) through a small queue; a slow or broken channel never affects a recording.</td></tr>
+  </table></div>
+
+  <h2 id="extend">Adding features</h2>
+  <ul>
+    <li><b>Another LiDAR:</b> a new adapter folder implementing <code>LidarSensor</code>, selected in <code>main.cpp</code>, with its mount in <code>device_config.h</code>. No change to the core.</li>
+    <li><b>A push button (input):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code>. It will replace today's fixed 200-chunk limit.</li>
+    <li><b>LEDs or a phone link (output):</b> an adapter implementing <code>DeviceEvents</code>, registered with <code>hub.AddAsync(...)</code>.</li>
+  </ul>
+  <div class="card caveat">Refactors must not change any recording. <code>tools/golden_replay.sh</code> replays a real packet log through an older build and the current one and compares every file byte by byte. See <a href="tools.html">tools.html</a>.</div>
+
+  <h2 id="more">More documents</h2>
+  <ul>
+    <li><a href="architecture.md">architecture.md</a>: the architecture in full, with the deferred items.</li>
+    <li><a href="l2-recording-format.md">l2-recording-format.md</a>: every field of every file.</li>
+    <li><a href="imu_lidar_time_alignment.md">imu_lidar_time_alignment.md</a>: how IMU and point times are aligned.</li>
+    <li><a href="l2_point_conversion.md">l2_point_conversion.md</a>: the L2 point math.</li>
+    <li><a href="unitree_l2_slam_tuning.md">unitree_l2_slam_tuning.md</a>: L2 specifications and SLAM tuning.</li>
+    <li><a href="tools.html">tools.html</a>: the offline tools.</li>
+  </ul>
+</main>
+</body>
+</html>
