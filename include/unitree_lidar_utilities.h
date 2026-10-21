@@ -26,43 +26,16 @@ typedef unsigned __int64 uint64_t;
 #include <vector>
 #include <memory>
 #include <math.h>
+#include <cmath>
 #include <chrono>
 
 #include "unitree_lidar_sdk_config.h"
 #include "unitree_lidar_protocol.h"
+#include "domain/geometry/point_filter.h"
 #include "domain/recording/point_record.h"
 
 namespace unitree_lidar_sdk
 {
-    /**
-     * @brief Shared zero-point for all sensor streams to preserve nanosecond precision
-     * when using 64-bit doubles in HDmapper. The L2 stamp of the first point packet;
-     * point times and IMU timestamps are both L2 clock minus this value.
-     */
-    inline int64_t &GetGlobalTimeOffsetNs()
-    {
-        static int64_t offset = 0;
-        return offset;
-    }
-
-    /**
-     * @brief Defines the physical mounting orientation of the sensor
-     */
-    enum class SensorOrientation
-    {
-        STANDARD, // +X Front, +Y Left, +Z Up
-        VERTICAL  // Physical: +Z Front, +X Down, +Y Left
-    };
-
-    /**
-     * @brief Global property to toggle the sensor orientation mapping.
-     * Defaults to SensorOrientation::STANDARD.
-     */
-    inline SensorOrientation &GetSensorOrientation()
-    {
-        static SensorOrientation orientation = SensorOrientation::STANDARD;
-        return orientation;
-    }
 
     ///////////////////////////////////////////////////////////////////////////////
     // CONSTANTS
@@ -91,7 +64,7 @@ namespace unitree_lidar_sdk
     using PointDLidar = dlidar::PointRecord;
 
     /**
-     * @brief Parsed IMU Data container for modular axis mapping.
+     * @brief One L2 IMU sample in the sensor frame, SI units (m/s^2, rad/s).
      */
     typedef struct
     {
@@ -164,64 +137,39 @@ namespace unitree_lidar_sdk
     }
 
     /**
-     * @brief Centralized IMU parsing and coordinate mapping.
+     * @brief IMU packet -> sample in the sensor frame, SI units. The mount and
+     * the conversion to g are applied by the core (CaptureTiming).
      */
     inline void parseFromImuPacket(ParsedImuData &out, const LidarImuData &imu)
     {
-        switch (GetSensorOrientation())
+        for (int i = 0; i < 3; i++)
         {
-        case SensorOrientation::VERTICAL:
-            // -------------------------------------------------------------
-            // IMU AXIS MAPPING (Vertical Mount)
-            // Physical: +Z Front, +X Down, +Y Left
-            // Target: +X Front, +Y Left, +Z Up
-            // Math: X_out = Z_phys, Y_out = Y_phys, Z_out = -X_phys
-            // -------------------------------------------------------------
-            out.accel[0] = imu.linear_acceleration[2] / 9.80665f;
-            out.accel[1] = imu.linear_acceleration[1] / 9.80665f;
-            out.accel[2] = -imu.linear_acceleration[0] / 9.80665f;
-
-            out.gyro[0] = imu.angular_velocity[2];
-            out.gyro[1] = imu.angular_velocity[1];
-            out.gyro[2] = -imu.angular_velocity[0];
-            break;
-
-        case SensorOrientation::STANDARD:
-        default:
-            // -------------------------------------------------------------
-            // IMU AXIS MAPPING (Standard NWU)
-            // -------------------------------------------------------------
-            out.accel[0] = imu.linear_acceleration[0] / 9.80665f;
-            out.accel[1] = imu.linear_acceleration[1] / 9.80665f;
-            out.accel[2] = imu.linear_acceleration[2] / 9.80665f;
-
-            out.gyro[0] = imu.angular_velocity[0];
-            out.gyro[1] = imu.angular_velocity[1];
-            out.gyro[2] = imu.angular_velocity[2];
-            break;
+            out.accel[i] = imu.linear_acceleration[i];
+            out.gyro[i] = imu.angular_velocity[i];
         }
-
-        // The L2's own stamp of the sample. ImuTimeline puts it relative to
-        // GetGlobalTimeOffsetNs(); the zero is set by point packets only.
         out.sensor_stamp_ns = StampToNs(imu.info.stamp);
         out.seq = imu.info.seq;
     }
 
     /**
-     * @brief Parse from a point packet to a 3D point cloud
+     * @brief Point packet -> points in the sensor frame, times in s relative to
+     * `zero_ns`. Samples without a return or outside the packet's range limits
+     * are skipped, and so are the ones `filter` rejects (before the trig, to
+     * save CPU; the core applies the same filter again).
      */
     inline void parseFromPacketToPointCloud(
         PointCloudDLidar &cloudOut,
         const LidarPointDataPacket &packet,
-        float range_min = 0,
-        float range_max = 100,
-        uint8_t min_intensity = 0)
+        int64_t zero_ns,
+        const dlidar::PointFilter &filter)
     {
         // ... [Matrix math remains unchanged] ...
-        const float sin_beta = sin(packet.data.param.beta_angle);
-        const float cos_beta = cos(packet.data.param.beta_angle);
-        const float sin_xi = sin(packet.data.param.xi_angle);
-        const float cos_xi = cos(packet.data.param.xi_angle);
+        // Float overloads (sinf/cosf), as with <math.h>; unqualified sin() with
+        // only <cmath> would compute in double and change the points.
+        const float sin_beta = std::sin(packet.data.param.beta_angle);
+        const float cos_beta = std::cos(packet.data.param.beta_angle);
+        const float sin_xi = std::sin(packet.data.param.xi_angle);
+        const float cos_xi = std::cos(packet.data.param.xi_angle);
         const float cos_beta_sin_xi = cos_beta * sin_xi;
         const float sin_beta_cos_xi = sin_beta * cos_xi;
         const float sin_beta_sin_xi = sin_beta * sin_xi;
@@ -247,11 +195,7 @@ namespace unitree_lidar_sdk
         // j * time_increment. Never the host arrival time (the SDK's
         // use_system_timestamp does not touch this packet).
         const int64_t packet_time_ns = StampToNs(packet.data.info.stamp);
-        if (GetGlobalTimeOffsetNs() == 0)
-        {
-            GetGlobalTimeOffsetNs() = packet_time_ns;
-        }
-        const double packet_base_time = (double)(packet_time_ns - GetGlobalTimeOffsetNs()) / 1.0e9;
+        const double packet_base_time = (double)(packet_time_ns - zero_ns) / 1.0e9;
 
         PointDLidar point3d;
         point3d.ring = 1;
@@ -266,15 +210,13 @@ namespace unitree_lidar_sdk
 
             if (range_float < packet.data.range_min || range_float > packet.data.range_max)
                 continue;
-            if (range_float < range_min || range_float > range_max)
-                continue;
-            if (intensities[j] < min_intensity)
+            if (!filter.Accepts(range_float, (float)intensities[j]))
                 continue;
 
-            float sin_alpha = sin(alpha_cur);
-            float cos_alpha = cos(alpha_cur);
-            float sin_theta = sin(theta_cur);
-            float cos_theta = cos(theta_cur);
+            float sin_alpha = std::sin(alpha_cur);
+            float cos_alpha = std::cos(alpha_cur);
+            float sin_theta = std::sin(theta_cur);
+            float cos_theta = std::cos(theta_cur);
 
             float A = (-cos_beta_sin_xi + sin_beta_cos_xi * sin_alpha) * range_float + packet.data.param.b_axis_dist;
             float B = cos_alpha * cos_xi * range_float;
@@ -284,30 +226,9 @@ namespace unitree_lidar_sdk
             float orig_y = sin_theta * A + cos_theta * B;
             float orig_z = C + packet.data.param.a_axis_dist;
 
-            switch (GetSensorOrientation())
-            {
-            case SensorOrientation::VERTICAL:
-                // -------------------------------------------------------------
-                // LIDAR AXIS MAPPING (Vertical Mount)
-                // Physical: +Z Front, +X Down, +Y Left
-                // Target: +X Front, +Y Left, +Z Up
-                // Math: X_out = Z_phys, Y_out = Y_phys, Z_out = -X_phys
-                // -------------------------------------------------------------
-                point3d.x = orig_z;
-                point3d.y = orig_y;
-                point3d.z = -orig_x;
-                break;
-
-            case SensorOrientation::STANDARD:
-            default:
-                // -------------------------------------------------------------
-                // LIDAR AXIS MAPPING (Standard)
-                // -------------------------------------------------------------
-                point3d.x = orig_x;
-                point3d.y = orig_y;
-                point3d.z = orig_z;
-                break;
-            }
+            point3d.x = orig_x;
+            point3d.y = orig_y;
+            point3d.z = orig_z;
 
             point3d.intensity = intensities[j];
 

@@ -54,6 +54,11 @@ add_executable(replay_capture tools/replay_capture.cpp)
 target_compile_options(replay_capture PRIVATE -O2)
 target_link_libraries(replay_capture laszip)
 
+add_executable(test_capture_timing tests/test_capture_timing.cpp)
+set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_capture_timing laszip)
+add_test(NAME capture_timing COMMAND test_capture_timing)
+
 # Domain unit tests (src/domain only).
 foreach(t axis_map point_filter)
 add_executable(test_${t} tests/domain/test_${t}.cpp)

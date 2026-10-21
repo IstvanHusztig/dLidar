@@ -3,20 +3,26 @@
 #include "unitree_lidar_utilities.h"
 #include "time_alignment.h"
 #include "packet_state.h"
+#include "domain/geometry/axis_map.h"
+#include "domain/geometry/point_filter.h"
 
 #include <time.h>
 #include <vector>
 
 using namespace unitree_lidar_sdk;
 
-// Reject points inside the housing blind zone (spec: 0.05 m) to filter out
-// self-reflection off the sensor housing. Kept a bit past the blind zone
-// since accuracy degrades near it.
-const float kMinPointRangeM = 0.1f;
+// The L2's default point filter: rejects points inside the housing blind zone
+// (spec: 0.05 m, kept a bit past it since accuracy degrades near it: 0.1 m),
+// beyond 100 m, and low-reflectivity returns (intensity below 5 of 255), which
+// are usually noise or multipath rather than a real surface.
+const dlidar::PointFilter kL2DefaultFilter{0.1f, 100.0f, 5.0f};
 
-// Reject low-reflectivity returns (0-255 scale) that are usually noise/
-// multipath rather than a real surface.
-const uint8_t kMinPointIntensity = 5;
+// How the sensor's data becomes recorded data: the mount and the point filter.
+struct CaptureSetup
+{
+    dlidar::AxisMap mount;                 // default: sensor axes = output axes
+    dlidar::PointFilter filter = kL2DefaultFilter;
+};
 
 // Host clocks when a packet was returned by runParse().
 struct HostTime
@@ -34,11 +40,14 @@ inline HostTime HostNow()
 }
 
 // Turns parsed SDK packets into written points and IMU samples, all timed on
-// the L2 clock (see ImuTimeline), and keeps the per-packet timing log.
+// the L2 clock (see ImuTimeline), and keeps the per-packet timing log. Owns
+// the recording's time zero: the L2 stamp of the first point packet that has
+// points. Applies the mount, the conversion to g and the point filter.
 class CaptureTiming
 {
 public:
-    explicit CaptureTiming(const ImuTimeline::Config &config = ImuTimeline::Config()) : timeline_(config) {}
+    explicit CaptureTiming(const ImuTimeline::Config &config = ImuTimeline::Config(), const CaptureSetup &setup = CaptureSetup())
+        : timeline_(config), setup_(setup) {}
 
     // IMU packet just parsed. Acceleration in g, angular velocity in rad/s.
     void OnImu(const LidarImuData &imu, HostTime now, std::vector<OutputImuData> &imu_out)
@@ -46,13 +55,21 @@ public:
         ParsedImuData parsed;
         parseFromImuPacket(parsed, imu);
 
+        // m/s^2 -> g, then the mount (select and negate only, so the order
+        // does not change a bit).
+        float accel_g[3], accel[3], gyro[3];
+        for (int i = 0; i < 3; i++)
+            accel_g[i] = parsed.accel[i] / 9.80665f;
+        setup_.mount.Apply(accel_g, accel);
+        setup_.mount.Apply(parsed.gyro, gyro);
+
         ImuInput in{};
-        in.data.AccelerationX = parsed.accel[0];
-        in.data.AccelerationY = parsed.accel[1];
-        in.data.AccelerationZ = parsed.accel[2];
-        in.data.GyroX = parsed.gyro[0];
-        in.data.GyroY = parsed.gyro[1];
-        in.data.GyroZ = parsed.gyro[2];
+        in.data.AccelerationX = accel[0];
+        in.data.AccelerationY = accel[1];
+        in.data.AccelerationZ = accel[2];
+        in.data.GyroX = gyro[0];
+        in.data.GyroY = gyro[1];
+        in.data.GyroZ = gyro[2];
         in.data.ImuId = 0;
         in.sensor_ns = parsed.sensor_stamp_ns;
         in.seq = parsed.seq;
@@ -74,10 +91,18 @@ public:
         if (data.point_num == 0)
             return;
 
-        parseFromPacketToPointCloud(cloud_, packet, kMinPointRangeM, 100, kMinPointIntensity);
-        points_out.insert(points_out.end(), cloud_.points.begin(), cloud_.points.end());
+        if (zero_ns_ == 0) // set before converting this packet, so its first point is at 0
+            zero_ns_ = stamp;
+        parseFromPacketToPointCloud(cloud_, packet, zero_ns_, setup_.filter);
+        for (PointDLidar p : cloud_.points)
+        {
+            if (!setup_.filter.Accepts(p.range, p.intensity))
+                continue;
+            setup_.mount.ApplyInPlace(p.x, p.y, p.z);
+            points_out.push_back(p);
+        }
 
-        timeline_.SetZero(GetGlobalTimeOffsetNs());
+        timeline_.SetZero(zero_ns_);
         timeline_.PushPointPacket(stamp, PacketDurationNs(data.point_num, data.time_increment), now.mono_ns, now.unix_ns,
                                   imu_out);
     }
@@ -103,8 +128,14 @@ public:
 
     const ImuTimeline &Timeline() const { return timeline_; }
 
+    // The L2 stamp all recorded times are relative to; 0 until the first point
+    // packet with points.
+    int64_t ZeroNs() const { return zero_ns_; }
+
 private:
     ImuTimeline timeline_;
+    CaptureSetup setup_;
+    int64_t zero_ns_ = 0;
     PointCloudDLidar cloud_;
     std::vector<PacketTiming> log_;
     std::vector<PointPacketState> packet_states_;

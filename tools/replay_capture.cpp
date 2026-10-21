@@ -14,6 +14,10 @@
 #if __has_include("packet_state.h")
 #define NEW_FORMAT 1
 #include "pcd_manager.h"
+#if __has_include("app/device_config.h")
+#define MOUNT_IN_CORE 1
+#include "app/device_config.h"
+#endif
 #else
 #define NEW_FORMAT 0
 #include "datawriter.h"
@@ -133,8 +137,13 @@ int main(int argc, char **argv)
     if (!ReadPacketLog(argv[1], log) || log.empty())
         return 1;
     double seconds = argc > 3 ? atof(argv[3]) : 1e9;
+#if MOUNT_IN_CORE
+    CaptureSetup setup;
+    setup.mount = kMount;
+#else
     GetSensorOrientation() = SensorOrientation::VERTICAL;
     GetGlobalTimeOffsetNs() = 0;
+#endif
     ImuTimeline::Config cfg;
     cfg.log = false;
     cfg.host.log = false;
@@ -150,7 +159,11 @@ int main(int argc, char **argv)
     info.lidar_hardware_version = "replay (synthetic packets)";
     info.sdk_version = unitree_lidar_sdk_VERSION;
     info.work_mode = 0;
+#if MOUNT_IN_CORE
+    ChunkAssembler as(cfg, info, setup);
+#else
     ChunkAssembler as(cfg, info);
+#endif
     for (const PacketTiming &t : log)
     {
         if ((t.host_mono_ns - log[0].host_mono_ns) / 1e9 > seconds || as.ChunksProduced() >= target_chunks)

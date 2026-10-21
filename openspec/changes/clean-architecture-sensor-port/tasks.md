@@ -23,10 +23,10 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 4. Core owns zero, mount, units and filter
 
-- [ ] 4.1 Move the time zero from `GetGlobalTimeOffsetNs` into `CaptureTiming` (first packet with `point_num > 0`, `== 0` sentinel, set before conversion, read at chunk collect); the conversion takes the zero as a parameter; verify golden is identical and a new test covers the zero rule (empty packets first, an all-filtered first packet)
-- [ ] 4.2 Make the conversion emit the sensor frame and m/s²; apply `AxisMap` and `/ 9.80665f` in `CaptureTiming` to points and IMU; delete `GetSensorOrientation`; use explicit float `std::sin`/`std::cos`; verify golden is identical and `test_sdk_conversion` passes
-- [ ] 4.3 Apply `PointFilter` in the core and pass it into the conversion for early rejection; delete `kMinPointRangeM`/`kMinPointIntensity` from `capture_timing.h` (the values become the L2 default filter); verify golden is identical
-- [ ] 4.4 Add a test of the in-packet order (log record → state row → points → IMU emitted by `PushPointPacket`) and `ChunkReady` after every packet; verify it passes
+- [x] 4.1 Move the time zero from `GetGlobalTimeOffsetNs` into `CaptureTiming` (first packet with `point_num > 0`, `== 0` sentinel, set before conversion, read at chunk collect); the conversion takes the zero as a parameter; verify golden is identical and a new test covers the zero rule (empty packets first, an all-filtered first packet)
+- [x] 4.2 Make the conversion emit the sensor frame and m/s²; apply `AxisMap` and `/ 9.80665f` in `CaptureTiming` to points and IMU; delete `GetSensorOrientation`; use explicit float `std::sin`/`std::cos`; verify golden is identical and `test_sdk_conversion` passes
+- [x] 4.3 Apply `PointFilter` in the core and pass it into the conversion for early rejection; delete `kMinPointRangeM`/`kMinPointIntensity` from `capture_timing.h` (the values become the L2 default filter); verify golden is identical
+- [x] 4.4 Add a test of the in-packet order (log record → state row → points → IMU emitted by `PushPointPacket`) and `ChunkReady` after every packet; verify it passes
 
 ## 5. Sensor port and Unitree L2 adapter
 

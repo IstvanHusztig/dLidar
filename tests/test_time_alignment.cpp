@@ -205,7 +205,6 @@ struct Result
 
 Result Run(const Sim &sim, ImuTimeline::Mode mode, std::vector<PacketTiming> *log = nullptr)
 {
-    GetGlobalTimeOffsetNs() = 0;
     ImuTimeline::Config cfg;
     cfg.mode = mode;
     cfg.log = false;
@@ -262,7 +261,7 @@ Result Run(const Sim &sim, ImuTimeline::Mode mode, std::vector<PacketTiming> *lo
         {
             size_t before = points_out.size();
             timing.OnPoints(PointPacket(e.index), now, points_out, imu_out);
-            zero = GetGlobalTimeOffsetNs();
+            zero = timing.ZeroNs();
             double start = e.index * kPointsPerPacket * kPointDtS;
             for (size_t i = before; i < points_out.size(); i++)
             {
@@ -311,7 +310,6 @@ void ExpectAligned(const char *name, const Result &r, ImuTimeline::Mode mode, do
 void TestPacketConversion()
 {
     printf("packet conversion\n");
-    GetGlobalTimeOffsetNs() = 0;
     ImuTimeline::Config cfg;
     cfg.mode = ImuTimeline::Mode::Sensor;
     cfg.log = false;
@@ -324,7 +322,7 @@ void TestPacketConversion()
     p.data.point_num = 3;
     p.data.time_increment = 1e-5f;
     timing.OnPoints(p, {1, 1}, pts, imu);
-    CHECK(GetGlobalTimeOffsetNs() == 1790000000123456789LL, "zero %" PRId64, GetGlobalTimeOffsetNs());
+    CHECK(timing.ZeroNs() == 1790000000123456789LL, "zero %" PRId64, timing.ZeroNs());
     CHECK(pts.size() == 3, "%zu points", pts.size());
     for (size_t j = 0; j < pts.size(); j++)
         CHECK(std::fabs(pts[j].time - j * (double)1e-5f) < 1e-12, "point %zu time %.12f", j, pts[j].time);

@@ -6,6 +6,7 @@
 // the calibration moves the points (docs/l2_point_conversion.md).
 #include "unitree_lidar_sdk.h"
 #include "capture_timing.h"
+#include "app/device_config.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -106,7 +107,8 @@ int main()
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     bind(sock, (sockaddr *)&from, sizeof from);
 
-    GetSensorOrientation() = SensorOrientation::VERTICAL; // as src/dLidar.cpp
+    CaptureSetup setup; // as src/dLidar.cpp
+    setup.mount = kMount;
     struct Calib
     {
         const char *name;
@@ -146,7 +148,7 @@ int main()
             const LidarPointDataPacket &parsed = reader->getLidarPointDataPacket();
             CHECK(memcmp(&parsed.data, &sent.data, sizeof(LidarPointData)) == 0, "SDK packet differs from sent");
 
-            CaptureTiming timing;
+            CaptureTiming timing(ImuTimeline::Config(), setup);
             std::vector<PointDLidar> dlidar;
             std::vector<OutputImuData> imu;
             timing.OnPoints(parsed, HostNow(), dlidar, imu);
@@ -192,14 +194,14 @@ int main()
                 for (const PointDLidar &p : dlidar)
                     kept |= p.sample_index == kv.first;
                 float r = d.param.range_scale * ((float)d.ranges[kv.first] + d.param.range_bias);
-                CHECK(kept || d.intensities[kv.first] < kMinPointIntensity || r < kMinPointRangeM,
+                CHECK(kept || d.intensities[kv.first] < kL2DefaultFilter.min_intensity || r < kL2DefaultFilter.min_range_m,
                       "SDK point j=%d (I=%u, r=%.3f) dropped by dLidar", kv.first, d.intensities[kv.first], r);
             }
             sdk_points += sdk_cloud.points.size();
             dlidar_points += matched;
         }
         CHECK(max_sdk_vs_dlidar <= kMaxDiffM, "calibration %s: |SDK - dLidar| = %.3g m", cal.name, max_sdk_vs_dlidar);
-        printf("calibration %-5s: SDK %zu points, dLidar %zu (rest removed by kMinPointIntensity/kMinPointRangeM); "
+        printf("calibration %-5s: SDK %zu points, dLidar %zu (rest removed by kL2DefaultFilter); "
                "max |SDK - dLidar| = %.2g m, float32 vs double model %.2g m; calibration moves points up to %.1f mm/m\n",
                cal.name, sdk_points, dlidar_points, max_sdk_vs_dlidar, max_float_vs_double, 1000 * max_cal_effect_per_m);
     }

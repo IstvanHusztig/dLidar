@@ -486,10 +486,8 @@ void TestParseFillsExtraFields()
         d.ranges[j] = (uint16_t)(j % 7 == 0 ? 0 : 1000 + 10 * j); // every 7th point has no return
         d.intensities[j] = (uint8_t)(j % 11 == 0 ? 2 : 100);      // every 11th is below the intensity floor
     }
-    GetGlobalTimeOffsetNs() = 0;
     PointCloudDLidar cloud;
-    parseFromPacketToPointCloud(cloud, pkt, 0.1f, 100, 5);
-    GetGlobalTimeOffsetNs() = 0;
+    parseFromPacketToPointCloud(cloud, pkt, StampToNs(d.info.stamp), dlidar::PointFilter{0.1f, 100, 5});
 
     size_t expected = 0;
     for (int j = 0; j < 300; j++)

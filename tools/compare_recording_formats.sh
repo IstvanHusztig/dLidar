@@ -30,13 +30,13 @@ fi
 git -C "$repo" archive "$old_rev" include | tar -x -C "$work/old"
 
 laszip_lib="$repo/build/3rd/lib"
-build() { # include_dir output
-    g++ -O2 -std=c++17 -ffp-contract=off -I"$1" -I"$repo/src" -I"$repo/3rd/include" -I"$repo/3rd" "$repo/tools/replay_capture.cpp" \
+build() { # include_dirs output
+    g++ -O2 -std=c++17 -ffp-contract=off $1 -I"$repo/3rd/include" -I"$repo/3rd" "$repo/tools/replay_capture.cpp" \
         -L"$laszip_lib" -llaszip -Wl,-rpath,"$laszip_lib" -o "$2"
 }
 echo "building replay against $old_rev and the working tree ..."
-build "$work/old/include" "$work/replay_old"
-build "$repo/include" "$work/replay_new"
+build "-I$work/old/include" "$work/replay_old"
+build "-I$repo/include -I$repo/src" "$work/replay_new"
 
 echo "replaying $packets ($seconds s) ..."
 "$work/replay_old" "$packets" "$out/old" "$seconds" > "$out/old.log" 2>&1

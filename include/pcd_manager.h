@@ -151,7 +151,8 @@ class ChunkAssembler
 public:
 	static const int kMaxPointsPerChunk = 14000;
 
-	ChunkAssembler(const ImuTimeline::Config &config, const RecordingInfo &info) : timing_(config), info_(info)
+	ChunkAssembler(const ImuTimeline::Config &config, const RecordingInfo &info, const CaptureSetup &setup = CaptureSetup())
+		: timing_(config, setup), info_(info)
 	{
 		Reserve();
 	}
@@ -211,12 +212,13 @@ private:
 		chunk.points = std::move(points_);
 		chunk.imu_data = std::move(imu_);
 		timing_.TakePacketLog(chunk.packets);
-		timing_.TakePacketStateRows(GetGlobalTimeOffsetNs(), chunk.packet_state_rows);
+		timing_.TakePacketStateRows(timing_.ZeroNs(), chunk.packet_state_rows);
 		return chunk;
 	}
 };
 
-void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &timing_config, uint32_t work_mode)
+void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &timing_config, uint32_t work_mode,
+					   const CaptureSetup &setup)
 {
 	const int target_chunks = 200; // ~1 min of data at 20 Hz, 18 scans per chunk
 
@@ -266,7 +268,7 @@ void ProcessSensorData(UnitreeLidarReader *lreader, const ImuTimeline::Config &t
 	DrainPendingPackets(lreader, std::chrono::seconds(2));
 	std::cout << ">>> STARTING CONTINUOUS DATA CAPTURE <<< (Ctrl-C to stop)" << std::endl;
 
-	ChunkAssembler assembler(timing_config, info);
+	ChunkAssembler assembler(timing_config, info, setup);
 
 	while (assembler.ChunksProduced() < target_chunks && !StopRequested())
 	{

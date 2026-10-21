@@ -1,12 +1,11 @@
 #include "pcd_manager.h"
+#include "app/device_config.h"
 
 // Sent with setLidarWorkMode at start-up; recorded in timingNNNN.json.
 const uint32_t kLidarWorkMode = 0;
 
 void SetLidarWorkMode(UnitreeLidarReader *lidarReader)
 {
-	unitree_lidar_sdk::GetSensorOrientation() = unitree_lidar_sdk::SensorOrientation::VERTICAL;
-
 	std::cout << "set Lidar work mode to: " << kLidarWorkMode << std::endl;
 	lidarReader->setLidarWorkMode(kLidarWorkMode);
 	sleep(1);
@@ -75,6 +74,14 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (!kMount.IsProperRotation())
+	{
+		std::cerr << "The configured mount (" << kMount.Describe() << ") is not a rotation; fix kMount in src/app/device_config.h." << std::endl;
+		return 2;
+	}
+	CaptureSetup setup;
+	setup.mount = kMount;
+
 	// A recording that was killed or lost power is finalized into its own
 	// subdirectory first, so the new recording does not overwrite it.
 	if (!RecoverInterruptedRecording(OutputDirectory(), true))
@@ -85,7 +92,7 @@ int main(int argc, char *argv[])
 
 	UnitreeLidarReader *lidarReader = InitializeLidar();
 
-	ProcessSensorData(lidarReader, timing_config, kLidarWorkMode);
+	ProcessSensorData(lidarReader, timing_config, kLidarWorkMode, setup);
 
 	lidarReader->stopLidarRotation();
 
