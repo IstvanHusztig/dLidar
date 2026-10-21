@@ -26,7 +26,7 @@ A recording that cannot be written completely SHALL end in Error with a warning,
 
 #### Scenario: Sensor does not start
 - **WHEN** the sensor does not answer its start-up queries within 10 s
-- **THEN** the device reports a warning and Error
+- **THEN** the device reports a warning and Error, and no recording files are created
 
 #### Scenario: Storage fails
 - **WHEN** the storage cannot open or fails while writing
@@ -45,7 +45,7 @@ Start, stop and status requests from every input channel SHALL go through one th
 
 #### Scenario: Stop during start-up
 - **WHEN** a stop arrives while the sensor is starting up (Preparing)
-- **THEN** the start-up ends within a fraction of a second and the recording is finalized
+- **THEN** the start-up ends within about a second, no recording files are created, and the device returns to Idle
 
 #### Scenario: Second signal still kills
 - **WHEN** a second SIGINT/SIGTERM/SIGHUP arrives

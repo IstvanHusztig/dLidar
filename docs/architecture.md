@@ -89,11 +89,13 @@ input channel ──StartRecording──> ScannerController ──(worker thread
 ```
 
 States: Idle → Preparing (sensor start-up) → Recording → Finalizing (sensor stopped, files finished) → Idle. The state is Error if the recording failed, with a warning first:
-- the sensor did not start (the L2 gives up after 10 s without an answer)
+- the sensor did not start (the L2 gives up after 10 s without an answer); no files are written
 - the storage could not open or failed while writing; the capture then stops
 - an exception (sensor, storage, out of memory); the chunks already captured are written and the files closed
 
 A new start is accepted from Idle or Error. A start command in any other state is rejected, and the current state is returned. The state that `Status()` and `StartRecording` report is the one that decides: an accepted start reads Preparing at once, and the final Idle/Error is stored before the channels hear of it, so a channel may start the next recording from its `OnState(Idle)`.
+
+The storage opens only once the sensor has started, so a recording that never started (sensor failure, stop during Preparing: Preparing → Idle) leaves no files for dMapper to read.
 
 Threads: the controller's worker runs the recordings (capture loop, `CaptureTiming`, the events of the recording) and each recording has a writer thread (storage, storage warnings). The sensor is only used by the worker and the storage only by the writer. The chunk queue between them is not bounded, since dropping chunks would break the recording; past 50 waiting chunks a warning is sent.
 
@@ -134,4 +136,3 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
 - A daemon mode (wait idle for buttons/phone), GPIO and Bluetooth adapters.
 - The signal stop flag stays set once raised, so it ends every later recording too. Right for the CLI; a daemon mode needs its own exit command.
-- A stop during Preparing still produces an (empty) recording, because the storage opens at the start.

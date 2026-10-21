@@ -34,8 +34,9 @@ namespace dlidar
     // never stalls packet reading. States and messages go to `events`, from
     // this thread and (storage warnings) from the writer thread.
     //
-    // It ends in Error unless the sensor started and the storage wrote
-    // everything. A storage failure stops the capture. An exception (sensor,
+    // The storage is opened once the sensor has started, so a recording that
+    // never started leaves no files. It ends in Error unless the sensor
+    // started and the storage wrote everything. A storage failure stops the capture. An exception (sensor,
     // storage, out of memory) ends the capture too; the chunks already queued
     // are still written and the files closed.
     class RecordSession
@@ -44,7 +45,8 @@ namespace dlidar
         RecordSession(LidarSensor &sensor, RecordingStorage &storage, DeviceEvents &events, const SessionConfig &config)
             : sensor_(sensor), storage_(storage), events_(events), config_(config) {}
 
-        // Runs the whole recording; true if it was written completely.
+        // Runs the whole recording; true if it was written completely (or,
+        // stopped during the start-up, nothing had to be written).
         bool Run(const StopToken &stop)
         {
             status_.location = storage_.Location();
@@ -52,28 +54,33 @@ namespace dlidar
             status_.points = 0;
             Publish(DeviceState::Preparing);
 
-            std::thread writer([this] { WriterLoop(); });
-
-            bool sensor_ok = false;
+            // The storage opens only once the sensor runs: a failed start or
+            // a stop during the start-up leaves no files behind (dMapper reads
+            // every .csv/.laz in the folder).
+            std::thread writer;
+            bool sensor_ok = false, recorded = false;
             std::string failure;
             try
             {
                 sensor_ok = sensor_.Prepare(stop);
-                SensorInfo info = sensor_.Info();
-                assembler_ = std::make_unique<ChunkAssembler>(sensor_, config_.timing, info.versions, config_.setup.mount,
-                                                              config_.setup.filter.value_or(info.default_filter));
                 if (!sensor_ok)
                     events_.OnWarning({WarningKind::SensorFailed, "ERROR: the sensor did not start."});
-                else
+                else if (!stop.StopRequested())
                 {
+                    SensorInfo info = sensor_.Info();
+                    assembler_ = std::make_unique<ChunkAssembler>(sensor_, config_.timing, info.versions, config_.setup.mount,
+                                                                  config_.setup.filter.value_or(info.default_filter));
+                    writer = std::thread([this] { WriterLoop(); });
+                    recorded = true;
                     Publish(DeviceState::Recording);
                     Capture(stop);
                 }
 
                 if (sensor_ok)
                     sensor_.Stop();
-                Publish(DeviceState::Finalizing);
+                if (recorded)
                 {
+                    Publish(DeviceState::Finalizing);
                     SensorChunk final_chunk = assembler_->Finish();
                     events_.OnSummary(Summary(assembler_->Timeline()));
                     Push(std::move(final_chunk));
@@ -88,20 +95,22 @@ namespace dlidar
                 failure = "unknown exception";
             }
             bool failed = !failure.empty();
+            if (writer.joinable())
             {
-                std::lock_guard<std::mutex> lock(mutex_);
-                capturing_ = false;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    capturing_ = false;
+                }
+                cv_.notify_one();
+                writer.join();
             }
-            cv_.notify_one();
-            writer.join();
 
             if (failed)
             {
                 StopSensorQuietly();
-                events_.OnWarning({WarningKind::RecordingFailed, "ERROR: the recording stopped on an internal error: " +
-                                                                     (failure.empty() ? std::string("unknown") : failure)});
+                events_.OnWarning({WarningKind::RecordingFailed, "ERROR: the recording stopped on an internal error: " + failure});
             }
-            bool ok = sensor_ok && writer_ok_ && !failed;
+            bool ok = sensor_ok && !failed && (!recorded || writer_ok_);
             status_.last_ok = ok;
             Publish(ok ? DeviceState::Idle : DeviceState::Error);
             return ok;

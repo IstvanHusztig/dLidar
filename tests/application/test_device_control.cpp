@@ -170,7 +170,8 @@ void TestSensorFailure()
     c.StartRecording();
     c.WaitIdle();
     CHECK(c.Status().state == DeviceState::Error && !c.Status().last_ok, "state %s", StateName(c.Status().state));
-    CHECK(!sensor.stopped && storage.closes == 1, "sensor stopped %d, storage closed %d", sensor.stopped, storage.closes);
+    CHECK(!sensor.stopped && storage.opens == 0, "sensor stopped %d, storage opened %d (no files)", sensor.stopped, storage.opens);
+    CHECK((events.States() == std::vector<std::string>{"preparing", "error"}), "states");
     std::vector<std::string> ev = events.Events();
     CHECK(std::count(ev.begin(), ev.end(), "warning:ERROR: the sensor did not start.") == 1, "warning");
     sensor.prepare_ok = true;
@@ -263,11 +264,37 @@ void TestSensorThrowsInPrepare()
     std::vector<std::string> ev = events.Events();
     CHECK(std::count(ev.begin(), ev.end(), "warning:ERROR: the recording stopped on an internal error: no route to host") == 1,
           "warning");
-    CHECK(storage.closes == 1 && sensor.stopped, "storage closed %d, sensor stopped %d", storage.closes, sensor.stopped);
+    CHECK(storage.opens == 0 && sensor.stopped, "storage opened %d, sensor stopped %d", storage.opens, sensor.stopped);
     sensor.on_prepare = nullptr;
     CHECK(c.StartRecording(), "start after the exception");
     c.WaitIdle();
     CHECK(c.Status().state == DeviceState::Idle && c.Status().last_ok, "second recording");
+}
+
+// A stop while the sensor starts up: no files, back to Idle, the next
+// start records normally.
+void TestStopDuringStartup()
+{
+    printf("a stop during the start-up writes no files\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    Gate gate;
+    sensor.on_prepare = [&] { gate.Wait(); };
+    MemoryStorage storage;
+    RecordingEvents events;
+    ScannerController c(sensor, storage, events, Config(2));
+    c.StartRecording();
+    CHECK(WaitFor([&] { return c.Status().state == DeviceState::Preparing; }), "not preparing");
+    c.StopRecording();
+    gate.Open();
+    c.WaitIdle();
+    CHECK(storage.opens == 0 && sensor.stopped && c.Status().state == DeviceState::Idle && c.Status().last_ok,
+          "opened %d, stopped %d, state %s", storage.opens, sensor.stopped, StateName(c.Status().state));
+    CHECK((events.States() == std::vector<std::string>{"preparing", "idle"}), "states");
+    sensor.on_prepare = nullptr;
+    c.StartRecording();
+    c.WaitIdle();
+    CHECK(storage.opens == 1 && storage.closes == 1 && c.Status().last_ok, "next recording");
 }
 
 // The controller is destroyed while a recording runs: it is stopped and
@@ -298,6 +325,7 @@ int main()
     TestStateDecidesStart();
     TestStartFromCallback();
     TestSensorThrowsInPrepare();
+    TestStopDuringStartup();
     TestDestroyWhileRecording();
     return FinishTests("Device control");
 }

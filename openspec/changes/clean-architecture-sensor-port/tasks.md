@@ -74,6 +74,7 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 - [x] 11.4 EventHub: async channels held by `shared_ptr` (a detached stuck thread keeps its channel alive), threads start at registration, sync channels get one event at a time, one shared 1 s shutdown deadline
 - [x] 11.5 L2 start-up: stop checked during the restart sleeps; dirtiness/time-delay queries time out after 10 s (Error instead of hanging forever); `main` starts no recording after an early stop
 - [x] 11.6 Golden replay (60 s and whole log) identical; 100 stress runs of each test binary without failure
+- [x] 11.8 No files for a recording that never started: the storage opens once the sensor runs (sensor failure, stop during the start-up); checked with the real L2 adapter against an address without an L2 (Error after 17 s, stop ends within ~1 s, empty output folder)
 - [ ] 11.7 On the L2: Ctrl-C during the start-up ends within ~0.1 s; an unplugged L2 ends in Error after ~10 s
 
 ## Workflow follow-up

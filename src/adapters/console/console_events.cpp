@@ -17,9 +17,14 @@ namespace dlidar
         case DeviceState::Idle:
             if (last_ == DeviceState::Finalizing)
                 std::cout << "Capture complete. Recording is in " << status.location << std::endl;
+            else if (last_ == DeviceState::Preparing)
+                std::cout << "Stopped before the recording started; no files were written." << std::endl;
             break;
         case DeviceState::Error:
-            std::cerr << "Recording failed. Whatever was captured is in " << status.location << std::endl;
+            if (last_ == DeviceState::Preparing)
+                std::cerr << "Recording failed before it started; no files were written." << std::endl;
+            else
+                std::cerr << "Recording failed. Whatever was captured is in " << status.location << std::endl;
             break;
         case DeviceState::Preparing:
             break;
