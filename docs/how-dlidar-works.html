@@ -175,7 +175,7 @@
   </ul>
 
   <h2 id="files">The files of a recording</h2>
-  <p>Each recording takes the next free number NNNN, so earlier recordings are never overwritten. dMapper reads every <code>.csv</code>, <code>.las</code> and <code>.laz</code> in the folder, so no other file may use those extensions. Field by field: <a href="l2-recording-format.md">l2-recording-format.md</a>.</p>
+  <p>Each recording takes the next free number NNNN, so earlier recordings are never overwritten. dMapper reads every <code>.csv</code>, <code>.las</code> and <code>.laz</code> in the folder, so no other file may use those extensions. Field by field: <a href="l2-recording-format.md">l2-recording-format.md</a>. What recording format 2 added (per-point range, scan angles, packet state) and how it was verified: <a href="recording-format-2.html">recording-format-2.html</a>.</p>
   <div class="table-wrap"><table>
     <tr><th>File</th><th>Content</th><th>Used by</th></tr>
     <tr><td><code>lidarNNNN.laz</code></td><td>The point cloud (LAS 1.2, point format 1): x, y, z, intensity, time, plus extra bytes (range, raw range, sample index, packet seq, scan angles).</td><td>dMapper</td></tr>
@@ -271,6 +271,7 @@
   <ul>
     <li><a href="architecture.md">architecture.md</a>: the architecture in full, with the deferred items.</li>
     <li><a href="l2-recording-format.md">l2-recording-format.md</a>: every field of every file.</li>
+    <li><a href="recording-format-2.html">recording-format-2.html</a>: what recording format 2 added, for dMapper's intensity correction, and how it was verified.</li>
     <li><a href="imu_lidar_time_alignment.md">imu_lidar_time_alignment.md</a>: how IMU and point times are aligned.</li>
     <li><a href="l2_point_conversion.md">l2_point_conversion.md</a>: the L2 point math.</li>
     <li><a href="unitree_l2_slam_tuning.md">unitree_l2_slam_tuning.md</a>: L2 specifications and SLAM tuning.</li>

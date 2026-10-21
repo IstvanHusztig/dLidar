@@ -48,7 +48,7 @@
 <body>
 <main>
   <h1>dLidar recording format 2</h1>
-  <p class="sub">What changed in dLidar's Unitree L2 recordings, so dMapper can later add an intensity normalization (range and incidence-angle correction). The full field reference is <code>docs/l2-recording-format.md</code>.</p>
+  <p class="sub">What changed in dLidar's Unitree L2 recordings, so dMapper can later add an intensity normalization (range and incidence-angle correction). The full field reference is <code>docs/l2-recording-format.md</code>. For how dLidar works as a whole, see <a href="how-dlidar-works.html">How dLidar works</a>.</p>
 
   <div class="card rule">
     <strong>This change only adds data.</strong> Every format 1 field keeps its value, type and position. The IMU CSV is byte-identical. No new file in a recording folder ends in <code>.csv</code>, <code>.las</code> or <code>.laz</code>. Today's dMapper therefore reads a format 2 recording exactly as it read a format 1 recording.
