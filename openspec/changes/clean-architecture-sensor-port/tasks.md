@@ -61,7 +61,7 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 10. Integration checks
 
-- [ ] 10.1 Full golden replay of `~/PointCloudDump/packets0001.bin` (whole log) against commit 0; verify every file is identical
+- [x] 10.1 Full golden replay of `~/PointCloudDump/packets0001.bin` (whole log) against commit 0; verify every file is identical
 - [ ] 10.2 Live capture on the Pi 5 with the L2: start-up prints, recording, Ctrl-C finalization, a second-signal kill, and recovery on the next start; verify files are complete and `tools/check_imu_timestamps.py` is clean
 - [ ] 10.3 The same live capture on the Pi Zero 2 W; verify no dropped chunks or warnings beyond the baseline, and similar CPU/RAM use (`/usr/bin/time -v`)
 - [ ] 10.4 Import the live recording into dMapper with its configuration unchanged; verify the trajectory and map look like a pre-refactor recording of the same scene
