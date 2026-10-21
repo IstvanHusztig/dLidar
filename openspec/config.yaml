@@ -1,0 +1,42 @@
+schema: spec-driven
+
+context: |
+  The capture tool runs on a Raspberry Pi Zero 2 W (aarch64, 4 cores, 512 MB RAM) carried handheld
+  with a Unitree L2 LiDAR. Development and testing happen on a Raspberry Pi 5. Designs must fit the
+  Zero 2 W's CPU, memory and SD card write speed.
+  The recordings are processed by dMapper, our SLAM solution (https://github.com/IstvanHusztig/dMapper).
+  Any change to output files, units, axes or timestamps must state its effect on dMapper.
+  The recording format may only add data. Format 1 fields and the IMU CSV must stay identical
+  (see docs/l2-recording-format.md).
+  CLAUDE.md is the main project reference.
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

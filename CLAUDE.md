@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-dLidar is a C++17 capture tool for a **Unitree L2 LiDAR** (running on a Raspberry Pi / aarch64). It connects to the sensor over UDP, streams point-cloud and IMU packets, and writes a single LAZ point cloud plus an IMU CSV. The output is meant to be post-processed in HDmapper. The README says the project is still in development and not production ready.
+dLidar is a C++17 capture tool for a **Unitree L2 LiDAR** (running on a Raspberry Pi / aarch64). It connects to the sensor over UDP, streams point-cloud and IMU packets, and writes a single LAZ point cloud plus an IMU CSV. The output is post-processed by **dMapper**, our SLAM solution. Its code is on GitHub next to dLidar: https://github.com/IstvanHusztig/dMapper. Check it when a change affects what dMapper reads (file names, units, axes, timestamps). The capture runs on a Raspberry Pi Zero 2 W; development and testing happen on a Raspberry Pi 5. Changes are planned with OpenSpec (`openspec/`, `/opsx:*` commands; the CLI is in `~/.local/node/bin` on the Pi 5). The README says the project is still in development and not production ready.
 
 ## Build & Run
 
