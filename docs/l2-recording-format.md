@@ -2,7 +2,7 @@
 
 What a dLidar recording of the Unitree L2 contains, field by field. It is written for the dMapper side (odometry, mapping and the planned intensity normalization). Source references are `file:line` in this repo.
 
-**Recording format versions** (`kRecordingFormatVersion`, `include/datawriter.h:30`):
+**Recording format versions** (`kRecordingFormatVersion`, `src/domain/recording/recording_info.h`):
 
 | Version | What changed |
 |---|---|
@@ -11,7 +11,7 @@ What a dLidar recording of the Unitree L2 contains, field by field. It is writte
 
 ## Files of a recording
 
-All files are in `/home/$USER/PointCloudDump/` and share the session number NNNN, the next free 4-digit number (`include/datawriter.h:56-100`).
+All files are in `/home/$USER/PointCloudDump/` and share the session number NNNN, the next free 4-digit number (`NextSessionIndex`, `src/adapters/storage/recording_files.h`).
 
 | File | Since | Content |
 |---|---|---|
@@ -26,42 +26,42 @@ dMapper reads every `.csv`, `.las` and `.laz` in the folder, so a recording has 
 
 ## `lidarNNNN.laz`
 
-LAS 1.2, point format 1, written through the LASzip DLL API (`WriteLazChunk`, `include/datawriter.h`).
+LAS 1.2, point format 1, written through the LASzip DLL API (`WriteLazChunk`, `src/adapters/storage/laz_encoder.cpp`).
 
 ### Header
 
 | Field | Value | Since |
 |---|---|---|
-| version / point format | 1.2 / 1 (`datawriter.h:415`) | 1 |
+| version / point format | 1.2 / 1 (`laz_encoder.cpp`) | 1 |
 | point record length | 28 in format 1; **48** in format 2 (28 + 20 extra bytes) | 2 |
-| scale x/y/z | 0.0001 (`datawriter.h:417`) | 1 |
+| scale x/y/z | 0.0001 (`laz_encoder.cpp`) | 1 |
 | offset x/y/z | 0 (the LASzip default) | 1 |
 | `number_of_point_records` (legacy 32-bit) | the point count | 1 |
 | `number_of_points_by_return[0]` | the point count (every point has `return_number` 0, which doesn't match) | 1 |
 | `global_encoding` | 1. This claims adjusted standard GPS time, but `gps_time` is not GPS time; see below. | 1 |
 | `file_source_ID` | 4711 | 1 |
-| `generating_software` | format 1: `LASzip DLL 3.4 r4 (231020)`; format 2: **`dLidar recording format 2`** (`datawriter.h:442`) | 2 |
+| `generating_software` | format 1: `LASzip DLL 3.4 r4 (231020)`; format 2: **`dLidar recording format 2`** (`laz_encoder.cpp`) | 2 |
 | VLRs | format 2: the standard Extra Bytes VLR (LASF_Spec, record 4), plus LASzip's own | 2 |
 
 ### Standard point fields (same in formats 1 and 2)
 
 | Field | Value | Source |
 |---|---|---|
-| X, Y, Z | The L2's calibrated sensor frame, remapped for the vertical mount: x = orig_z, y = orig_y, z = −orig_x (+X front, +Y left, +Z up). No mounting rotation or lever arm. | `unitree_lidar_utilities.h:313` |
-| `intensity` | The raw 0–255 byte as sent (`intensities[j]`), not scaled. It goes byte → float → U16. | `unitree_lidar_utilities.h:329`, `datawriter.h:477` |
-| `gps_time` | Seconds since the zero, which is the L2 stamp of the first point packet: `(stamp − zero)/1e9 + j·time_increment`. The packet stamp is the time of its first point. The IMU `timestamp` column uses the same clock and zero, in ns. | `unitree_lidar_utilities.h:271, 331`, `datawriter.h:478` |
-| `user_data` | Always 1 (the hard-coded `ring`). It carries no information. | `unitree_lidar_utilities.h:274`, `datawriter.h:479` |
+| X, Y, Z | The L2's calibrated sensor frame, remapped for the vertical mount: x = orig_z, y = orig_y, z = −orig_x (+X front, +Y left, +Z up). No other mounting rotation and no lever arm. | `l2::ParsePoints`, `kMount` |
+| `intensity` | The raw 0–255 byte as sent (`intensities[j]`), not scaled. It goes byte → float → U16. | `l2::ParsePoints`, `laz_encoder.cpp` |
+| `gps_time` | Seconds since the zero, which is the L2 stamp of the first point packet: `(stamp − zero)/1e9 + j·time_increment`. The packet stamp is the time of its first point. The IMU `timestamp` column uses the same clock and zero, in ns. | `l2::ParsePoints`, `laz_encoder.cpp` |
+| `user_data` | Always 1 (the hard-coded `ring`). It carries no information. | `l2::ParsePoints`, `laz_encoder.cpp` |
 | classification, point_source_ID, return_number, number_of_returns, scan_angle_rank, flags | Never set: always 0. | — |
 
-Which points are written did not change. A point is dropped if `ranges[j]` is 0, if it is outside the packet's `range_min`/`range_max`, if the range is below 0.1 m (`kMinPointRangeM`) or above 100 m, or if the intensity is below 5 (`kMinPointIntensity`) (`unitree_lidar_utilities.h`, `capture_timing.h:15-19`).
+Which points are written did not change. A point is dropped if `ranges[j]` is 0, if it is outside the packet's `range_min`/`range_max`, if the range is below 0.1 m or above 100 m, or if the intensity is below 5 (`l2::kDefaultFilter`, applied in `l2::ParsePoints` and again by `CaptureTiming`).
 
 ### Extra bytes (format 2)
 
-These are stored in the record after the 28 standard bytes, in this order, and are described by the standard Extra Bytes VLR (`kLazExtraAttributes`, `datawriter.h:343`; packing `PackLazExtraBytes`, `datawriter.h:353`). Readers that don't use extra bytes see the format 1 fields unchanged. laspy 2.7 lists them by name and type (verified). Other readers of the standard VLR (PDAL, LAStools, CloudCompare) should do the same, but that was not tested.
+These are stored in the record after the 28 standard bytes, in this order, and are described by the standard Extra Bytes VLR (`kLazExtraAttributes` and `PackLazExtraBytes`, `src/adapters/storage/laz_encoder.cpp`). Readers that don't use extra bytes see the format 1 fields unchanged. laspy 2.7 lists them by name and type (verified). Other readers of the standard VLR (PDAL, LAStools, CloudCompare) should do the same, but that was not tested.
 
 | Name | Type | Byte | Unit | Meaning | Set at |
 |---|---|---|---|---|---|
-| `range` | float32 | 0 | m | The corrected range used for xyz: `range_scale * (ranges[j] + range_bias)`, as a float32 computed exactly as in the parser. | `unitree_lidar_utilities.h:282, 333` |
+| `range` | float32 | 0 | m | The corrected range used for xyz: `range_scale * (ranges[j] + range_bias)`, as a float32 computed exactly as in the parser. | `l2::ParsePoints` |
 | `raw_range` | uint16 | 4 | mm | `ranges[j]` as sent by the L2. | `:337` |
 | `sample_index` | uint16 | 6 | — | `j`, the index of the point in its packet (0..`point_num`−1, 0..299 on the L2). Filtered points leave gaps, but the remaining points keep their own `j`. | `:338` |
 | `packet_seq` | uint32 | 8 | — | The packet's `info.seq`. On the L2 it wraps at 1024 (measured). Use it with `packetstateNNNN.tsv`. | `:336` |
@@ -69,15 +69,15 @@ These are stored in the record after the 28 standard bytes, in this order, and a
 | `theta` | float32 | 16 | rad | The theta angle used for the point: `com_horizontal_angle_start + theta_angle_bias`, plus `com_horizontal_angle_step` per sample, accumulated in float32 as in the parser. Not wrapped to [0, 2π). | `:260, 335` |
 
 - **Scale/offset:** LASzip's `laszip_add_attribute` always sets the scale and offset option bits. dLidar passes scale 1 and offset 0 for every attribute, so the values are the stored numbers in the units above. Readers that honour scale (laspy) return the integer attributes as floats of the same value.
-- **Beam direction in the sensor frame:** `orig = (cosθ·A − sinθ·B, sinθ·A + cosθ·B, C + a_axis_dist)` with `A = (−cosβ sinξ + sinβ cosξ sinα)·r + b_axis_dist`, `B = cosα cosξ·r`, `C = (sinβ sinξ + cosβ cosξ sinα)·r`. Here α = `alpha`, θ = `theta`, r = `range`, and β, ξ, a, b come from the point's packet row in `packetstateNNNN.tsv` (`unitree_lidar_utilities.h:288-302`). The VERTICAL remap above then turns `orig` into X/Y/Z. `|xyz|` differs from `range` by at most `hypot(a_axis_dist, b_axis_dist)`.
+- **Beam direction in the sensor frame:** `orig = (cosθ·A − sinθ·B, sinθ·A + cosθ·B, C + a_axis_dist)` with `A = (−cosβ sinξ + sinβ cosξ sinα)·r + b_axis_dist`, `B = cosα cosξ·r`, `C = (sinβ sinξ + cosβ cosξ sinα)·r`. Here α = `alpha`, θ = `theta`, r = `range`, and β, ξ, a, b come from the point's packet row in `packetstateNNNN.tsv` (`l2::ParsePoints`). The vertical mount remap above then turns `orig` into X/Y/Z. `|xyz|` differs from `range` by at most `hypot(a_axis_dist, b_axis_dist)`.
 - **Matching a point to its packet row:** points are written packet by packet in arrival order. A new packet starts where `packet_seq` changes or `sample_index` does not increase. `gps_time = stamp_ns/1e9 + sample_index·time_increment` holds exactly with that row's `stamp_ns` and `time_increment`.
 - **Size:** the extra bytes compress much less than the standard fields. A replay of 190 s grew from 46 MB (format 1) to 109 MB (format 2).
 
 ## `packetstateNNNN.tsv` (format 2)
 
-Tab-separated, one header line, then one row per point packet received while recording, in arrival order. Packets that contributed no point are included. The rows are built by `MakePointPacketState` / `AppendPacketStateRow` (`include/packet_state.h:31, 60`) from `CaptureTiming::OnPoints` (`include/capture_timing.h:73`). Floats are printed with 9 significant digits, which gives back the received float32 exactly. Integers are exact. A partial last row from a crash is cut off by recovery (`datawriter.h:587`).
+Tab-separated, one header line, then one row per point packet received while recording, in arrival order. Packets that contributed no point are included. The rows are built by `MakePointPacketState` / `AppendPacketStateRow` (`src/adapters/unitree_l2/l2_packet_state.h`) for every point packet `UnitreeL2Sensor::Poll` returns, taken at each chunk with the recording zero. Floats are printed with 9 significant digits, which gives back the received float32 exactly. Integers are exact. A partial last row from a crash is cut off by recovery (`src/adapters/storage/recovery.cpp`).
 
-Units and meanings come from the vendor's protocol header (`include/unitree_lidar_protocol.h`). Where Unitree documents no unit, the column says "undocumented".
+Units and meanings come from the vendor's protocol header (`src/adapters/unitree_l2/vendor/unitree_lidar_protocol.h`). Where Unitree documents no unit, the column says "undocumented".
 
 | Column | Unit | Meaning |
 |---|---|---|
@@ -107,7 +107,7 @@ The unit labels "likely" are guesses from the field names. The values are as sen
 
 ## `timingNNNN.json`
 
-All format 1 keys are unchanged (including its own `"format_version": 1`, the version of the timing report). Format 2 adds these keys at the top (`AddRecordingInfo`, `datawriter.h:87`; queried in `QueryRecordingInfo`, `include/pcd_manager.h:111`):
+All format 1 keys are unchanged (including its own `"format_version": 1`, the version of the timing report). Format 2 adds these keys at the top (`AddRecordingInfo`, `src/domain/recording/recording_info.h`; queried in `LiveL2Source::Prepare`):
 
 | Key | Since | Value |
 |---|---|---|
@@ -115,7 +115,7 @@ All format 1 keys are unchanged (including its own `"format_version": 1`, the ve
 | `lidar_firmware_version` | 2 | From `getVersionOfLidarFirmware`, polled for up to 3 s before recording. `"unknown"` if the L2 sent no version packet in that time. |
 | `lidar_hardware_version` | 2 | From `getVersionOfLidarHardware` (up to 1 s), or `"unknown"`. |
 | `sdk_version` | 2 | From `getVersionOfSDK` (falls back to `unitree_lidar_sdk_VERSION`, 2.0.4). |
-| `work_mode` | 2 | The value sent with `setLidarWorkMode` (`kLidarWorkMode = 0`, `src/dLidar.cpp:4`). |
+| `work_mode` | 2 | The value sent with `setLidarWorkMode` (`kLidarWorkMode = 0`, `src/app/device_config.h`). |
 
 ## `imuNNNN.csv` (unchanged)
 
@@ -123,10 +123,10 @@ Space-separated, with the header `gyroX gyroY gyroZ accX accY accZ imuId timesta
 
 ## `points_tempNNNN.bin` (crash recovery)
 
-- **Format 2:** a 16-byte header: the magic `dLptsv2\n`, the record size as uint32 (48), and 4 reserved bytes (`kPointsTempMagic`, `datawriter.h:245`). Then raw 48-byte `PointDLidar` records (`unitree_lidar_utilities.h`).
+- **Format 2:** a 16-byte header: the magic `dLptsv2\n`, the record size as uint32 (48), and 4 reserved bytes (`kPointsTempMagic`, `src/adapters/storage/recording_files.h`). Then raw 48-byte `PointRecord` records (`src/domain/recording/point_record.h`).
 - **Format 1** (older builds): no header, raw 32-byte records (`PointDLidarV1`).
 
-`DetectPointsTempLayout` (`datawriter.h:279`) recognises both. A format 1 temp file is still recovered and becomes a format 1 LAZ (no extra bytes, LASzip `generating_software`). A trailing partial record is ignored.
+`DetectPointsTempLayout` (`src/adapters/storage/recording_files.h`) recognises both. A format 1 temp file is still recovered and becomes a format 1 LAZ (no extra bytes, LASzip `generating_software`). A trailing partial record is ignored.
 
 ## Checking a format 2 recording against format 1
 
@@ -138,4 +138,4 @@ The change was verified by replaying the same packets through the previous code 
 - The only new file was `packetstateNNNN.tsv`.
 - On the extra bytes and the sidecar: `|xyz| − range` stayed within the axis offsets, `sample_index` was within 0..299, and `range` equalled `range_scale·(raw_range+range_bias)` exactly. `packet_seq` and `gps_time` matched the sidecar row of every point. The sidecar had one row per point packet of `packetsNNNN.bin`, and its seq gaps matched the packet log.
 
-To repeat this check after a later format change, run `tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]`. It builds `tools/replay_capture.cpp` against `OLD_REV`'s `include/` and against the working tree, replays the packet log through both, and runs `tools/verify_recording_format.py OLD_DIR NEW_DIR`, which needs `laspy[lazrs]` and numpy. `bin/replay_capture` alone writes one replayed recording.
+To repeat this check after a later format change, run `tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]`. It builds the frozen `tools/replay_capture_format1.cpp` against `OLD_REV`'s `include/` and uses the working tree's `bin/replay_capture`, replays the packet log through both, and runs `tools/verify_recording_format.py OLD_DIR NEW_DIR`, which needs `laspy[lazrs]` and numpy. `bin/replay_capture` alone writes one replayed recording.

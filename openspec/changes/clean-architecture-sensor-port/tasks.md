@@ -56,8 +56,8 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 9. Documentation
 
-- [ ] 9.1 Write `docs/architecture.md` (layers, dependency rule, ports, data flow, how to add a sensor / input channel / output channel, deferred items such as the JSON serializer and format 3); verify every path it names exists
-- [ ] 9.2 Update CLAUDE.md (Architecture, Build & Run, file paths) and the file references in `docs/*.md`; verify `grep -rn 'include/' CLAUDE.md docs/*.md` finds no stale paths
+- [x] 9.1 Write `docs/architecture.md` (layers, dependency rule, ports, data flow, how to add a sensor / input channel / output channel, deferred items such as the JSON serializer and format 3); verify every path it names exists
+- [x] 9.2 Update CLAUDE.md (Architecture, Build & Run, file paths) and the file references in `docs/*.md`; verify `grep -rn 'include/' CLAUDE.md docs/*.md` finds no stale paths
 
 ## 10. Integration checks
 

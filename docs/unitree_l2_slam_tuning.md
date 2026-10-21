@@ -52,26 +52,26 @@ These come from the current code and have to match the SLAM config.
 
 | Aspect | dLidar behavior | Source |
 |---|---|---|
-| Axis frame | `SensorOrientation::VERTICAL` remaps **both** points and IMU from physical (+Z front, +X down, +Y left) to +X front, +Y left, +Z up. The LiDAR↔IMU rotation extrinsic should therefore already be close to identity. | `include/unitree_lidar_utilities.h` |
-| Acceleration units | **g** (m/s² divided by 9.80665) | `parseFromImuPacket` |
-| Gyro units | rad/s | `parseFromImuPacket` |
-| Point time | `double` seconds on the **L2 clock**: (packet stamp − zero) / 1e9 + j · `time_increment`. The packet stamp is the time of its first point. Zero (`GetGlobalTimeOffsetNs`) is the stamp of the first point packet. | `parseFromPacketToPointCloud` |
-| IMU timestamps | ns on the **same L2 clock** and zero (`timestamp` column): the L2's stamp of each IMU sample. `timestampUnix` = `timestamp` + one constant per recording. See `docs/imu_lidar_time_alignment.md`. | `ImuTimeline` in `include/time_alignment.h` |
+| Axis frame | The mount `kMount` (`dlidar::AxisMap`) remaps **both** points and IMU from physical (+Z front, +X down, +Y left) to +X front, +Y left, +Z up. The LiDAR↔IMU rotation extrinsic should therefore already be close to identity. | `src/app/device_config.h`, `CaptureTiming` |
+| Acceleration units | **g** (m/s² divided by 9.80665) | `CaptureTiming` |
+| Gyro units | rad/s | `l2::ParseImu` |
+| Point time | `double` seconds on the **L2 clock**: (packet stamp − zero) / 1e9 + j · `time_increment`. The packet stamp is the time of its first point. The zero (`CaptureTiming::ZeroNs`) is the stamp of the first point packet with points. | `l2::ParsePoints` |
+| IMU timestamps | ns on the **same L2 clock** and zero (`timestamp` column): the L2's stamp of each IMU sample. `timestampUnix` = `timestamp` + one constant per recording. See `docs/imu_lidar_time_alignment.md`. | `ImuTimeline` in `src/domain/timing/time_alignment.h` |
 | IMU sample spacing | As stamped by the L2. Nothing is resampled, interpolated or rebuilt; a sample whose stamp is not after the previous one is dropped. Only if the stamps fail the startup check (`timingNNNN.json` says `host_aligned`) is the spacing rebuilt from arrivals (`ImuTimestamper`) and mapped onto the L2 clock. Strictly increasing. | `ImuTimeline` |
-| Timing metadata | `timingNNNN.json`: IMU time source, decision, drops, measured clock rates and latencies. `packetsNNNN.bin`: arrival and L2 stamp of every packet (replay with `bin/replay_packets`). | `include/time_alignment.h` |
-| Range filter at parse time | Sensor packet `range_min`/`range_max`, plus a **0.1 m** minimum applied by dLidar (`kMinPointRangeM`) to reject housing self-reflection. Max stays at the parser default of 100 m; the SLAM max-range cutoff (realistically 15-30 m depending on reflectivity) is not applied here. | `include/capture_timing.h` |
-| Intensity filter at parse time | Points with reflectivity below **5** (0-255 scale, `kMinPointIntensity`) are dropped as likely noise/multipath. | `include/capture_timing.h` |
-| LAZ precision | Scale factor 0.0001 m (0.1 mm), well below the 4.5 mm sensor resolution | `include/datawriter.h` |
-| IMU CSV format | Space-separated: `gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix` | `include/datawriter.h` |
+| Timing metadata | `timingNNNN.json`: IMU time source, decision, drops, measured clock rates and latencies. `packetsNNNN.bin`: arrival and L2 stamp of every packet (replay with `bin/replay_packets`). | `src/domain/timing/time_alignment.h` |
+| Range filter at parse time | Sensor packet `range_min`/`range_max`, plus a **0.1 m** minimum applied by dLidar (`l2::kDefaultFilter`) to reject housing self-reflection. Max stays at 100 m; the SLAM max-range cutoff (realistically 15-30 m depending on reflectivity) is not applied here. | `src/adapters/unitree_l2/l2_conversion.h` |
+| Intensity filter at parse time | Points with reflectivity below **5** (0-255 scale, `l2::kDefaultFilter`) are dropped as likely noise/multipath. | `src/adapters/unitree_l2/l2_conversion.h` |
+| LAZ precision | Scale factor 0.0001 m (0.1 mm), well below the 4.5 mm sensor resolution | `src/adapters/storage/laz_encoder.cpp` |
+| IMU CSV format | Space-separated: `gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix` | `src/adapters/storage/recording_files.h` |
 
-| Lens dirtiness monitoring | Checked once at startup (`PrintDirtyPercentage`) and now also polled every 10 s during capture (`CheckDirtyPercentage`); logs a warning past **5%** dirty. Non-blocking, reuses the dirty index already cached from the most recently parsed packet. Relevant for handheld cave/outdoor use where the lens can fog or collect dust mid-run. | `include/pcd_manager.h` |
+| Lens dirtiness monitoring | Checked once at startup (`LiveL2Source::Prepare`) and polled every 10 s during capture (`LensMonitor`); logs a warning past **5%** dirty. Non-blocking, reuses the dirty index already cached from the most recently parsed packet. Relevant for handheld cave/outdoor use where the lens can fog or collect dust mid-run. | `src/application/capture/lens_monitor.h` |
 
 ### Open points
 
 - ~~**IMU rate mismatch / backward timestamps:**~~ Fixed: the old fixed 1.667 ms and later 2 ms interpolation steps did not match the real ~882 Hz rate, causing overlapping batches and backward timestamps. The SDK stamps packets with host arrival time (`use_system_timestamp`, default on), so `ImuTimestamper` now rebuilds even spacing. Recordings made before the fix can be repaired with `tools/repair_imu_timestamps.py`. That evens the spacing only; the IMU stays on the host clock (see the next point).
 - ~~**IMU lags the points by 50–80 ms:**~~ Fixed (not yet verified on hardware): the IMU had host arrival stamps while the points always had the L2's own stamps. Both now use the L2 clock. See `docs/imu_lidar_time_alignment.md` for the cause and the field check. Recordings made before the fix keep the lag; it cannot be removed from their files alone.
 - ~~**Point packet base time:**~~ Point packets were never host-stamped. The SDK's `use_system_timestamp` only overwrites the IMU packet's stamp. Point times always came from the L2 clock.
-- ~~**Housing self-reflection / low-reflectivity noise:**~~ Fixed in dLidar: a 0.1 m minimum range and an intensity floor of 5 are now applied at capture time (see table above). Tune `kMinPointRangeM`/`kMinPointIntensity` in `include/capture_timing.h` if real captures show either cutoff too aggressive or too lax.
+- ~~**Housing self-reflection / low-reflectivity noise:**~~ Fixed in dLidar: a 0.1 m minimum range and an intensity floor of 5 are now applied at capture time (see table above). Tune `l2::kDefaultFilter` in `src/adapters/unitree_l2/l2_conversion.h` (or set `SessionConfig::setup.filter`) if real captures show either cutoff too aggressive or too lax.
 - **Non-repetitive scan overlap (item 5):** the L2's non-repetitive Lissajous-style scan pattern means a stationary/slow-moving sensor keeps re-sampling nearly the same points near the optical axis, building up redundant density rather than new coverage. dLidar doesn't (and shouldn't) deduplicate this — it belongs in the SLAM's voxel-downsampling / feature-extraction stage. See the prompt below to have the SLAM side handle it.
 
 ## Prompt: Tune `lidar-vertical.toml` for Non-Repetitive Scan Overlap

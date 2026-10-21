@@ -20,13 +20,13 @@ The SDK is a prebuilt library (`lib/aarch64/libunitree_lidar_sdk.a`, version 2.0
 
 1. Source: `LidarPointDataPacket.data.info.stamp`, the **L2 clock**, time of the packet's first point.
 2. `parseFromPacketToPointCloud` (old `include/unitree_lidar_utilities.h:313-323`): `time = (stamp − zero) / 1e9 + j · time_increment`. Here j is the index within the packet, so filtered points don't shift the others. The per-point offset was accumulated in `float`.
-3. `PointDLidar.time` (`double`, s) → `points_tempNNNN.bin` → `WriteLazChunk`: `gps_time = time` (`include/datawriter.h:276`).
+3. `PointDLidar.time` (`double`, s) → `points_tempNNNN.bin` → `WriteLazChunk`: `gps_time = time` (old `include/datawriter.h:276`).
 
 ### IMU `timestamp` / `timestampUnix`
 
 1. `initializeUDP(..., use_system_timestamp = true)` (old `src/dLidar.cpp:17`). Before commit `346ae97` the call used the SDK default, which is also `true`. So every IMU stamp was the **host `CLOCK_REALTIME` at parse time**, in every dLidar version.
 2. `parseFromImuPacket` (old `unitree_lidar_utilities.h:207-214`): `timestamp = host stamp − zero`.
-3. `ImuTimestamper::Push` (old `include/pcd_manager.h:218`) rebuilt a steady clock from those arrival times (`include/imu_timestamper.h`):
+3. `ImuTimestamper::Push` (old `include/pcd_manager.h:218`) rebuilt a steady clock from those arrival times (`ImuTimestamper`, now `src/domain/timing/imu_timestamper.h`):
    - model `t_k = t_0 + k·T + o_k` with `t_k ≤ arrival_k` (the lower edge of the arrivals);
    - `T` = slope of the lower convex hull of (k, arrival) over 20 s, refit every 0.5 s;
    - output delayed 0.5 s, `o_k` follows the lowest arrival bound and slews at most 0.25 % of T per step;
@@ -38,7 +38,7 @@ The SDK is a prebuilt library (`lib/aarch64/libunitree_lidar_sdk.a`, version 2.0
 
 ### Zero point
 
-`GetGlobalTimeOffsetNs()` was set by **whichever packet came first**: the host time if an IMU packet came first, the L2 stamp if a point packet did. Both streams subtract the same constant, so it shifted both equally but never aligned them.
+The zero (then the global `GetGlobalTimeOffsetNs()`) was set by **whichever packet came first**: the host time if an IMU packet came first, the L2 stamp if a point packet did. Both streams subtract the same constant, so it shifted both equally but never aligned them.
 
 ### Where ~890 Hz comes from
 
@@ -72,17 +72,17 @@ This matches every observation:
 
 All changes are in dLidar; the file format is unchanged.
 
-- `src/dLidar.cpp:16`: `kUseSystemTimestamp = false`. The SDK leaves the L2 stamp on every packet. dLidar takes the host arrival time itself (`HostNow()`, `CLOCK_MONOTONIC` + `CLOCK_REALTIME`), for diagnostics and the fallback only.
-- `include/unitree_lidar_utilities.h:215`: `parseFromImuPacket` returns the absolute L2 stamp (`sensor_stamp_ns`) and no longer touches the zero.
-- `include/unitree_lidar_utilities.h:258-263`: the zero is the L2 stamp of the **first point packet**. At line 323 the point offset is now `j · time_increment` in `double` instead of a running `float` sum.
-- `include/capture_timing.h` (`CaptureTiming`): handles each parsed packet (`OnImu`, `OnPoints`), the same code in the capture loop (`include/pcd_manager.h:184-187`) and the tests, and logs every packet's timing.
-- `include/time_alignment.h` (`ImuTimeline`) writes the IMU time on the L2 clock:
+- `LiveL2Config::use_system_timestamp = false` (`src/adapters/unitree_l2/live_l2_source.h`). The SDK leaves the L2 stamp on every packet. dLidar takes the host arrival time itself (`HostNow()` in `live_l2_source.cpp`, `CLOCK_MONOTONIC` + `CLOCK_REALTIME`), for diagnostics and the fallback only.
+- `l2::ParseImu` (`src/adapters/unitree_l2/l2_conversion.cpp`) returns the absolute L2 stamp and no longer touches the zero.
+- `CaptureTiming` owns the zero: the L2 stamp of the **first point packet** with points. In `l2::ParsePoints` the point offset is now `j · time_increment` in `double` instead of a running `float` sum.
+- `src/application/capture/capture_timing.h` (`CaptureTiming`): handles each packet the sensor returns (`OnPacket`), the same code in the capture loop (`RecordSession`) and the tests, and logs every packet's timing.
+- `src/domain/timing/time_alignment.h` (`ImuTimeline`) writes the IMU time on the L2 clock:
   - **sensor:** `timestamp = L2 IMU stamp − zero + kImuOffsetNs` (line 626). Nothing is rebuilt, resampled, interpolated or filtered. A sample whose stamp is not after the previous one, or whose `seq` repeats, is dropped and counted. Lost samples (`seq` gaps) and stamp jumps are counted.
   - **auto** (default) holds the first 2 s and checks the L2 IMU stamps (line 534): ≥ 99 % increasing; ≥ 95 % of steps within 0.5–1.5 × the median, so they are sample times rather than batch send times; rate within 1 % of the host's; and the same clock as the points, with minimum arrival latencies within 100 ms. If the checks pass it uses **sensor**, otherwise **host_aligned**.
   - **host_aligned** (fallback): `ImuTimestamper` rebuilds the IMU clock from the arrivals. Then the lower edge of the point packets' (L2 end-of-packet time, host arrival) over 30 s maps it onto the L2 clock (line 646). The IMU period is thereby measured against the L2 clock and doesn't drift. This assumes both packet types have the same minimum delivery latency.
   - `--imu-time=auto|sensor|host` forces a mode.
   - `timestampUnix = timestamp + one constant per recording`: the zero plus the L2-to-Unix offset at the lower edge of the point packets seen so far (line 567).
-- New files per recording, written by `include/datawriter.h` and moved along by crash recovery:
+- New files per recording, written by the storage adapter (`src/adapters/storage/`) and moved along by crash recovery:
   - `timingNNNN.json`: the IMU time source, the decision and why, the method, `imu_offset_ns`, the zero, the epoch offset, drops, measured clock rates, the L2-side IMU spacing, latencies, and the lag the old method would have written. It is written once the mode is decided, so a killed recording still has it, and again at the end.
   - `packetsNNNN.bin`: the arrival time and L2 stamp of every packet (40 bytes each, `PacketTiming`). `bin/replay_packets packetsNNNN.bin` replays it through all modes and the old method.
 
@@ -90,7 +90,7 @@ All changes are in dLidar; the file format is unchanged.
 
 `ctest --test-dir build --output-on-failure`: all 3 suites pass.
 
-`tests/test_time_alignment.cpp` simulates an L2 with its own clock running +98 ppm against the host and 78 ms behind Unix time, like recording 44:
+`tests/adapters/unitree_l2/test_l2_time_alignment.cpp` simulates an L2 with its own clock running +98 ppm against the host and 78 ms behind Unix time, like recording 44:
 
 - 889.7 Hz IMU sent in 8 ms batches;
 - point packets of 120 points;
@@ -114,7 +114,7 @@ It builds real `LidarImuData` / `LidarPointDataPacket` structs and runs them thr
 - **Diagnostics recover the simulated truth:** L2 clock +98.00 ppm, IMU period 1.12408 ms, IMU − point minimum latency +0.04 → +0.12 ms, old-method lag 79.0 → 20.3 ms.
 - **Replaying the packet log** gives the same report as the live run.
 - **Also covered:** the conversion of one synthetic packet of each type, which is exact; IMU timestamps strictly increasing; `timestampUnix − timestamp` constant.
-- `tests/test_datawriter.cpp` checks that the new files are written and recovered.
+- `tests/adapters/storage/test_datawriter.cpp` checks that the new files are written and recovered.
 
 ## 5. What changes for dMapper
 
@@ -156,7 +156,7 @@ During the first seconds the console prints `IMU time source: sensor (sensor sta
 
 **If it fails:**
 
-- **Constant residual of the same sign in both recordings, no drift:** the L2's IMU stamp marks a fixed point other than the sample instant (e.g. filter delay). If dMapper reports the IMU r ms *later* than the LiDAR, set `kImuOffsetNs = −r · 1e6` in `src/dLidar.cpp`, rebuild and record again. The value is written to `timingNNNN.json` as `imu_offset_ns`.
+- **Constant residual of the same sign in both recordings, no drift:** the L2's IMU stamp marks a fixed point other than the sample instant (e.g. filter delay). If dMapper reports the IMU r ms *later* than the LiDAR, set `kImuOffsetNs = −r · 1e6` in `src/app/main.cpp`, rebuild and record again. The value is written to `timingNNNN.json` as `imu_offset_ns`.
 - **Residual drifts, or `timingNNNN.json` says `host_aligned`:** send `timingNNNN.json` and `packetsNNNN.bin`. A recording with `--imu-time=host` gives the fallback's numbers for comparison.
 
 ## 7. Assumptions not yet verified on hardware
