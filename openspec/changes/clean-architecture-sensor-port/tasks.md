@@ -17,7 +17,7 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 3. Domain layer
 
-- [ ] 3.1 Create `src/domain/recording/` (`PointRecord`, `ImuSample`, `PacketTiming` + type codes + `PacketDurationNs`, `SensorChunk`, `RecordingInfo`, `kRecordingFormatVersion`) in `namespace dlidar`, with aliases from the old names; verify the build passes and golden is identical
+- [x] 3.1 Create `src/domain/recording/` (`PointRecord`, `ImuSample`, `PacketTiming` + type codes + `PacketDurationNs`, `SensorChunk`, `RecordingInfo`, `kRecordingFormatVersion`) in `namespace dlidar`, with aliases from the old names; verify the build passes and golden is identical
 - [ ] 3.2 Move `imu_timestamper.h` and `time_alignment.h` to `src/domain/timing/` (content unchanged apart from the namespace and includes); verify `test_imu_timestamper` and `test_time_alignment` pass and golden is identical
 - [ ] 3.3 Add `src/domain/geometry/axis_map.h` (signed permutation, proper-rotation check, select-and-negate apply) and `point_filter.h` (float thresholds on range and intensity); add `tests/domain/test_axis_map.cpp` (all 24 proper rotations accepted, the 24 mirrors rejected, ±0.0 and NaN keep their sign, vertical L2 mount maps as today) and `test_point_filter.cpp`; verify both pass in ctest
 

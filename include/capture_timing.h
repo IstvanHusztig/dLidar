@@ -91,10 +91,13 @@ public:
         log_.clear();
     }
 
-    // Moves the point packet states collected since the last call into `out`.
-    void TakePacketStates(std::vector<PointPacketState> &out)
+    // Appends the packetstate rows of the point packets since the last call to
+    // `out`, with stamp_ns relative to `zero_ns`.
+    void TakePacketStateRows(int64_t zero_ns, std::string &out)
     {
-        out.insert(out.end(), packet_states_.begin(), packet_states_.end());
+        out.reserve(out.size() + packet_states_.size() * 320);
+        for (const PointPacketState &st : packet_states_)
+            AppendPacketStateRow(out, st, zero_ns);
         packet_states_.clear();
     }
 

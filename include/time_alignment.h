@@ -46,33 +46,13 @@
 // Report() describes the method and the measured clock relations; it is
 // written to the recording as timingNNNN.json.
 
-// Timing of one received packet; also the record of packetsNNNN.bin.
-struct PacketTiming
-{
-    int64_t host_mono_ns; // CLOCK_MONOTONIC when runParse() returned the packet
-    int64_t host_unix_ns; // CLOCK_REALTIME at the same moment
-    int64_t sensor_ns;    // the packet's L2 stamp (DataInfo.stamp), absolute
-    uint32_t seq;         // DataInfo.seq
-    uint32_t type;        // kPacketTypePoints or kPacketTypeImu
-    float time_increment; // points: seconds between points; IMU: 0
-    uint32_t point_num;   // points: points in the packet; IMU: 0
-};
-static_assert(sizeof(PacketTiming) == 40, "packet log record layout");
-static_assert(offsetof(PacketTiming, host_mono_ns) == 0 && offsetof(PacketTiming, host_unix_ns) == 8 &&
-                  offsetof(PacketTiming, sensor_ns) == 16 && offsetof(PacketTiming, seq) == 24 &&
-                  offsetof(PacketTiming, type) == 28 && offsetof(PacketTiming, time_increment) == 32 &&
-                  offsetof(PacketTiming, point_num) == 36,
-              "packet log record field offsets");
+#include "domain/recording/packet_timing.h"
 
-const uint32_t kPacketTypePoints = 102; // LIDAR_POINT_DATA_PACKET_TYPE
-const uint32_t kPacketTypeImu = 104;    // LIDAR_IMU_DATA_PACKET_TYPE
-const char kPacketLogMagic[8] = {'d', 'L', 'p', 'k', 't', 'v', '1', '\n'};
-
-// L2 time of a point packet's last point.
-inline int64_t PacketDurationNs(uint32_t point_num, float time_increment)
-{
-    return point_num > 1 ? (int64_t)std::llround((double)(point_num - 1) * (double)time_increment * 1e9) : 0;
-}
+using dlidar::kPacketLogMagic;
+using dlidar::kPacketTypeImu;
+using dlidar::kPacketTypePoints;
+using dlidar::PacketDurationNs;
+using dlidar::PacketTiming;
 
 // Lower convex hull of (x, y) added in increasing x (others are skipped).
 // Fit() gives the hull edge spanning the mean x: the line under all points

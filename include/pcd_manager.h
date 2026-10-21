@@ -211,8 +211,7 @@ private:
 		chunk.points = std::move(points_);
 		chunk.imu_data = std::move(imu_);
 		timing_.TakePacketLog(chunk.packets);
-		timing_.TakePacketStates(chunk.packet_states);
-		chunk.zero_ns = GetGlobalTimeOffsetNs();
+		timing_.TakePacketStateRows(GetGlobalTimeOffsetNs(), chunk.packet_state_rows);
 		return chunk;
 	}
 };

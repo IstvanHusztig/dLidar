@@ -8,7 +8,7 @@ set(CMAKE_CXX_FLAGS "-std=c++17 -ffp-contract=off")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g2 -ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall -DNDEBUG") 
 
-include_directories(include 3rd/include 3rd)
+include_directories(src include 3rd/include 3rd)
 
 add_subdirectory(3rd)
 

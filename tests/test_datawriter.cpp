@@ -533,10 +533,9 @@ void TestPacketStateFile()
         CHECK(w.Open(dir), "open");
         int64_t imu = 0, pts = 0;
         SensorChunk c = Chunk(0, imu, pts, 10, 100);
-        c.zero_ns = zero;
         for (int i = 0; i < 3; i++)
         {
-            c.packet_states.push_back(MakePointPacketState(d));
+            AppendPacketStateRow(c.packet_state_rows, MakePointPacketState(d), zero);
             d.info.seq++;
         }
         w.AppendChunk(c);

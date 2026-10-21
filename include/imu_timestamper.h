@@ -9,20 +9,9 @@
 #include <limits>
 #include <vector>
 
-struct OutputImuData
-{
-    int64_t LidarTimestamp; // ns, relative to GetGlobalTimeOffsetNs() (same base as point times)
-    int64_t EpochTimestamp; // ns, Unix epoch; LidarTimestamp + a fixed offset
-    int ImuId;
+#include "domain/recording/imu_sample.h"
 
-    float GyroX;
-    float GyroY;
-    float GyroZ;
-
-    float AccelerationX;
-    float AccelerationY;
-    float AccelerationZ;
-};
+using OutputImuData = dlidar::ImuSample;
 
 // Rebuilds IMU acquisition times from host arrival times.
 //

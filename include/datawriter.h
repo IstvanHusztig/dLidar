@@ -1,6 +1,8 @@
 #pragma once
 
 #include "unitree_lidar_sdk.h"
+#include "domain/recording/recording_info.h"
+#include "domain/recording/sensor_chunk.h"
 #include "time_alignment.h"
 #include "packet_state.h"
 #include "shutdown.h"
@@ -24,11 +26,6 @@
 
 using namespace unitree_lidar_sdk;
 
-// Version of what a recording contains (docs/l2-recording-format.md). Written
-// to timingNNNN.json and the LAZ generating_software. 1: everything before
-// the LAZ extra bytes; 2: LAZ extra bytes, packetstateNNNN.tsv, sensor
-// versions in timingNNNN.json.
-const int kRecordingFormatVersion = 2;
 
 // Files of a recording inside the output directory.
 // Every recording takes the next free session number N, so its files group:
@@ -51,51 +48,11 @@ const char *const kPacketStatePrefix = "packetstate"; // kPacketStateHeader, the
 const char *const kPacketStateSuffix = ".tsv";
 const char *const kImuCsvHeader = "gyroX gyroY gyroZ accX accY accZ imuId timestamp timestampUnix\n";
 
-struct SensorChunk
-{
-    int chunk_index;
-    std::vector<PointDLidar> points;
-    std::vector<OutputImuData> imu_data;
-    std::vector<PacketTiming> packets; // timing of the packets of this chunk
-    std::vector<PointPacketState> packet_states; // the point packets of this chunk
-    int64_t zero_ns = 0;               // GetGlobalTimeOffsetNs(), for packetstate stamp_ns
-    std::string timing_report;         // if set, (re)written as timingNNNN.json
-};
-
-// Sensor and software versions of a recording, added to timingNNNN.json.
-struct RecordingInfo
-{
-    std::string lidar_firmware_version = "unknown";
-    std::string lidar_hardware_version = "unknown";
-    std::string sdk_version = "unknown";
-    int64_t work_mode = -1;
-};
-
-inline std::string JsonEscape(const std::string &v)
-{
-    std::string e;
-    for (char ch : v)
-    {
-        if (ch == '"' || ch == '\\')
-            e += '\\';
-        if ((unsigned char)ch >= 0x20)
-            e += ch;
-    }
-    return e;
-}
-
-// Adds the recording keys at the top of a timing report ("{\n...}").
-inline std::string AddRecordingInfo(const std::string &report, const RecordingInfo &info)
-{
-    if (report.compare(0, 2, "{\n") != 0)
-        return report;
-    std::string keys = "  \"recording_format_version\": " + std::to_string(kRecordingFormatVersion) + ",\n" +
-                       "  \"lidar_firmware_version\": \"" + JsonEscape(info.lidar_firmware_version) + "\",\n" +
-                       "  \"lidar_hardware_version\": \"" + JsonEscape(info.lidar_hardware_version) + "\",\n" +
-                       "  \"sdk_version\": \"" + JsonEscape(info.sdk_version) + "\",\n" +
-                       "  \"work_mode\": " + std::to_string(info.work_mode) + ",\n";
-    return "{\n" + keys + report.substr(2);
-}
+using dlidar::AddRecordingInfo;
+using dlidar::JsonEscape;
+using dlidar::kRecordingFormatVersion;
+using dlidar::RecordingInfo;
+using dlidar::SensorChunk;
 
 inline std::string JoinPath(const std::string &dir, const std::string &name)
 {
@@ -245,14 +202,6 @@ inline int64_t TrimPartialCsvLine(const std::string &csv_path) { return TrimPart
 // without the magic is from an older build: bare 32-byte PointDLidarV1 records.
 const char kPointsTempMagic[8] = {'d', 'L', 'p', 't', 's', 'v', '2', '\n'};
 const uint64_t kPointsTempHeaderSize = 16;
-static_assert(sizeof(PointDLidar) == 48, "points temp record layout (format 2)");
-static_assert(offsetof(PointDLidar, x) == 0 && offsetof(PointDLidar, y) == 4 && offsetof(PointDLidar, z) == 8 &&
-                  offsetof(PointDLidar, intensity) == 12 && offsetof(PointDLidar, time) == 16 &&
-                  offsetof(PointDLidar, ring) == 24 && offsetof(PointDLidar, range) == 28 &&
-                  offsetof(PointDLidar, alpha) == 32 && offsetof(PointDLidar, theta) == 36 &&
-                  offsetof(PointDLidar, packet_seq) == 40 && offsetof(PointDLidar, raw_range) == 44 &&
-                  offsetof(PointDLidar, sample_index) == 46,
-              "points temp record field offsets (format 2)");
 
 // The point record of format 1 temp files.
 struct PointDLidarV1
@@ -766,12 +715,9 @@ public:
         if (!chunk.timing_report.empty())
             WriteTimingReport(chunk.timing_report);
 
-        if (state_file.is_open() && !chunk.packet_states.empty())
+        if (state_file.is_open() && !chunk.packet_state_rows.empty())
         {
-            std::string rows;
-            rows.reserve(chunk.packet_states.size() * 320);
-            for (const PointPacketState &st : chunk.packet_states)
-                AppendPacketStateRow(rows, st, chunk.zero_ns);
+            const std::string &rows = chunk.packet_state_rows;
             state_file.write(rows.data(), (std::streamsize)rows.size());
             state_file.flush();
         }
