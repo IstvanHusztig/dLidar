@@ -53,6 +53,8 @@
 
   <nav><ul>
     <li><a href="#overview">Overview</a></li>
+    <li><a href="#golden">golden_replay.sh</a></li>
+    <li><a href="#architecture">check_architecture.py</a></li>
     <li><a href="#compare">compare_recording_formats.sh</a></li>
     <li><a href="#replay-capture">replay_capture</a></li>
     <li><a href="#verify">verify_recording_format.py</a></li>
@@ -64,6 +66,8 @@
   <h2 id="overview">Overview</h2>
   <div class="table-wrap"><table>
     <tr><th>Tool</th><th>Use it to</th><th>Input</th><th>Writes</th></tr>
+    <tr><td><code>tools/golden_replay.sh</code></td><td>Prove that a code change (refactor) changes no output at all</td><td><code>packetsNNNN.bin</code>, a git revision</td><td>two recordings + identical / not identical</td></tr>
+    <tr><td><code>tools/check_architecture.py</code></td><td>Check the layer dependency rule of <code>src/</code> (run by ctest)</td><td><code>src/</code></td><td>report only</td></tr>
     <tr><td><code>tools/compare_recording_formats.sh</code></td><td>Prove that a recording format change keeps the standard content identical</td><td><code>packetsNNNN.bin</code>, a git revision</td><td>two recordings + a pass/fail report</td></tr>
     <tr><td><code>bin/replay_capture</code></td><td>Produce a recording from a packet log without the sensor</td><td><code>packetsNNNN.bin</code></td><td>a full recording</td></tr>
     <tr><td><code>tools/verify_recording_format.py</code></td><td>Compare an old-format and a new-format recording of the same packets</td><td>two recording folders</td><td>report only</td></tr>
@@ -71,6 +75,29 @@
     <tr><td><code>tools/check_imu_timestamps.py</code></td><td>Check the order and rate of IMU timestamps</td><td><code>imuNNNN.csv</code></td><td>report only</td></tr>
     <tr><td><code>tools/repair_imu_timestamps.py</code></td><td>Fix the IMU timestamps of recordings made before the timestamp fix</td><td>old <code>imu*.csv</code></td><td>a new CSV</td></tr>
   </table></div>
+
+  <h2 id="golden">golden_replay.sh <span class="tag">shell</span></h2>
+  <p>Replays the same packet log through a base revision and the working tree, then compares every recording file and the console log byte for byte. Use it for changes that must not change the output, such as the clean-architecture refactor. Use <code>compare_recording_formats.sh</code> instead when the format itself changes.</p>
+  <pre><code>tools/golden_replay.sh [BASE_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</code></pre>
+  <div class="table-wrap"><table>
+    <tr><th>Argument</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>BASE_REV</code></td><td><code>36ecead</code></td><td>The reference revision (golden base of the clean-architecture change)</td></tr>
+    <tr><td><code>PACKETS_BIN</code></td><td><code>~/PointCloudDump/packets0001.bin</code></td><td>The packet timing log to replay</td></tr>
+    <tr><td><code>SECONDS</code></td><td><code>60</code></td><td>Replay only the first N seconds; <code>1e9</code> replays the whole log</td></tr>
+    <tr><td><code>OUT_DIR</code></td><td>a new temp directory</td><td>Gets <code>base/</code> and <code>new/</code>, each with <code>rec/</code> and <code>console.log</code></td></tr>
+    <tr><td><code>GOLDEN_COMPARE_ONLY=1</code> (env)</td><td>unset</td><td>Skip building and replaying; only compare an existing <code>OUT_DIR</code></td></tr>
+  </table></div>
+  <ul>
+    <li>The base is built once in a temporary <code>git worktree</code> (sharing the <code>3rd/</code> LASzip checkout) and cached in <code>~/.cache/dlidar_golden/&lt;hash&gt;</code>. Both sides need the <code>replay_capture</code> CMake target.</li>
+    <li>Exit code 0 means every file is identical; each file is listed as <code>same</code>, <code>DIFFERS</code>, <code>MISSING</code> or <code>EXTRA</code>.</li>
+    <li>Run it on the Pi (aarch64). Every target is built with <code>-ffp-contract=off</code>, so the <code>-O2</code> replay does the same arithmetic as the <code>-O0</code> <code>bin/dLidar</code>.</li>
+  </ul>
+
+  <h2 id="architecture">check_architecture.py <span class="tag">Python</span></h2>
+  <p>Checks the <code>#include</code>s of <code>src/</code> against the layer rule: <code>domain/</code> includes only standard headers and <code>domain/</code>; <code>application/</code> adds <code>application/</code>; an adapter includes the core and itself, never <code>app/</code> or another adapter; <code>app/</code> includes anything. ctest runs it as <code>architecture</code>, and its self-test as <code>architecture_selftest</code>.</p>
+  <pre><code>python3 -I tools/check_architecture.py [--strict] [SRC_DIR]
+python3 -I tools/check_architecture.py --self-test</code></pre>
+  <p><code>--strict</code> also rejects sources outside the layer directories and a leftover <code>include/</code> directory.</p>
 
   <h2 id="compare">compare_recording_formats.sh <span class="tag">shell</span></h2>
   <p>Replays the same packets through an older dLidar commit and the working tree. It then checks that the standard recording content is identical and the newer additions are consistent. Run it after any change to what a recording contains. The rule is that changes only add data and dMapper must read new recordings exactly as old ones.</p>

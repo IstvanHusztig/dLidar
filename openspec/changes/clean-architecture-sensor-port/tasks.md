@@ -4,16 +4,16 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 1. Baseline (commit 0)
 
-- [ ] 1.1 Get the pending `include/pcd_manager.h` change (`target_chunks` 800 → 200) committed or stashed by the user, so the base is clean; verify `git status` shows no changes under `include/`, `src/`, `tests/` or `tools/`
-- [ ] 1.2 Add `-ffp-contract=off` to all targets in `CMakeLists.txt` and to the `g++` line of `tools/compare_recording_formats.sh`; verify `objdump -d bin/replay_capture | grep -c 'fmadd\|fmsub\|fnmadd\|fnmsub'` drops to only vendor/libm functions, and ctest passes
-- [ ] 1.3 Add `offsetof`/`sizeof` static_asserts for every field of `PacketTiming` (40 B) and `PointDLidar` (48 B); verify the build passes
-- [ ] 1.4 Record this commit's hash as the golden base in the change's `design.md` Migration Plan; verify that hash is written there
+- [x] 1.1 Get the pending `include/pcd_manager.h` change (`target_chunks` 800 → 200) committed or stashed by the user, so the base is clean; verify `git status` shows no changes under `include/`, `src/`, `tests/` or `tools/`
+- [x] 1.2 Add `-ffp-contract=off` to all targets in `CMakeLists.txt` and to the `g++` line of `tools/compare_recording_formats.sh`; verify `objdump -d bin/replay_capture | grep -c 'fmadd\|fmsub\|fnmadd\|fnmsub'` drops to only vendor/libm functions, and ctest passes
+- [x] 1.3 Add `offsetof`/`sizeof` static_asserts for every field of `PacketTiming` (40 B) and `PointDLidar` (48 B); verify the build passes
+- [x] 1.4 Record this commit's hash as the golden base in the change's `design.md` Migration Plan; verify that hash is written there
 
 ## 2. Verification tooling
 
-- [ ] 2.1 Write `tools/golden_replay.sh BASE_REV [PACKETS] [SECONDS]`: it builds BASE_REV in a temporary `git worktree` (cmake, `-ffp-contract=off`), runs both `replay_capture` builds on the same log, `cmp`s every output file and diffs the console logs; verify it reports "identical" for HEAD against itself, and reports a difference when one byte of the new LAZ is altered by hand
-- [ ] 2.2 Write `tools/check_architecture.py` (layer include rules from design D8, permissive mode until group 7) and register it as ctest `architecture`; verify it passes now, and fails for a test file under `src/domain/` that includes `unitree_lidar_sdk.h`
-- [ ] 2.3 Document both tools in `docs/tools.html` and in CLAUDE.md (Build & Run); verify the documented commands run as written
+- [x] 2.1 Write `tools/golden_replay.sh BASE_REV [PACKETS] [SECONDS]`: it builds BASE_REV in a temporary `git worktree` (cmake, `-ffp-contract=off`), runs both `replay_capture` builds on the same log, `cmp`s every output file and diffs the console logs; verify it reports "identical" for HEAD against itself, and reports a difference when one byte of the new LAZ is altered by hand
+- [x] 2.2 Write `tools/check_architecture.py` (layer include rules from design D8, permissive mode until group 7) and register it as ctest `architecture`; verify it passes now, and fails for a test file under `src/domain/` that includes `unitree_lidar_sdk.h`
+- [x] 2.3 Document both tools in `docs/tools.html` and in CLAUDE.md (Build & Run); verify the documented commands run as written
 
 ## 3. Domain layer
 

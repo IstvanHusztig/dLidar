@@ -221,6 +221,8 @@ All dLidar code goes into `namespace dlidar`, with no `using namespace` in heade
 
 One commit per step. After each: build, `ctest`, `tools/golden_replay.sh <commit0>` identical.
 
+Golden base (commit 0): `36ecead`.
+
 0. Pending work committed; add `-ffp-contract=off`; add the `offsetof` asserts.
 1. Golden harness and architecture check (the check is permissive at first, and tightened as layers appear).
 2. Domain types into `src/domain` + `namespace dlidar` (aliases keep the old names compiling).

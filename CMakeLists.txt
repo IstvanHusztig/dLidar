@@ -53,3 +53,10 @@ target_compile_options(replay_packets PRIVATE -O2)
 add_executable(replay_capture tools/replay_capture.cpp)
 target_compile_options(replay_capture PRIVATE -O2)
 target_link_libraries(replay_capture laszip)
+
+# Layer dependency rule (docs/architecture.md); --self-test checks the checker.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+add_test(NAME architecture COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/check_architecture.py ${PROJECT_SOURCE_DIR}/src)
+add_test(NAME architecture_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/check_architecture.py --self-test)
+endif()
