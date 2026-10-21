@@ -105,7 +105,7 @@ python3 -I tools/check_architecture.py --self-test</code></pre>
 tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</code></pre>
   <div class="table-wrap"><table>
     <tr><th>Argument</th><th>Default</th><th>Meaning</th></tr>
-    <tr><td><code>OLD_REV</code></td><td><code>d68191b</code></td><td>The commit whose <code>include/</code> writes the reference recording (<code>d68191b</code> is the last recording format 1 commit)</td></tr>
+    <tr><td><code>OLD_REV</code></td><td><code>d68191b</code></td><td>A header-only commit of recording format 1 whose <code>include/</code> writes the reference recording (<code>d68191b</code> is the last recording format 1 commit)</td></tr>
     <tr><td><code>PACKETS_BIN</code></td><td><code>~/PointCloudDump/packets0001.bin</code></td><td>The packet timing log to replay</td></tr>
     <tr><td><code>SECONDS</code></td><td>whole log</td><td>Replay only the first N seconds. The 800-chunk capture limit still applies.</td></tr>
     <tr><td><code>OUT_DIR</code></td><td>a new temp directory</td><td>Gets <code>old/</code>, <code>new/</code>, <code>old.log</code> and <code>new.log</code>. <code>old/</code> and <code>new/</code> must be empty.</td></tr>
@@ -114,7 +114,7 @@ tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</
   <p>The script:</p>
   <ol>
     <li>Extracts <code>include/</code> of <code>OLD_REV</code> with <code>git archive</code> into a temp directory.</li>
-    <li>Builds <code>tools/replay_capture.cpp</code> twice, against the old headers and against the working tree.</li>
+    <li>Builds the frozen <code>tools/replay_capture_format1.cpp</code> against those old headers, and the working tree's <code>bin/replay_capture</code> with CMake.</li>
     <li>Replays the packet log through both into <code>OUT_DIR/old</code> and <code>OUT_DIR/new</code>.</li>
     <li>Runs <code>tools/verify_recording_format.py</code> on the two folders and exits with its status.</li>
   </ol>
@@ -122,14 +122,14 @@ tools/compare_recording_formats.sh [OLD_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</
 PYTHON=~/venv-laspy/bin/python tools/compare_recording_formats.sh d68191b ~/PointCloudDump/packets0001.bin 30</code></pre>
 
   <h2 id="replay-capture">replay_capture <span class="tag">C++</span></h2>
-  <p>Replays the packet sequence of a recording's <code>packetsNNNN.bin</code> into a new recording, without the sensor. The input is the L2 stamps, seq, host arrival times, <code>time_increment</code> and <code>point_num</code>. The output goes through the real capture code: <code>CaptureTiming</code>, <code>ChunkAssembler</code> and <code>ContinuousDataWriter</code>.</p>
-  <pre><code>bin/replay_capture ~/PointCloudDump/packets0001.bin OUT_DIR [SECONDS]</code></pre>
+  <p>Replays the packet sequence of a recording's <code>packetsNNNN.bin</code> into a new recording, without the sensor. The input is the L2 stamps, seq, host arrival times, <code>time_increment</code> and <code>point_num</code>. The output goes through the real capture code, the same path as a live recording.</p>
+  <pre><code>bin/replay_capture ~/PointCloudDump/packets0001.bin OUT_DIR [SECONDS] [TARGET_CHUNKS]</code></pre>
   <ul>
     <li><code>OUT_DIR</code> must exist. The recording takes the next free session number in it, as a real capture does.</li>
     <li>The packet log holds only timing, so <strong>packet contents are synthetic</strong>. The rays of the L2 sensor model, with the same formula as the parser, hit a box room around a stationary sensor. Ranges carry ±3 mm of noise and 2 % have no return. Intensity depends on wall reflectivity, incidence and range. The IMU is at rest (1 g on +Z). Calibration and state values are fixed plausible numbers.</li>
     <li>Everything is deterministic. Host times come from the log, so two builds fed the same log write byte-identical files wherever their formats agree.</li>
     <li>The output is not a measurement: odometry on it gives a stationary trajectory. Use it for format and pipeline checks, not for tuning.</li>
-    <li>Built against an older commit's headers (no <code>packet_state.h</code>), it mirrors that commit's <code>ProcessSensorData</code> loop. The compare script relies on this.</li>
+    <li>Its packets go through the production path: <code>SyntheticL2Source</code> → <code>UnitreeL2Sensor</code> → <code>ScannerController</code>/<code>RecordSession</code> → <code>FileRecordingStorage</code>. An optional fourth argument sets the chunk limit (default 800).</li>
   </ul>
 
   <h2 id="verify">verify_recording_format.py <span class="tag">Python</span></h2>
