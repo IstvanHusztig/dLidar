@@ -16,11 +16,16 @@ namespace dlidar
     // Fans the device's events out to every registered output channel.
     //
     // AddSync: called on the publishing thread, in order with other console
-    // output - only for trusted, fast channels (the console).
+    // output - only for trusted, fast channels (the console). A recording
+    // publishes from two threads (capture and writer); the hub delivers to
+    // the sync channels one event at a time, so they need no locking.
     // AddAsync: the default for anything else (LEDs, Bluetooth). Each channel
     // gets its own thread and a bounded queue; when the queue is full the
     // oldest event is dropped, so a slow or blocked channel never delays a
     // recording. Exceptions from any channel are caught and ignored.
+    //
+    // Register every channel before events start. The hub must outlive its
+    // publishers (destroy the ScannerController first).
     class EventHub : public DeviceEvents
     {
     public:
@@ -29,15 +34,27 @@ namespace dlidar
         EventHub() = default;
         EventHub(const EventHub &) = delete;
         EventHub &operator=(const EventHub &) = delete;
+        // Delivers what is queued, giving all async channels together at
+        // most 1 s; a channel still stuck after that is left behind on its
+        // thread, which keeps the channel alive until the call returns.
         ~EventHub()
         {
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
             for (auto &a : async_)
-                a->Shutdown();
+                a->RequestStop();
+            for (auto &a : async_)
+                a->Finish(deadline);
         }
 
-        // Register before events start; `channel` must outlive the hub.
+        // `channel` must outlive the hub.
         void AddSync(DeviceEvents &channel) { sync_.push_back(&channel); }
-        void AddAsync(DeviceEvents &channel) { async_.push_back(std::make_shared<Async>(channel)); }
+        // Shared with the channel's thread, which may outlive the hub.
+        void AddAsync(std::shared_ptr<DeviceEvents> channel)
+        {
+            auto a = std::make_shared<Async>(std::move(channel));
+            a->Start();
+            async_.push_back(std::move(a));
+        }
 
         void OnState(const DeviceStatus &s) override
         {
@@ -63,9 +80,9 @@ namespace dlidar
         // shutdown can be detached without touching freed state.
         struct Async : std::enable_shared_from_this<Async>
         {
-            explicit Async(DeviceEvents &c) : channel(c) {}
+            explicit Async(std::shared_ptr<DeviceEvents> c) : channel(std::move(c)) {}
 
-            DeviceEvents &channel;
+            std::shared_ptr<DeviceEvents> channel;
             std::mutex mutex;
             std::condition_variable cv;
             std::deque<Event> queue;
@@ -77,8 +94,6 @@ namespace dlidar
             {
                 {
                     std::lock_guard<std::mutex> lock(mutex);
-                    if (!worker.joinable())
-                        Start();
                     if (queue.size() >= kQueueSize)
                     {
                         queue.pop_front();
@@ -108,7 +123,7 @@ namespace dlidar
                     lock.unlock();
                     try
                     {
-                        e(channel);
+                        e(*channel);
                     }
                     catch (...)
                     {
@@ -119,16 +134,21 @@ namespace dlidar
                 cv.notify_all();
             }
 
-            // Delivers what is queued, waiting at most 1 s for a channel that
-            // is stuck; then leaves its thread behind.
-            void Shutdown()
+            void RequestStop()
+            {
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    stop = true;
+                }
+                cv.notify_all();
+            }
+
+            // Waits until `deadline` for the queue to be delivered; a stuck
+            // channel's thread is then left behind.
+            void Finish(std::chrono::steady_clock::time_point deadline)
             {
                 std::unique_lock<std::mutex> lock(mutex);
-                if (!worker.joinable())
-                    return;
-                stop = true;
-                cv.notify_all();
-                bool finished = cv.wait_for(lock, std::chrono::seconds(1), [&] { return done; });
+                bool finished = cv.wait_until(lock, deadline, [&] { return done; });
                 if (!finished)
                     queue.clear(); // the stuck channel gets nothing more once it returns
                 lock.unlock();
@@ -141,17 +161,22 @@ namespace dlidar
 
         std::vector<DeviceEvents *> sync_;
         std::vector<std::shared_ptr<Async>> async_;
+        // Recursive: a sync channel may publish from inside its callback.
+        std::recursive_mutex sync_mutex_;
 
         void Deliver(const Event &e)
         {
-            for (DeviceEvents *c : sync_)
             {
-                try
+                std::lock_guard<std::recursive_mutex> lock(sync_mutex_);
+                for (DeviceEvents *c : sync_)
                 {
-                    e(*c);
-                }
-                catch (...)
-                {
+                    try
+                    {
+                        e(*c);
+                    }
+                    catch (...)
+                    {
+                    }
                 }
             }
             for (auto &a : async_)

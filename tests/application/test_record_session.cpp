@@ -8,7 +8,9 @@
 #include "recording_events.h"
 #include "../check.h"
 
+#include <chrono>
 #include <cstring>
+#include <memory>
 
 using namespace dlidar;
 using namespace dlidar::test;
@@ -112,26 +114,98 @@ void TestFailingChannels()
         reference = RecordWith(hub);
     }
 
-    static BlockingEvents blocking; // outlives the hub's detached thread
-    ThrowingEvents throwing_sync, throwing_async;
-    RecordingEvents sync_seen, async_seen;
+    // The blocking channel is shared with the hub's thread that is stuck in
+    // it, so it stays alive after the hub has left that thread behind.
+    auto blocking = std::make_shared<BlockingEvents>();
+    auto blocking2 = std::make_shared<BlockingEvents>();
+    ThrowingEvents throwing_sync;
+    RecordingEvents sync_seen;
+    auto async_seen = std::make_shared<RecordingEvents>();
     std::vector<SensorChunk> chunks;
+    std::chrono::steady_clock::time_point closed;
+    auto t0 = std::chrono::steady_clock::now();
     {
         EventHub hub;
         hub.AddSync(throwing_sync);
         hub.AddSync(sync_seen);
         hub.AddAsync(blocking);
-        hub.AddAsync(throwing_async);
+        hub.AddAsync(blocking2);
+        hub.AddAsync(std::make_shared<ThrowingEvents>());
         hub.AddAsync(async_seen);
         chunks = RecordWith(hub);
-        CHECK(blocking.Calls() == 1, "blocking channel got %d calls", blocking.Calls());
-    } // hub gives the stuck channel 1 s, then leaves it
-    blocking.Release();
+        t0 = std::chrono::steady_clock::now();
+        CHECK(blocking->Calls() == 1, "blocking channel got %d calls", blocking->Calls());
+    } // hub gives the stuck channels 1 s together, then leaves them
+    closed = std::chrono::steady_clock::now();
+    CHECK(closed - t0 < std::chrono::milliseconds(1800), "two stuck channels took %lld ms",
+          (long long)std::chrono::duration_cast<std::chrono::milliseconds>(closed - t0).count());
+    blocking->Release();
+    blocking2->Release();
 
     CHECK(SameChunks(chunks, reference), "recording differs with failing channels");
     std::vector<std::string> want{"preparing", "recording", "finalizing", "idle"};
     CHECK(sync_seen.States() == want, "sync channel states");
-    CHECK(async_seen.States() == want, "async channel states");
+    CHECK(async_seen->States() == want, "async channel states");
+}
+
+// The storage cannot open: the capture stops instead of queueing the whole
+// recording in memory, and the recording ends in Error.
+void TestStorageOpenFails()
+{
+    printf("a storage that does not open stops the recording\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    MemoryStorage storage;
+    storage.fail_open = true;
+    RecordingEvents events;
+    RecordSession session(sensor, storage, events, Config(100000));
+    CHECK(!session.Run(StopToken()), "run reported success");
+    std::vector<std::string> e = events.Events();
+    CHECK(std::count(e.begin(), e.end(), "warning:Fatal Error: Failed to open output streams!") == 1, "warning");
+    CHECK(events.States().back() == "error" && storage.closes == 0 && sensor.stopped, "ends in error, sensor stopped");
+}
+
+// The storage throws while writing: the capture stops, the files are still
+// closed, the recording ends in Error.
+void TestStorageThrows()
+{
+    printf("a storage that throws stops the recording\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    MemoryStorage storage;
+    storage.throw_at_append = 2;
+    RecordingEvents events;
+    RecordSession session(sensor, storage, events, Config(100000));
+    CHECK(!session.Run(StopToken()), "run reported success");
+    std::vector<std::string> e = events.Events();
+    CHECK(std::count(e.begin(), e.end(), "warning:ERROR: writing the recording failed: disk broke") == 1, "warning");
+    CHECK(storage.chunks.size() == 2 && storage.closes == 1, "%zu chunks, %d closes", storage.chunks.size(), storage.closes);
+    CHECK(events.States().back() == "error", "ends in error");
+}
+
+// The sensor throws in the middle of a recording: no std::terminate; what
+// was captured is written, the files are closed, the state is Error.
+void TestSensorThrows()
+{
+    printf("a sensor that throws ends the recording in Error\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    sensor.on_poll = [](int n) {
+        if (n == 200)
+            throw std::runtime_error("socket gone");
+    };
+    MemoryStorage storage;
+    RecordingEvents events;
+    RecordSession session(sensor, storage, events, Config(100000));
+    CHECK(!session.Run(StopToken()), "run reported success");
+    std::vector<std::string> e = events.Events();
+    CHECK(std::count(e.begin(), e.end(), "warning:ERROR: the recording stopped on an internal error: socket gone") == 1, "warning");
+    size_t points = 0;
+    for (const SensorChunk &c : storage.chunks)
+        points += c.points.size();
+    CHECK(storage.chunks.size() == 4 && points == 4 * 14100 && storage.closes == 1 && sensor.stopped,
+          "%zu chunks %zu points, %d closes, stopped %d", storage.chunks.size(), points, storage.closes, sensor.stopped);
+    CHECK(events.States().back() == "error", "ends in error");
 }
 
 void TestLensMonitor()
@@ -158,6 +232,9 @@ int main()
 {
     TestFullRecording();
     TestFailingChannels();
+    TestStorageOpenFails();
+    TestStorageThrows();
+    TestSensorThrows();
     TestLensMonitor();
     return FinishTests("Record session");
 }

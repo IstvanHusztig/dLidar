@@ -9,6 +9,8 @@
 #include "../check.h"
 
 #include <chrono>
+#include <memory>
+#include <stdexcept>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -142,7 +144,8 @@ void TestSeveralOutputs()
     FakeSensor sensor;
     sensor.endless = true;
     MemoryStorage storage;
-    RecordingEvents a, b;
+    RecordingEvents a;
+    auto b = std::make_shared<RecordingEvents>();
     {
         EventHub hub;
         hub.AddSync(a);
@@ -151,7 +154,7 @@ void TestSeveralOutputs()
         c.StartRecording();
         c.WaitIdle();
     }
-    CHECK(a.States() == kFullCycle && b.States() == kFullCycle, "a %zu b %zu states", a.States().size(), b.States().size());
+    CHECK(a.States() == kFullCycle && b->States() == kFullCycle, "a %zu b %zu states", a.States().size(), b->States().size());
 }
 
 // The sensor does not start: Error, the storage is still closed cleanly, and
@@ -176,6 +179,113 @@ void TestSensorFailure()
     c.WaitIdle();
     CHECK(c.Status().state == DeviceState::Idle && c.Status().last_ok, "second recording");
 }
+// The state that StartRecording and Status() show is the one that decides:
+// an accepted start is Preparing at once, and once Status() is Idle a start
+// is accepted (it used to be refused for a moment after the final Idle).
+void TestStateDecidesStart()
+{
+    printf("Status() and StartRecording agree\n");
+    int refused_while_idle = 0, not_preparing = 0;
+    for (int i = 0; i < 200; i++)
+    {
+        FakeSensor sensor;
+        sensor.endless = true;
+        Gate gate; // the recording cannot end before the checks below
+        sensor.on_prepare = [&] { gate.Wait(); };
+        MemoryStorage storage;
+        RecordingEvents events;
+        ScannerController c(sensor, storage, events, Config(1));
+        DeviceState seen;
+        c.StartRecording();
+        if (!(!c.StartRecording(&seen) && seen == DeviceState::Preparing && c.Status().state == DeviceState::Preparing))
+            not_preparing++;
+        gate.Open();
+        while (c.Status().state != DeviceState::Idle)
+            std::this_thread::yield();
+        if (!c.StartRecording(&seen))
+            refused_while_idle++;
+        c.WaitIdle();
+    }
+    CHECK(not_preparing == 0, "%d accepted starts not Preparing at once", not_preparing);
+    CHECK(refused_while_idle == 0, "%d starts refused while Status() was Idle", refused_while_idle);
+}
+
+// A channel starts the next recording from its OnState(Idle) (e.g. an
+// auto-repeat); WaitIdle covers both. WaitIdle from a callback returns.
+class RestartOnIdle : public RecordingEvents
+{
+public:
+    ScannerController *controller = nullptr;
+    int restarts = 0;
+    bool restart_accepted = false;
+    void OnState(const DeviceStatus &s) override
+    {
+        RecordingEvents::OnState(s);
+        if (s.state == DeviceState::Recording)
+            controller->WaitIdle(); // must not deadlock
+        if (s.state == DeviceState::Idle && restarts++ == 0)
+            restart_accepted = controller->StartRecording();
+    }
+};
+
+void TestStartFromCallback()
+{
+    printf("a channel can start the next recording from OnState(Idle)\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    MemoryStorage storage;
+    RestartOnIdle events;
+    ScannerController c(sensor, storage, events, Config(2));
+    events.controller = &c;
+    c.StartRecording();
+    c.WaitIdle();
+    std::vector<std::string> twice = kFullCycle;
+    twice.insert(twice.end(), kFullCycle.begin(), kFullCycle.end());
+    CHECK(events.restart_accepted && storage.opens == 2 && storage.closes == 2, "restart accepted %d, %d opens",
+          events.restart_accepted, storage.opens);
+    CHECK(events.States() == twice, "two full cycles before WaitIdle returned");
+}
+
+// An exception in the sensor's start-up: Error with a warning instead of
+// std::terminate, the storage is closed, and the next start works.
+void TestSensorThrowsInPrepare()
+{
+    printf("an exception in the sensor start-up ends in Error\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    sensor.on_prepare = [] { throw std::runtime_error("no route to host"); };
+    MemoryStorage storage;
+    RecordingEvents events;
+    ScannerController c(sensor, storage, events, Config(2));
+    c.StartRecording();
+    c.WaitIdle();
+    CHECK(c.Status().state == DeviceState::Error && !c.Status().last_ok, "state %s", StateName(c.Status().state));
+    std::vector<std::string> ev = events.Events();
+    CHECK(std::count(ev.begin(), ev.end(), "warning:ERROR: the recording stopped on an internal error: no route to host") == 1,
+          "warning");
+    CHECK(storage.closes == 1 && sensor.stopped, "storage closed %d, sensor stopped %d", storage.closes, sensor.stopped);
+    sensor.on_prepare = nullptr;
+    CHECK(c.StartRecording(), "start after the exception");
+    c.WaitIdle();
+    CHECK(c.Status().state == DeviceState::Idle && c.Status().last_ok, "second recording");
+}
+
+// The controller is destroyed while a recording runs: it is stopped and
+// finished; a start that has not begun is dropped.
+void TestDestroyWhileRecording()
+{
+    printf("destroying the controller finishes the running recording\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    MemoryStorage storage;
+    RecordingEvents events;
+    {
+        ScannerController c(sensor, storage, events, Config(100000));
+        c.StartRecording();
+        CHECK(WaitFor([&] { return c.Status().chunks >= 1; }), "no chunks");
+    }
+    CHECK(storage.opens == 1 && storage.closes == 1 && events.States() == kFullCycle, "finished on destruction");
+}
 } // namespace
 
 int main()
@@ -185,5 +295,9 @@ int main()
     TestStopFromAnyChannel();
     TestSeveralOutputs();
     TestSensorFailure();
+    TestStateDecidesStart();
+    TestStartFromCallback();
+    TestSensorThrowsInPrepare();
+    TestDestroyWhileRecording();
     return FinishTests("Device control");
 }

@@ -22,37 +22,79 @@ namespace dlidar
             return {(int64_t)m.tv_sec * 1000000000LL + m.tv_nsec, (int64_t)r.tv_sec * 1000000000LL + r.tv_nsec};
         }
 
-        void PrintDirtyPercentage(UnitreeLidarReader *lreader)
+        // The L2 answers the start-up queries within a few seconds once it
+        // rotates; longer means it is not there (UDP does not fail without it).
+        const std::chrono::seconds kStartupAnswerTimeout(10);
+
+        // Sleeps `seconds`, returning early (false) on a stop.
+        bool SleepUnlessStopped(int seconds, const StopToken &stop)
+        {
+            auto until = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+            while (std::chrono::steady_clock::now() < until)
+            {
+                if (stop.StopRequested())
+                    return false;
+                usleep(50000);
+            }
+            return !stop.StopRequested();
+        }
+
+        // Parses packets until `get` succeeds; false on a stop or after the timeout.
+        template <typename Get>
+        bool ParseUntil(UnitreeLidarReader *lreader, Get get, const StopToken &stop)
+        {
+            auto until = std::chrono::steady_clock::now() + kStartupAnswerTimeout;
+            while (!get())
+            {
+                if (stop.StopRequested() || std::chrono::steady_clock::now() >= until)
+                    return false;
+                lreader->runParse();
+            }
+            return true;
+        }
+
+        enum class Step
+        {
+            Done,
+            Stopped,
+            NoAnswer
+        };
+
+        Step Outcome(bool done, const StopToken &stop)
+        {
+            if (done)
+                return Step::Done;
+            return stop.StopRequested() ? Step::Stopped : Step::NoAnswer;
+        }
+
+        Step PrintDirtyPercentage(UnitreeLidarReader *lreader, const StopToken &stop)
         {
             float dirtyPercentage;
-            while (!lreader->getDirtyPercentage(dirtyPercentage))
-            {
-                lreader->runParse();
-            }
+            if (!ParseUntil(lreader, [&] { return lreader->getDirtyPercentage(dirtyPercentage); }, stop))
+                return Outcome(false, stop);
             printf("dirty percentage = %f %%\n", dirtyPercentage);
-            sleep(1);
+            return Outcome(SleepUnlessStopped(1, stop), stop);
         }
 
-        void PrintTimeDelay(UnitreeLidarReader *lreader)
+        Step PrintTimeDelay(UnitreeLidarReader *lreader, const StopToken &stop)
         {
             double timeDelay;
-            while (!lreader->getTimeDelay(timeDelay))
-            {
-                lreader->runParse();
-            }
+            if (!ParseUntil(lreader, [&] { return lreader->getTimeDelay(timeDelay); }, stop))
+                return Outcome(false, stop);
             printf("time delay (second) = %f\n", timeDelay);
-            sleep(1);
+            return Outcome(SleepUnlessStopped(1, stop), stop);
         }
 
-        void RestartLidar(UnitreeLidarReader *lreader)
+        Step RestartLidar(UnitreeLidarReader *lreader, const StopToken &stop)
         {
             std::cout << "stop lidar rotation ..." << std::endl;
             lreader->stopLidarRotation();
-            sleep(3);
+            if (!SleepUnlessStopped(3, stop))
+                return Step::Stopped;
 
             std::cout << "start lidar rotation ..." << std::endl;
             lreader->startLidarRotation();
-            sleep(3);
+            return Outcome(SleepUnlessStopped(3, stop), stop);
         }
 
         // The SDK buffers packets while nothing reads them (lidar restart, the
@@ -149,9 +191,20 @@ namespace dlidar
 
     bool LiveL2Source::Prepare(const StopToken &stop)
     {
-        RestartLidar(reader_);
-        PrintDirtyPercentage(reader_);
-        PrintTimeDelay(reader_);
+        // A stop ends the start-up early and successfully: the capture loop
+        // then sees the stop and the (empty) recording is finished normally.
+        for (auto step : {&RestartLidar, &PrintDirtyPercentage, &PrintTimeDelay})
+        {
+            Step result = step(reader_, stop);
+            if (result == Step::Stopped)
+                return true;
+            if (result == Step::NoAnswer)
+            {
+                std::cerr << "The L2 did not answer within " << kStartupAnswerTimeout.count() << " s; check its power and network ("
+                          << "is it at the configured IP?)." << std::endl;
+                return false;
+            }
+        }
         info_ = QueryRecordingInfo(reader_, work_mode_, stop);
         DrainPendingPackets(reader_, std::chrono::seconds(2), stop);
         return true;

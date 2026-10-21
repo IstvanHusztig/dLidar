@@ -34,6 +34,7 @@ namespace dlidar::test
         bool prepared = false, stopped = false;
         bool prepare_ok = true;
         std::function<void()> on_prepare; // runs inside Prepare (e.g. to hold the start-up)
+        std::function<void(int)> on_poll; // runs inside Poll with the poll count (e.g. to throw)
         // When the queue is empty: endless point packets of 300 points, 3 ms
         // apart, instead of EndOfStream.
         bool endless = false;
@@ -79,6 +80,9 @@ namespace dlidar::test
         Polled Poll() override
         {
             Polled out;
+            if (on_poll)
+                on_poll(polls_);
+            polls_++;
             if (queue_.empty() && endless)
             {
                 endless_n_++;
@@ -129,6 +133,7 @@ namespace dlidar::test
         std::deque<Packet> queue_;
         Packet current_;
         int64_t endless_n_ = 0;
+        int polls_ = 0;
         std::vector<int64_t> stamps_;
 
         const char *Header() const override { return "stamp_ns\n"; }

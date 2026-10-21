@@ -43,7 +43,9 @@ namespace dlidar
     {
         LensDirty,
         StorageFailed,
-        SensorFailed
+        StorageSlow,     // chunks pile up in memory
+        SensorFailed,
+        RecordingFailed  // an internal error ended the recording
     };
 
     struct DeviceWarning
@@ -62,7 +64,8 @@ namespace dlidar
     };
 
     // Output channel of the device (console, later LEDs, a phone over
-    // Bluetooth). Called from capture threads; see EventHub for isolation.
+    // Bluetooth). Called from the recording's threads (capture and writer);
+    // see EventHub for isolation.
     class DeviceEvents
     {
     public:

@@ -40,7 +40,8 @@ namespace dlidar
         const unitree_lidar_sdk::LidarImuData &ImuPacket() const override;
 
         // Restarts the rotation, prints the dirtiness and time delay, queries
-        // the versions, then reads out the SDK's packet backlog for 2 s.
+        // the versions, then reads out the SDK's packet backlog for 2 s. A stop
+        // ends it early (true); false if the L2 does not answer within 10 s.
         bool Prepare(const StopToken &stop) override;
         RecordingInfo Versions() override { return info_; }
         std::optional<float> LensDirtiness() override;

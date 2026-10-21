@@ -10,6 +10,7 @@
 #include <atomic>
 #include <memory>
 #include <condition_variable>
+#include <exception>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -30,7 +31,13 @@ namespace dlidar
     // One recording: sensor start-up, capture loop, finishing the files.
     // Producer/consumer: this thread polls the sensor and assembles chunks, a
     // writer thread hands them to the storage, so slow storage (SD card)
-    // never stalls packet reading. States and messages go to `events`.
+    // never stalls packet reading. States and messages go to `events`, from
+    // this thread and (storage warnings) from the writer thread.
+    //
+    // It ends in Error unless the sensor started and the storage wrote
+    // everything. A storage failure stops the capture. An exception (sensor,
+    // storage, out of memory) ends the capture too; the chunks already queued
+    // are still written and the files closed.
     class RecordSession
     {
     public:
@@ -47,26 +54,40 @@ namespace dlidar
 
             std::thread writer([this] { WriterLoop(); });
 
-            bool sensor_ok = sensor_.Prepare(stop);
-            SensorInfo info = sensor_.Info();
-            assembler_ = std::make_unique<ChunkAssembler>(sensor_, config_.timing, info.versions, config_.setup.mount,
-                                                          config_.setup.filter.value_or(info.default_filter));
-            if (!sensor_ok)
-                events_.OnWarning({WarningKind::SensorFailed, "ERROR: the sensor did not start."});
-            else
+            bool sensor_ok = false;
+            std::string failure;
+            try
             {
-                Publish(DeviceState::Recording);
-                Capture(stop);
-            }
+                sensor_ok = sensor_.Prepare(stop);
+                SensorInfo info = sensor_.Info();
+                assembler_ = std::make_unique<ChunkAssembler>(sensor_, config_.timing, info.versions, config_.setup.mount,
+                                                              config_.setup.filter.value_or(info.default_filter));
+                if (!sensor_ok)
+                    events_.OnWarning({WarningKind::SensorFailed, "ERROR: the sensor did not start."});
+                else
+                {
+                    Publish(DeviceState::Recording);
+                    Capture(stop);
+                }
 
-            if (sensor_ok)
-                sensor_.Stop();
-            Publish(DeviceState::Finalizing);
-            {
-                SensorChunk final_chunk = assembler_->Finish();
-                events_.OnSummary(Summary(assembler_->Timeline()));
-                Push(std::move(final_chunk));
+                if (sensor_ok)
+                    sensor_.Stop();
+                Publish(DeviceState::Finalizing);
+                {
+                    SensorChunk final_chunk = assembler_->Finish();
+                    events_.OnSummary(Summary(assembler_->Timeline()));
+                    Push(std::move(final_chunk));
+                }
             }
+            catch (const std::exception &e)
+            {
+                failure = e.what();
+            }
+            catch (...)
+            {
+                failure = "unknown exception";
+            }
+            bool failed = !failure.empty();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 capturing_ = false;
@@ -74,9 +95,15 @@ namespace dlidar
             cv_.notify_one();
             writer.join();
 
-            bool ok = sensor_ok && writer_ok_;
+            if (failed)
+            {
+                StopSensorQuietly();
+                events_.OnWarning({WarningKind::RecordingFailed, "ERROR: the recording stopped on an internal error: " +
+                                                                     (failure.empty() ? std::string("unknown") : failure)});
+            }
+            bool ok = sensor_ok && writer_ok_ && !failed;
             status_.last_ok = ok;
-            Publish(sensor_ok ? DeviceState::Idle : DeviceState::Error);
+            Publish(ok ? DeviceState::Idle : DeviceState::Error);
             return ok;
         }
 
@@ -90,11 +117,18 @@ namespace dlidar
         DeviceStatus status_;
         std::unique_ptr<ChunkAssembler> assembler_;
 
+        // Chunks waiting for the writer. Not bounded: dropping chunks would
+        // break the recording, so a slow storage only gets a warning.
         std::queue<SensorChunk> queue_;
         std::mutex mutex_;
         std::condition_variable cv_;
         bool capturing_ = true;
+        bool backlog_warned_ = false;
         std::atomic<bool> writer_ok_{false};
+        std::atomic<bool> writer_failed_{false}; // stops the capture
+
+        // ~40 MB of points waiting: the storage is far slower than the sensor.
+        static const size_t kBacklogWarnChunks = 50;
 
         void Publish(DeviceState s)
         {
@@ -105,7 +139,7 @@ namespace dlidar
         void Capture(const StopToken &stop)
         {
             LensMonitor lens;
-            while (assembler_->ChunksProduced() < config_.target_chunks && !stop.StopRequested())
+            while (assembler_->ChunksProduced() < config_.target_chunks && !stop.StopRequested() && !writer_failed_)
             {
                 Polled p = sensor_.Poll();
                 if (p.kind == PacketKind::EndOfStream)
@@ -128,34 +162,86 @@ namespace dlidar
 
         void Push(SensorChunk chunk)
         {
+            size_t waiting = 0;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 queue_.push(std::move(chunk));
+                if (queue_.size() >= kBacklogWarnChunks && !backlog_warned_)
+                {
+                    backlog_warned_ = true;
+                    waiting = queue_.size();
+                }
             }
             cv_.notify_one();
+            if (waiting)
+                events_.OnWarning({WarningKind::StorageSlow, "WARNING: the storage is " + std::to_string(waiting) +
+                                                                 " chunks behind the sensor; the recording is held in memory."});
+        }
+
+        void StopSensorQuietly()
+        {
+            try
+            {
+                sensor_.Stop();
+            }
+            catch (...)
+            {
+            }
         }
 
         void WriterLoop()
         {
-            if (!storage_.Open())
+            bool opened = false;
+            try
             {
-                events_.OnWarning({WarningKind::StorageFailed, "Fatal Error: Failed to open output streams!"});
-                return;
-            }
-            while (true)
-            {
-                SensorChunk chunk;
+                if (!storage_.Open())
                 {
-                    std::unique_lock<std::mutex> lock(mutex_);
-                    cv_.wait(lock, [&] { return !queue_.empty() || !capturing_; });
-                    if (queue_.empty() && !capturing_)
-                        break;
-                    chunk = std::move(queue_.front());
-                    queue_.pop();
+                    writer_failed_ = true;
+                    events_.OnWarning({WarningKind::StorageFailed, "Fatal Error: Failed to open output streams!"});
+                    return;
                 }
-                storage_.Append(chunk);
+                opened = true;
+                while (true)
+                {
+                    SensorChunk chunk;
+                    {
+                        std::unique_lock<std::mutex> lock(mutex_);
+                        cv_.wait(lock, [&] { return !queue_.empty() || !capturing_; });
+                        if (queue_.empty() && !capturing_)
+                            break;
+                        chunk = std::move(queue_.front());
+                        queue_.pop();
+                    }
+                    storage_.Append(chunk);
+                }
+                writer_ok_ = storage_.Close();
             }
-            writer_ok_ = storage_.Close();
+            catch (const std::exception &e)
+            {
+                WriterFailed(opened, e.what());
+            }
+            catch (...)
+            {
+                WriterFailed(opened, "unknown exception");
+            }
+        }
+
+        // An exception in the storage: stop the capture, still try to finish
+        // what was written (whatever is left behind is recovered on the next start).
+        void WriterFailed(bool opened, const std::string &what)
+        {
+            writer_failed_ = true;
+            writer_ok_ = false;
+            events_.OnWarning({WarningKind::StorageFailed, "ERROR: writing the recording failed: " + what});
+            if (!opened)
+                return;
+            try
+            {
+                storage_.Close();
+            }
+            catch (...)
+            {
+            }
         }
 
         static RecordingSummary Summary(const ImuTimeline &t)

@@ -13,9 +13,28 @@ The device SHALL run at most one recording at a time and SHALL report one of the
 - **WHEN** a start command arrives while a recording is Preparing, Recording or Finalizing
 - **THEN** the command is rejected with the current state, and the running recording is not affected
 
+#### Scenario: Start accepted once Idle
+- **WHEN** the reported state is Idle or Error (including inside an output channel's Idle notification)
+- **THEN** a start command is accepted, and the state reads Preparing as soon as the command returns
+
 #### Scenario: Recording ends by itself
 - **WHEN** the recording reaches its configured length
 - **THEN** the device passes through Finalizing and returns to Idle with the recording complete
+
+### Requirement: A failed recording ends in Error
+A recording that cannot be written completely SHALL end in Error with a warning, never crash the process or hold the recording in memory without bound, and the device SHALL accept the next start.
+
+#### Scenario: Sensor does not start
+- **WHEN** the sensor does not answer its start-up queries within 10 s
+- **THEN** the device reports a warning and Error
+
+#### Scenario: Storage fails
+- **WHEN** the storage cannot open or fails while writing
+- **THEN** the capture stops, what was written is closed, and the device reports a warning and Error
+
+#### Scenario: Internal error
+- **WHEN** the sensor, the storage or a memory allocation throws during a recording
+- **THEN** the chunks already captured are written, the files are closed, the sensor is stopped, and the device reports a warning and Error
 
 ### Requirement: Commands through one control interface
 Start, stop and status requests from every input channel SHALL go through one thread-safe control interface. A stop from any channel SHALL finalize the recording exactly as SIGINT does today.
@@ -23,6 +42,10 @@ Start, stop and status requests from every input channel SHALL go through one th
 #### Scenario: Stop from any channel
 - **WHEN** a stop arrives from a signal or from any other input channel during Recording
 - **THEN** the recording is finalized into complete files, and the device returns to Idle
+
+#### Scenario: Stop during start-up
+- **WHEN** a stop arrives while the sensor is starting up (Preparing)
+- **THEN** the start-up ends within a fraction of a second and the recording is finalized
 
 #### Scenario: Second signal still kills
 - **WHEN** a second SIGINT/SIGTERM/SIGHUP arrives

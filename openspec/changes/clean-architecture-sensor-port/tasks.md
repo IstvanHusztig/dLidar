@@ -66,6 +66,16 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 - [ ] 10.3 The same live capture on the Pi Zero 2 W; verify no dropped chunks or warnings beyond the baseline, and similar CPU/RAM use (`/usr/bin/time -v`)
 - [ ] 10.4 Import the live recording into dMapper with its configuration unchanged; verify the trajectory and map look like a pre-refactor recording of the same scene
 
+## 11. Concurrency review (high effort)
+
+- [x] 11.1 Review `ScannerController`, `EventHub`, `RecordSession`, `signals.h` (own review plus an independent Opus review); stress tests and ASan/UBSan builds (ThreadSanitizer does not run on the Pi 5 kernel)
+- [x] 11.2 Controller: one worker thread for its lifetime; the stored state decides whether a start is accepted (no refusal while Idle, start from an Idle callback works); exceptions end in Error instead of `std::terminate`; `WaitIdle` from a callback returns
+- [x] 11.3 Session: a storage failure stops the capture (was: unbounded queue, 5.7 GB in 15 s); exceptions join the writer and close the files; Error unless everything was written; backlog warning at 50 chunks
+- [x] 11.4 EventHub: async channels held by `shared_ptr` (a detached stuck thread keeps its channel alive), threads start at registration, sync channels get one event at a time, one shared 1 s shutdown deadline
+- [x] 11.5 L2 start-up: stop checked during the restart sleeps; dirtiness/time-delay queries time out after 10 s (Error instead of hanging forever); `main` starts no recording after an early stop
+- [x] 11.6 Golden replay (60 s and whole log) identical; 100 stress runs of each test binary without failure
+- [ ] 11.7 On the L2: Ctrl-C during the start-up ends within ~0.1 s; an unplugged L2 ends in Error after ~10 s
+
 ## Workflow follow-up
 
 - Archive the change after review (`/opsx:archive`).

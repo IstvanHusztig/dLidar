@@ -88,7 +88,14 @@ input channel ──StartRecording──> ScannerController ──(worker thread
                                         ChunkAssembler ──SensorChunk──> queue ──writer thread──> RecordingStorage
 ```
 
-States: Idle → Preparing (sensor start-up) → Recording → Finalizing (sensor stopped, files finished) → Idle. The state is Error if the sensor does not start; a new start is accepted from Idle or Error. A start command in any other state is rejected, and the current state is returned.
+States: Idle → Preparing (sensor start-up) → Recording → Finalizing (sensor stopped, files finished) → Idle. The state is Error if the recording failed, with a warning first:
+- the sensor did not start (the L2 gives up after 10 s without an answer)
+- the storage could not open or failed while writing; the capture then stops
+- an exception (sensor, storage, out of memory); the chunks already captured are written and the files closed
+
+A new start is accepted from Idle or Error. A start command in any other state is rejected, and the current state is returned. The state that `Status()` and `StartRecording` report is the one that decides: an accepted start reads Preparing at once, and the final Idle/Error is stored before the channels hear of it, so a channel may start the next recording from its `OnState(Idle)`.
+
+Threads: the controller's worker runs the recordings (capture loop, `CaptureTiming`, the events of the recording) and each recording has a writer thread (storage, storage warnings). The sensor is only used by the worker and the storage only by the writer. The chunk queue between them is not bounded, since dropping chunks would break the recording; past 50 waiting chunks a warning is sent.
 
 ## Recordings are byte-identical
 
@@ -112,12 +119,12 @@ The restructure changed no output. `tools/golden_replay.sh` replays a packet log
 
 No core change is needed; `tests/application/fake_sensor.h` is a minimal example.
 
-**An input channel** (button, phone command). Call `ScannerController::StartRecording` / `StopRecording` / `Status` from the adapter's own thread. They are thread-safe, and `StartRecording` returns false with the current state when busy.
+**An input channel** (button, phone command). Call `ScannerController::StartRecording` / `StopRecording` / `Status` from the adapter's own thread. They are thread-safe and never block on a recording, and `StartRecording` returns false with the current state when busy. `WaitIdle` blocks until every accepted recording has ended; called from an event callback it returns at once.
 
 **An output channel** (LEDs, phone status).
 1. Implement `DeviceEvents` (`OnState`, `OnWarning`, `OnProgress`, `OnSummary`).
-2. Register it in `main.cpp` with `hub.AddAsync(channel)`. It gets its own thread and a bounded queue that drops the oldest event when full, so a slow or failing channel never affects a recording.
-3. `AddSync` is only for the console.
+2. Register it in `main.cpp` with `hub.AddAsync(std::make_shared<MyChannel>(...))`. It gets its own thread and a bounded queue that drops the oldest event when full, so a slow or failing channel never affects a recording. At shutdown the async channels get 1 s together to deliver their queue; a channel still stuck is left on its thread, which keeps it alive.
+3. `AddSync` is only for the console. The hub hands sync channels one event at a time (a recording publishes from two threads), on the publishing thread.
 
 ## Deferred
 
@@ -126,4 +133,5 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 - `PointRecord` and the LAZ extra bytes follow L2 semantics, such as `raw_range` as uint16 mm. A second sensor may need recording format 3 with a sensor-defined extra-bytes schema.
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
 - A daemon mode (wait idle for buttons/phone), GPIO and Bluetooth adapters.
-- When the storage cannot open, the capture still runs and queues chunks (an existing bug, kept unchanged here).
+- The signal stop flag stays set once raised, so it ends every later recording too. Right for the CLI; a daemon mode needs its own exit command.
+- A stop during Preparing still produces an (empty) recording, because the storage opens at the start.

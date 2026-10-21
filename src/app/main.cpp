@@ -93,6 +93,14 @@ int main(int argc, char *argv[])
 	dlidar::EventHub hub;
 	hub.AddSync(console);
 
+	// A stop during recovery or the L2 set-up: no recording (it would leave
+	// an empty file pair that dMapper reads).
+	if (StopRequested())
+	{
+		sensor.Stop();
+		return 0;
+	}
+
 	{
 		// Input channels: SIGINT/SIGTERM/SIGHUP (the stop flag). Later: buttons
 		// and the phone send StartRecording/StopRecording.
