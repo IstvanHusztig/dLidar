@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.0)
 project(dLidar)
 
 set(CMAKE_BUILD_TYPE "Debug")
-set(CMAKE_CXX_FLAGS "-std=c++17")
+# No fused multiply-add: results must not depend on -O level or how code is
+# split (bin/dLidar is -O0, the replay tools -O2; tools/golden_replay.sh).
+set(CMAKE_CXX_FLAGS "-std=c++17 -ffp-contract=off")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g2 -ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall -DNDEBUG") 
 

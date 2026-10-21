@@ -12,6 +12,7 @@
 #include <limits>
 #include <algorithm>
 #include <cerrno>
+#include <cstddef>
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
@@ -245,6 +246,13 @@ inline int64_t TrimPartialCsvLine(const std::string &csv_path) { return TrimPart
 const char kPointsTempMagic[8] = {'d', 'L', 'p', 't', 's', 'v', '2', '\n'};
 const uint64_t kPointsTempHeaderSize = 16;
 static_assert(sizeof(PointDLidar) == 48, "points temp record layout (format 2)");
+static_assert(offsetof(PointDLidar, x) == 0 && offsetof(PointDLidar, y) == 4 && offsetof(PointDLidar, z) == 8 &&
+                  offsetof(PointDLidar, intensity) == 12 && offsetof(PointDLidar, time) == 16 &&
+                  offsetof(PointDLidar, ring) == 24 && offsetof(PointDLidar, range) == 28 &&
+                  offsetof(PointDLidar, alpha) == 32 && offsetof(PointDLidar, theta) == 36 &&
+                  offsetof(PointDLidar, packet_seq) == 40 && offsetof(PointDLidar, raw_range) == 44 &&
+                  offsetof(PointDLidar, sample_index) == 46,
+              "points temp record field offsets (format 2)");
 
 // The point record of format 1 temp files.
 struct PointDLidarV1

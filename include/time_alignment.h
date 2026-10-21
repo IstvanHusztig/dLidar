@@ -2,6 +2,7 @@
 
 #include "imu_timestamper.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <algorithm>
 #include <cinttypes>
@@ -57,6 +58,11 @@ struct PacketTiming
     uint32_t point_num;   // points: points in the packet; IMU: 0
 };
 static_assert(sizeof(PacketTiming) == 40, "packet log record layout");
+static_assert(offsetof(PacketTiming, host_mono_ns) == 0 && offsetof(PacketTiming, host_unix_ns) == 8 &&
+                  offsetof(PacketTiming, sensor_ns) == 16 && offsetof(PacketTiming, seq) == 24 &&
+                  offsetof(PacketTiming, type) == 28 && offsetof(PacketTiming, time_increment) == 32 &&
+                  offsetof(PacketTiming, point_num) == 36,
+              "packet log record field offsets");
 
 const uint32_t kPacketTypePoints = 102; // LIDAR_POINT_DATA_PACKET_TYPE
 const uint32_t kPacketTypeImu = 104;    // LIDAR_IMU_DATA_PACKET_TYPE
