@@ -38,8 +38,8 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 
 ## 6. Storage port and adapter
 
-- [ ] 6.1 Define `src/application/ports/recording_storage.h` (`Open`, `Append`, `Close`, `RecoverLeftovers`); move `ContinuousDataWriter`, points temp, LAZ encoder, session files, recovery and crash truncation into `src/adapters/storage/` (`.cpp` where LASzip is used); verify golden is identical
-- [ ] 6.2 Give the packet-state header to the storage at construction (from `Diagnostics()`); write no `packetstate` file when there is no header; verify `test_datawriter` (moved to `tests/adapters/storage/`) passes, including the partial-row recovery, and a new case covers "no diagnostics → no file"
+- [x] 6.1 Define `src/application/ports/recording_storage.h` (`Open`, `Append`, `Close`, `RecoverLeftovers`); move `ContinuousDataWriter`, points temp, LAZ encoder, session files, recovery and crash truncation into `src/adapters/storage/` (`.cpp` where LASzip is used); verify golden is identical
+- [x] 6.2 Give the packet-state header to the storage at construction (from `Diagnostics()`); write no `packetstate` file when there is no header; verify `test_datawriter` (moved to `tests/adapters/storage/`) passes, including the partial-row recovery, and a new case covers "no diagnostics → no file"
 
 ## 7. Use case, device control and app
 

@@ -1,10 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <initializer_list>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <unistd.h>
+
+#include "adapters/storage/crash_guard.h"
 
 // Termination handling for a capture.
 //
@@ -23,19 +26,8 @@ inline std::atomic<bool> &StopRequested()
     return stop;
 }
 
-// The CSV the crash handler truncates, and its size after the last complete
-// row. Updated by ContinuousDataWriter.
-inline std::atomic<int> &CrashTruncateFd()
-{
-    static std::atomic<int> fd{-1};
-    return fd;
-}
-
-inline std::atomic<int64_t> &CrashTruncateSize()
-{
-    static std::atomic<int64_t> size{0};
-    return size;
-}
+using dlidar::CrashTruncateFd;
+using dlidar::CrashTruncateSize;
 
 namespace shutdown_detail
 {

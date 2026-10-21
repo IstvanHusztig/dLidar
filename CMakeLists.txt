@@ -28,8 +28,15 @@ add_library(dlidar_l2 STATIC
 set_target_properties(dlidar_l2 PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_l2 PUBLIC ${UNITREE_SDK_LIB} pthread)
 
+# Storage adapter (src/adapters/storage): recording files; the only code that sees LASzip.
+add_library(dlidar_storage STATIC
+    src/adapters/storage/laz_encoder.cpp
+    src/adapters/storage/recovery.cpp)
+set_target_properties(dlidar_storage PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_storage PUBLIC laszip)
+
 add_executable(dLidar src/dLidar.cpp)
-target_link_libraries(dLidar dlidar_l2 laszip)
+target_link_libraries(dLidar dlidar_l2 dlidar_storage)
 
 # Tests (no sensor needed): ctest --test-dir build
 enable_testing()
@@ -39,9 +46,9 @@ set_target_properties(test_imu_timestamper PROPERTIES RUNTIME_OUTPUT_DIRECTORY $
 target_compile_options(test_imu_timestamper PRIVATE -O2)
 add_test(NAME imu_timestamper COMMAND test_imu_timestamper)
 
-add_executable(test_datawriter tests/test_datawriter.cpp)
+add_executable(test_datawriter tests/adapters/storage/test_datawriter.cpp)
 set_target_properties(test_datawriter PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
-target_link_libraries(test_datawriter dlidar_l2 laszip)
+target_link_libraries(test_datawriter dlidar_l2 dlidar_storage)
 add_test(NAME datawriter COMMAND test_datawriter)
 
 add_executable(test_time_alignment tests/adapters/unitree_l2/test_l2_time_alignment.cpp)
@@ -64,7 +71,7 @@ target_compile_options(replay_packets PRIVATE -O2)
 # new recording (tools/compare_recording_formats.sh compares formats with it).
 add_executable(replay_capture tools/replay_capture.cpp)
 target_compile_options(replay_capture PRIVATE -O2)
-target_link_libraries(replay_capture dlidar_l2 laszip)
+target_link_libraries(replay_capture dlidar_l2 dlidar_storage)
 
 add_executable(test_capture_timing tests/application/test_capture_timing.cpp)
 set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)

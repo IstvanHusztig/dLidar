@@ -1,6 +1,7 @@
 #pragma once
 
-#include "datawriter.h"
+#include "shutdown.h"
+#include "application/ports/recording_storage.h"
 #include "application/capture/chunk_assembler.h"
 #include "application/ports/lidar_sensor.h"
 #include "application/ports/stop_token.h"
@@ -12,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <unistd.h>
+#include <iostream>
 
 using dlidar::CaptureSetup;
 using dlidar::ChunkAssembler;
@@ -19,6 +21,9 @@ using dlidar::LidarSensor;
 using dlidar::PacketKind;
 using dlidar::Polled;
 using dlidar::StopToken;
+using dlidar::RecordingStorage;
+using dlidar::SensorChunk;
+using dlidar::ImuTimeline;
 
 // Lens dirtiness above which we warn during capture. A dirty lens
 // attenuates/scatters returns and quietly degrades the whole run
@@ -74,8 +79,8 @@ void PrintTimingSummary(const ImuTimeline &timeline)
 	}
 }
 
-void ProcessSensorData(LidarSensor &sensor, const ImuTimeline::Config &timing_config, const CaptureSetup &setup,
-					   const StopToken &stop, int target_chunks = 200)
+void ProcessSensorData(LidarSensor &sensor, RecordingStorage &storage, const ImuTimeline::Config &timing_config,
+					   const CaptureSetup &setup, const StopToken &stop, int target_chunks = 200)
 {
 	// target_chunks: 200 is ~1 min of data at 20 Hz, 18 scans per chunk.
 
@@ -84,13 +89,9 @@ void ProcessSensorData(LidarSensor &sensor, const ImuTimeline::Config &timing_co
 	std::condition_variable queue_cv;
 	std::atomic<bool> is_capturing{true};
 
-	std::string base_path = OutputDirectory();
-
 	std::thread consumer_thread([&]()
 								{
-        ContinuousDataWriter stream_writer;
-
-        if (!stream_writer.Open(base_path)) {
+        if (!storage.Open()) {
             std::cerr << "Fatal Error: Failed to open output streams!" << std::endl;
             return;
         }
@@ -112,10 +113,10 @@ void ProcessSensorData(LidarSensor &sensor, const ImuTimeline::Config &timing_co
                 chunk_queue.pop();
             }
 
-            stream_writer.AppendChunk(current_chunk);
+            storage.Append(current_chunk);
         }
 
-        stream_writer.CloseAndPackageLAZ(); });
+        storage.Close(); });
 
 	sensor.Prepare(stop);
 	dlidar::SensorInfo sensor_info = sensor.Info();
@@ -161,5 +162,5 @@ void ProcessSensorData(LidarSensor &sensor, const ImuTimeline::Config &timing_co
 
 	consumer_thread.join();
 
-	std::cout << "Capture complete. Recording is in " << base_path << std::endl;
+	std::cout << "Capture complete. Recording is in " << storage.Location() << std::endl;
 }

@@ -13,6 +13,7 @@
 #include "adapters/unitree_l2/synthetic_l2_source.h"
 #include "adapters/unitree_l2/unitree_l2_sensor.h"
 #include "app/device_config.h"
+#include "adapters/storage/recording_writer.h"
 
 #include <cstdlib>
 #include <memory>
@@ -35,7 +36,7 @@ int main(int argc, char **argv)
     dlidar::UnitreeL2Sensor sensor(std::make_unique<dlidar::SyntheticL2Source>(std::move(log), seconds));
     dlidar::SensorInfo info = sensor.Info();
 
-    ContinuousDataWriter writer;
+    dlidar::ContinuousDataWriter writer(dlidar::l2::kPacketStateHeader);
     if (!writer.Open(argv[2]))
         return 1;
     const int target_chunks = 800;

@@ -2,6 +2,7 @@
 #include "app/device_config.h"
 #include "adapters/unitree_l2/live_l2_source.h"
 #include "adapters/unitree_l2/unitree_l2_sensor.h"
+#include "adapters/storage/file_recording_storage.h"
 
 // Added to every IMU timestamp. Leave 0 unless the field check
 // (docs/imu_lidar_time_alignment.md) measures a constant residual offset.
@@ -11,6 +12,10 @@ int main(int argc, char *argv[])
 {
 	InstallSignalHandlers();
 
+	// Recordings go to numbered files in OutputDirectory(); the L2's packet
+	// state rows are its diagnostics (packetstateNNNN.tsv).
+	dlidar::FileRecordingStorage storage(OutputDirectory(), dlidar::l2::kPacketStateHeader);
+
 	ImuTimeline::Config timing_config;
 	timing_config.imu_offset_ns = kImuOffsetNs;
 	for (int i = 1; i < argc; i++)
@@ -19,7 +24,7 @@ int main(int argc, char *argv[])
 		if (arg == "--finalize")
 		{
 			// Only convert an interrupted recording in place, no capture.
-			return RecoverInterruptedRecording(OutputDirectory(), false) ? 0 : 1;
+			return storage.RecoverLeftovers(false) ? 0 : 1;
 		}
 		else if (arg == "--imu-time=auto")
 			timing_config.mode = ImuTimeline::Mode::Auto;
@@ -44,7 +49,7 @@ int main(int argc, char *argv[])
 
 	// A recording that was killed or lost power is finalized into its own
 	// subdirectory first, so the new recording does not overwrite it.
-	if (!RecoverInterruptedRecording(OutputDirectory(), true))
+	if (!storage.RecoverLeftovers(true))
 	{
 		std::cerr << "Could not finalize the previous recording; fix that first (or run with --finalize)." << std::endl;
 		return 1;
@@ -61,7 +66,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 	dlidar::UnitreeL2Sensor sensor(std::move(source));
 
-	ProcessSensorData(sensor, timing_config, setup, StopToken(&StopRequested()));
+	ProcessSensorData(sensor, storage, timing_config, setup, StopToken(&StopRequested()));
 
 	sensor.Stop();
 
