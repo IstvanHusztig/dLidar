@@ -41,7 +41,8 @@ namespace dlidar
 
         // Restarts the rotation, prints the dirtiness and time delay, queries
         // the versions, then reads out the SDK's packet backlog for 2 s. A stop
-        // ends it early (true); false if the L2 does not answer within 10 s.
+        // ends it early (true); false if no packet arrives for 10 s or the
+        // status does not come within 60 s.
         bool Prepare(const StopToken &stop) override;
         RecordingInfo Versions() override { return info_; }
         std::optional<float> LensDirtiness() override;

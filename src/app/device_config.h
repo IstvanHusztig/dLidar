@@ -20,7 +20,6 @@ const unsigned short kLocalPort = 6201;
 // Sent with setLidarWorkMode at start-up; recorded in timingNNNN.json.
 const uint32_t kLidarWorkMode = 0;
 
-// A recording ends after this many chunks of >= 14000 points (200: ~1 min at
-// 20 Hz, 18 scans per chunk) or on Ctrl-C. Temporary: a push button will start
+// A recording ends after this many chunks or on Ctrl-C. Temporary: a push button will start
 // and stop recordings.
-const int kTargetChunks = 200;
+const int kTargetChunks = 1500;

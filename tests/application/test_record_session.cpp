@@ -1,6 +1,7 @@
 // RecordSession and EventHub with fakes only (no L2, no files): a complete
 // recording from FakeSensor into MemoryStorage, output channels that block
-// or throw do not change it, and the lens dirtiness warning interval.
+// or throw do not change it, the silent-sensor watchdog and the lens
+// dirtiness warning interval.
 #include "application/capture/record_session.h"
 #include "application/device/event_hub.h"
 #include "fake_sensor.h"
@@ -10,7 +11,9 @@
 
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <thread>
 
 using namespace dlidar;
 using namespace dlidar::test;
@@ -208,6 +211,67 @@ void TestSensorThrows()
     CHECK(events.States().back() == "error", "ends in error");
 }
 
+// Records Script(), then `tail` (packets without points), each taking 1 ms of
+// host time, against a 100 ms watchdog. The watchdog stops the capture: what
+// was captured is written, the files are closed, the state is Error.
+void CheckWatchdog(const std::function<void(FakeSensor &)> &tail)
+{
+    FakeSensor sensor;
+    Script(sensor);
+    tail(sensor);
+    sensor.on_poll = [](int n) {
+        if (n >= 240)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    };
+    MemoryStorage storage;
+    RecordingEvents events;
+    SessionConfig config = Config();
+    config.sensor_silence_timeout = std::chrono::milliseconds(100);
+    RecordSession session(sensor, storage, events, config);
+    CHECK(!session.Run(StopToken()), "run reported success");
+    std::vector<std::string> e = events.Events();
+    CHECK(std::count(e.begin(), e.end(),
+                     "warning:ERROR: no points from the sensor for 0.1 s (power or connection lost, or the sensor "
+                     "restarted); the recording was stopped.") == 1,
+          "warning");
+    size_t points = 0, imu = 0;
+    for (const SensorChunk &c : storage.chunks)
+    {
+        points += c.points.size();
+        imu += c.imu_data.size();
+    }
+    CHECK(storage.chunks.size() == 3 && points == 36000 && imu == 120 && storage.closes == 1 && sensor.stopped,
+          "%zu chunks %zu points %zu imu, %d closes, stopped %d", storage.chunks.size(), points, imu, storage.closes,
+          sensor.stopped);
+    CHECK(sensor.Pending() > 0, "stopped by the watchdog, not by the end of the packets");
+    std::vector<std::string> states = events.States();
+    CHECK((states == std::vector<std::string>{"preparing", "recording", "finalizing", "error"}), "states %zu", states.size());
+}
+
+void TestSensorSilent()
+{
+    printf("a sensor that goes silent ends the recording in Error\n");
+    CheckWatchdog([](FakeSensor &s) {
+        for (int i = 0; i < 2000; i++)
+            s.AddNothing();
+    });
+}
+
+// What an L2 that restarted sends: IMU packets on its reset clock and point
+// packets without points. They do not keep the recording alive.
+void TestSensorRestarted()
+{
+    printf("a sensor that restarts and sends no points ends the recording in Error\n");
+    CheckWatchdog([](FakeSensor &s) {
+        for (int i = 0; i < 1000; i++)
+        {
+            int64_t t = 5000000000LL + i * 1000000LL;
+            s.AddImu(t, t, (uint32_t)i);
+            s.AddPoints(t + 10, t + 10, (uint32_t)i, 0);
+        }
+    });
+}
+
 void TestLensMonitor()
 {
     printf("lens dirtiness warning at most every 10 s\n");
@@ -235,6 +299,8 @@ int main()
     TestStorageOpenFails();
     TestStorageThrows();
     TestSensorThrows();
+    TestSensorSilent();
+    TestSensorRestarted();
     TestLensMonitor();
     return FinishTests("Record session");
 }

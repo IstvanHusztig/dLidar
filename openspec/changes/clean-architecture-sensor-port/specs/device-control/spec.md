@@ -25,8 +25,12 @@ The device SHALL run at most one recording at a time and SHALL report one of the
 A recording that cannot be written completely SHALL end in Error with a warning, never crash the process or hold the recording in memory without bound, and the device SHALL accept the next start.
 
 #### Scenario: Sensor does not start
-- **WHEN** the sensor does not answer its start-up queries within 10 s
+- **WHEN** the sensor sends no packet for 10 s during its start-up, or does not answer its start-up queries within 60 s
 - **THEN** the device reports a warning and Error, and no recording files are created
+
+#### Scenario: Sensor goes silent while recording
+- **WHEN** the sensor sends no points for 10 s during Recording (power or connection lost, or it restarted and sends only IMU packets)
+- **THEN** the capture stops, the chunks already captured are written, the files are closed, the sensor is stopped, and the device reports a warning and Error
 
 #### Scenario: Storage fails
 - **WHEN** the storage cannot open or fails while writing

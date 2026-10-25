@@ -45,6 +45,7 @@ namespace dlidar
         StorageFailed,
         StorageSlow,     // chunks pile up in memory
         SensorFailed,
+        SensorSilent,    // no points during the recording; it was stopped
         RecordingFailed  // an internal error ended the recording
     };
 

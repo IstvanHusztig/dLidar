@@ -22,9 +22,12 @@ namespace dlidar
             return {(int64_t)m.tv_sec * 1000000000LL + m.tv_nsec, (int64_t)r.tv_sec * 1000000000LL + r.tv_nsec};
         }
 
-        // The L2 answers the start-up queries within a few seconds once it
-        // rotates; longer means it is not there (UDP does not fail without it).
+        // No packet at all for this long means the L2 is not there (UDP does
+        // not fail without it). After a restart it sends IMU packets at once
+        // but points (and so the dirtiness) only after ~20 s of spin-up, so a
+        // query waits as long as packets arrive, up to kStartupQueryLimit.
         const std::chrono::seconds kStartupAnswerTimeout(10);
+        const std::chrono::seconds kStartupQueryLimit(60);
 
         // Sleeps `seconds`, returning early (false) on a stop.
         bool SleepUnlessStopped(int seconds, const StopToken &stop)
@@ -39,16 +42,20 @@ namespace dlidar
             return !stop.StopRequested();
         }
 
-        // Parses packets until `get` succeeds; false on a stop or after the timeout.
+        // Parses packets until `get` succeeds; false on a stop, after
+        // kStartupAnswerTimeout without any packet or after kStartupQueryLimit.
         template <typename Get>
         bool ParseUntil(UnitreeLidarReader *lreader, Get get, const StopToken &stop)
         {
-            auto until = std::chrono::steady_clock::now() + kStartupAnswerTimeout;
+            auto start = std::chrono::steady_clock::now();
+            auto last_packet = start;
             while (!get())
             {
-                if (stop.StopRequested() || std::chrono::steady_clock::now() >= until)
+                auto now = std::chrono::steady_clock::now();
+                if (stop.StopRequested() || now - last_packet >= kStartupAnswerTimeout || now - start >= kStartupQueryLimit)
                     return false;
-                lreader->runParse();
+                if (lreader->runParse() != 0)
+                    last_packet = std::chrono::steady_clock::now();
             }
             return true;
         }
@@ -200,8 +207,9 @@ namespace dlidar
                 return true;
             if (result == Step::NoAnswer)
             {
-                std::cerr << "The L2 did not answer within " << kStartupAnswerTimeout.count() << " s; check its power and network ("
-                          << "is it at the configured IP?)." << std::endl;
+                std::cerr << "The L2 did not answer (no packet for " << kStartupAnswerTimeout.count() << " s or no status within "
+                          << kStartupQueryLimit.count() << " s); check its power and network (is it at the configured IP?)."
+                          << std::endl;
                 return false;
             }
         }

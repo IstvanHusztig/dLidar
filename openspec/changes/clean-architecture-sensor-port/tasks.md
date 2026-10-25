@@ -75,6 +75,7 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 - [x] 11.5 L2 start-up: stop checked during the restart sleeps; dirtiness/time-delay queries time out after 10 s (Error instead of hanging forever); `main` starts no recording after an early stop
 - [x] 11.6 Golden replay (60 s and whole log) identical; 100 stress runs of each test binary without failure
 - [x] 11.8 No files for a recording that never started: the storage opens once the sensor runs (sensor failure, stop during the start-up); checked with the real L2 adapter against an address without an L2 (Error after 17 s, stop ends within ~1 s, empty output folder)
+- [x] 11.9 L2 start-up waits while packets arrive (10 s without a packet, 60 s without the status; the L2 sends points only ~20 s after its restart, so the old 10 s limit always failed). Watchdog: no points for 10 s during the recording stops it and ends in Error with the captured data written (an L2 that restarted mid-recording sent only IMU on its reset clock for 82 s, and the capture waited forever when the link died); tests `TestSensorSilent`, `TestSensorRestarted`; golden replay identical
 - [ ] 11.7 On the L2: Ctrl-C during the start-up ends within ~0.1 s; an unplugged L2 ends in Error after ~10 s
 
 ## Workflow follow-up

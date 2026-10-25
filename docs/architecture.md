@@ -89,7 +89,8 @@ input channel ──StartRecording──> ScannerController ──(worker thread
 ```
 
 States: Idle → Preparing (sensor start-up) → Recording → Finalizing (sensor stopped, files finished) → Idle. The state is Error if the recording failed, with a warning first:
-- the sensor did not start (the L2 gives up after 10 s without an answer); no files are written
+- the sensor did not start (the L2 gives up after 10 s without a packet, or 60 s without its status); no files are written
+- the sensor sent no points for 10 s during the recording (`SessionConfig::sensor_silence_timeout`, host time; IMU packets do not count, so an L2 that restarted is caught too); the capture stops, what was captured is written and the files closed
 - the storage could not open or failed while writing; the capture then stops
 - an exception (sensor, storage, out of memory); the chunks already captured are written and the files closed
 

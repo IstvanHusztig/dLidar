@@ -8,11 +8,13 @@
 #include "application/ports/stop_token.h"
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <condition_variable>
 #include <exception>
 #include <mutex>
 #include <queue>
+#include <sstream>
 #include <thread>
 #include <utility>
 
@@ -26,6 +28,10 @@ namespace dlidar
         // scans per chunk) or on a stop. Temporary until a button starts and
         // stops recordings.
         int target_chunks = 200;
+        // No point from the sensor for this long (host time) ends the
+        // recording: it lost power or its connection, or it restarted and
+        // sends only IMU packets.
+        std::chrono::milliseconds sensor_silence_timeout{10000};
     };
 
     // One recording: sensor start-up, capture loop, finishing the files.
@@ -37,8 +43,8 @@ namespace dlidar
     // The storage is opened once the sensor has started, so a recording that
     // never started leaves no files. It ends in Error unless the sensor
     // started and the storage wrote everything. A storage failure stops the capture. An exception (sensor,
-    // storage, out of memory) ends the capture too; the chunks already queued
-    // are still written and the files closed.
+    // storage, out of memory) or a silent sensor ends the capture too; the
+    // chunks already queued are still written and the files closed.
     class RecordSession
     {
     public:
@@ -110,7 +116,7 @@ namespace dlidar
                 StopSensorQuietly();
                 events_.OnWarning({WarningKind::RecordingFailed, "ERROR: the recording stopped on an internal error: " + failure});
             }
-            bool ok = sensor_ok && !failed && (!recorded || writer_ok_);
+            bool ok = sensor_ok && !failed && !sensor_silent_ && (!recorded || writer_ok_);
             status_.last_ok = ok;
             Publish(ok ? DeviceState::Idle : DeviceState::Error);
             return ok;
@@ -135,6 +141,7 @@ namespace dlidar
         bool backlog_warned_ = false;
         std::atomic<bool> writer_ok_{false};
         std::atomic<bool> writer_failed_{false}; // stops the capture
+        bool sensor_silent_ = false;               // the watchdog stopped the capture
 
         // ~40 MB of points waiting: the storage is far slower than the sensor.
         static const size_t kBacklogWarnChunks = 50;
@@ -148,6 +155,7 @@ namespace dlidar
         void Capture(const StopToken &stop)
         {
             LensMonitor lens;
+            auto last_points = std::chrono::steady_clock::now();
             while (assembler_->ChunksProduced() < config_.target_chunks && !stop.StopRequested() && !writer_failed_)
             {
                 Polled p = sensor_.Poll();
@@ -165,6 +173,22 @@ namespace dlidar
                     status_.points += chunk.points.size();
                     Push(std::move(chunk));
                     events_.OnProgress(status_);
+                }
+
+                // Host time, not the packets' arrival stamps: a silent sensor
+                // delivers no packet to stamp (Poll() returns None), and a
+                // replay delivers its log as fast as it can.
+                auto now = std::chrono::steady_clock::now();
+                if (p.kind == PacketKind::Points && sensor_.Points().count > 0)
+                    last_points = now;
+                else if (now - last_points >= config_.sensor_silence_timeout)
+                {
+                    sensor_silent_ = true;
+                    std::ostringstream text;
+                    text << "ERROR: no points from the sensor for " << config_.sensor_silence_timeout.count() / 1000.0
+                         << " s (power or connection lost, or the sensor restarted); the recording was stopped.";
+                    events_.OnWarning({WarningKind::SensorSilent, text.str()});
+                    break;
                 }
             }
         }

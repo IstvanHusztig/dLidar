@@ -102,6 +102,7 @@
     <li><a href="#where">Where each function lives</a></li>
     <li><a href="#threads">Threads and states</a></li>
     <li><a href="#extend">Adding features</a></li>
+    <li><a href="#concepts">Concepts in the code</a></li>
     <li><a href="#more">More documents</a></li>
   </ul></nav>
 
@@ -135,7 +136,7 @@
       <div class="what">Installs the signal handlers. Finishes any recording a crash or power loss left behind (into <code>recovered_&lt;time&gt;/</code>). Connects to the L2 at <code>192.168.0.62</code>, builds the parts and asks the <code>ScannerController</code> to start a recording.</div></div>
     <div class="down">↓</div>
     <div class="stage adapt"><div class="who">2. Sensor start-up<small>Preparing · LiveL2Source</small></div>
-      <div class="what">Restarts the L2's rotation, then prints its lens dirtiness, time delay and firmware/hardware versions. Then reads away the packets that piled up meanwhile for 2 s, so stale packets don't enter the recording. If the L2 does not answer within 10 s, the recording ends in Error and no files are written.</div></div>
+      <div class="what">Restarts the L2's rotation, then prints its lens dirtiness, time delay and firmware/hardware versions. Then reads away the packets that piled up meanwhile for 2 s, so stale packets don't enter the recording. If no packet arrives for 10 s, or the status does not come within 60 s (after a restart the L2 sends points only after ~20 s of spin-up), the recording ends in Error and no files are written.</div></div>
     <div class="down">↓</div>
     <div class="stage app"><div class="who">3. Capture loop<small>Recording · RecordSession</small></div>
       <div class="what">The storage opens now, which creates the next free file number NNNN. Then one packet is read at a time: <code>sensor.Poll()</code> returns an IMU packet or a point packet, plus the host time it arrived.</div></div>
@@ -155,7 +156,7 @@
       </div></div>
     <div class="down">↓</div>
     <div class="stage app"><div class="who">6. Chunks<small>ChunkAssembler · LensMonitor</small></div>
-      <div class="what">Collects points (and the IMU samples released with them) into chunks of at least 14,000 points. Each full chunk goes into a queue. Every 10 s the lens dirtiness is checked; above 5% a warning is shown.</div></div>
+      <div class="what">Collects points (and the IMU samples released with them) into chunks of at least 14,000 points. Each full chunk goes into a queue. Every 10 s the lens dirtiness is checked; above 5% a warning is shown. If no points arrive for 10 s, a watchdog stops the recording.</div></div>
     <div class="down">↓ queue (a separate writer thread, so a slow SD card never delays reading packets)</div>
     <div class="stage adapt"><div class="who">7. Writing<small>FileRecordingStorage</small></div>
       <div class="what">IMU rows are appended to <code>imuNNNN.csv</code>. Points go in raw form to <code>points_tempNNNN.bin</code>, and the packet log and packet state rows are written alongside. Everything on disk is always in a state that can be recovered.</div></div>
@@ -193,7 +194,8 @@
     <tr><td>Ctrl-C (or SIGTERM / SIGHUP) once</td><td>Normal stop: the recording is finished and all files are complete.</td></tr>
     <tr><td>Ctrl-C twice</td><td>The process is killed at once. The next start finishes the leftover recording into <code>recovered_&lt;time&gt;/</code>, or run <code>./bin/dLidar --finalize</code> to finish it in place.</td></tr>
     <tr><td>Crash or power loss</td><td>Like a kill. A crash also cuts the CSV back to its last complete row. On the next start the points are recovered and a partial last CSV row is trimmed.</td></tr>
-    <tr><td>L2 does not answer</td><td>Error after 10 s of waiting; no files.</td></tr>
+    <tr><td>L2 does not answer</td><td>Error after 10 s without a packet (or 60 s without its status); no files.</td></tr>
+    <tr><td>L2 stops sending points during a recording (power or connection lost, it restarted)</td><td>After 10 s without points the watchdog stops the capture; what was captured is written, the files closed, the L2 stopped, Error.</td></tr>
     <tr><td>Storage cannot open or fails</td><td>The capture stops at once (rather than filling the memory), what was written is closed, Error.</td></tr>
     <tr><td>Any internal exception</td><td>The chunks already captured are written, the files closed, the L2 stopped, Error. The process keeps running and accepts a new start.</td></tr>
     <tr><td>SD card slower than the sensor</td><td>Chunks wait in memory; past 50 waiting chunks a warning is shown. Chunks are never dropped.</td></tr>
@@ -266,6 +268,124 @@
     <li><b>LEDs or a phone link (output):</b> an adapter implementing <code>DeviceEvents</code>, registered with <code>hub.AddAsync(...)</code>.</li>
   </ul>
   <div class="card caveat">Refactors must not change any recording. <code>tools/golden_replay.sh</code> replays a real packet log through an older build and the current one and compares every file byte by byte. See <a href="tools.html">tools.html</a>.</div>
+
+  <h2 id="concepts">Concepts in the code</h2>
+  <p>The programming ideas the code relies on, for readers who know C++ but not all of these techniques. Each one says what the idea is and why dLidar needs it.</p>
+  <ul>
+    <li><a href="#c-signals">Signals</a></li>
+    <li><a href="#c-atomics">Atomics</a></li>
+    <li><a href="#c-threads">Threads, mutexes and condition variables</a></li>
+    <li><a href="#c-exceptions">Exceptions at thread boundaries</a></li>
+    <li><a href="#c-raii">RAII: cleanup in destructors</a></li>
+    <li><a href="#c-ports">Interfaces, ports and fakes</a></li>
+    <li><a href="#c-files">Crash-safe files</a></li>
+    <li><a href="#c-clocks">Two host clocks</a></li>
+    <li><a href="#c-udp">UDP</a></li>
+    <li><a href="#c-consts">Constants and the <code>k</code> prefix</a></li>
+    <li><a href="#c-fp">Reproducible floating point</a></li>
+  </ul>
+
+  <h3 id="c-signals">Signals</h3>
+  <p>A <b>signal</b> is a small asynchronous notification that the Linux kernel delivers to a process. It carries no data, only a number such as <code>SIGINT</code> = 2 or <code>SIGTERM</code> = 15. It can arrive at any instruction. The kernel interrupts whatever the thread is doing, runs the function registered for that signal (the <i>handler</i>), and then resumes the interrupted code.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Source</th><th>Examples</th><th>Signals</th></tr>
+    <tr><td>Someone outside asks the process to stop</td><td>Ctrl-C in the terminal, <code>kill &lt;pid&gt;</code>, <code>systemctl stop</code>, SSH connection lost or terminal closed</td><td><code>SIGINT</code>, <code>SIGTERM</code>, <code>SIGHUP</code></td></tr>
+    <tr><td>The process itself does something fatal</td><td>null pointer access, bad memory mapping, divide by zero, <code>abort()</code> or a failed <code>assert</code></td><td><code>SIGSEGV</code>, <code>SIGBUS</code>, <code>SIGFPE</code>, <code>SIGILL</code>, <code>SIGABRT</code></td></tr>
+  </table></div>
+  <p>Every signal has a <b>default action</b>. For all the signals above, the default is to kill the process at once, so no destructors run, buffers aren't flushed and files aren't closed. A program can install its own handler with <code>sigaction()</code> to replace that default. The two exceptions are <code>SIGKILL</code> (<code>kill -9</code>) and power loss: nothing can catch those.</p>
+
+  <p><b>Why dLidar needs them.</b> A recording does a lot of work at the end. <code>points_tempNNNN.bin</code> is read twice and encoded into <code>lidarNNNN.laz.tmp</code>, which is then renamed. The IMU CSV and <code>timingNNNN.json</code> get finished, and the temp file is deleted last. Without handlers, Ctrl-C would kill the process mid-recording and leave a raw temp file, no LAZ, and possibly a half-written CSV row that dMapper would choke on. Today signals are also the only way to stop a recording early (there's no push button yet). On the headless Pi Zero, <code>SIGTERM</code> from systemd or <code>SIGHUP</code> from a dropped SSH session are the realistic ways a capture ends.</p>
+
+  <p><code>main.cpp</code> calls <code>InstallSignalHandlers()</code> (<code>src/app/signals.h</code>) as its first statement, before anything can be recorded. It installs two groups of handlers and ignores one signal.</p>
+
+  <p><b>1. Stop signals (<code>SIGINT</code>, <code>SIGTERM</code>, <code>SIGHUP</code>) mean "please finish".</b></p>
+<pre><code>inline void OnStopSignal(int sig)
+{
+    if (StopRequested().exchange(true))   // was it already set?
+    {   // second signal: give up
+        signal(sig, SIG_DFL);
+        raise(sig);
+        return;
+    }
+    WriteStderr("\nStop requested, finishing the recording ...");
+}</code></pre>
+  <ul>
+    <li><b>The first signal</b> only sets an <code>std::atomic&lt;bool&gt;</code> flag. The handler does no cleanup itself. The rest of the program checks the flag at safe points. If the stop came during recovery or the L2 start-up, <code>main.cpp</code> exits without creating any files, because an empty file pair would end up in dMapper's input. During a recording, <code>main.cpp</code> hands <code>&amp;StopRequested()</code> to the <code>ScannerController</code>. It becomes a <code>StopToken</code> (<code>application/ports/stop_token.h</code>) that <code>RecordSession</code> checks in its packet loop. When the flag is set, the loop ends and the <b>normal</b> shutdown path runs: drain the queue, flush the writer, finalize the LAZ. A Ctrl-C recording is therefore identical in format to one that hit 200 chunks.</li>
+    <li><b>A second signal</b> means the user really wants out, for example because finalizing hangs. The handler restores the default action (<code>SIG_DFL</code>) and re-raises the signal, and the process dies. That's safe because of recovery: on the next start, the leftover <code>points_tempNNNN.bin</code> is finalized into <code>recovered_&lt;time&gt;/</code>.</li>
+  </ul>
+
+  <p><b>2. Fatal signals (<code>SIGSEGV</code>, <code>SIGBUS</code>, <code>SIGFPE</code>, <code>SIGILL</code>, <code>SIGABRT</code>) mean "we're crashing, leave clean files".</b></p>
+<pre><code>inline void OnFatalSignal(int sig)
+{
+    int fd = CrashTruncateFd().load();
+    if (fd &gt;= 0)
+        ftruncate(fd, CrashTruncateSize().load());  // cut CSV back to last full row
+    signal(sig, SIG_DFL);
+    raise(sig);                                      // die as the crash would have
+}</code></pre>
+  <p>After a crash the process can't keep running, because memory may be corrupted. It can still repair one thing first: the IMU CSV. <code>ContinuousDataWriter</code> keeps two atomics in <code>adapters/storage/crash_guard.h</code> up to date: the CSV's file descriptor and the byte size after the last complete row. The handler truncates the file to that size, so no partial line is left, and then re-raises the signal. The process still dies with the correct signal, so a core dump or the shell's exit status still reports a segfault. <code>SA_RESETHAND</code> makes the handler one-shot, so a crash inside the handler can't loop. The points are recovered on the next start, just as after a kill.</p>
+
+  <p><b>3. <code>SIGPIPE</code> is ignored.</b> <code>SIGPIPE</code> is sent when the program writes to a closed pipe or socket, such as <code>./bin/dLidar | head</code> or a closed log pipe. Its default action would kill the recording silently. With the signal ignored, <code>write()</code> returns an error (<code>EPIPE</code>) instead, and the program can handle it.</p>
+
+  <p><b>Why the handlers do so little.</b> A handler can interrupt the program <i>anywhere</i>: inside <code>malloc</code>, while holding a mutex, or halfway through a <code>printf</code>. If the handler then calls a function that uses the same lock or heap, the program deadlocks or corrupts memory. POSIX therefore allows only <b>async-signal-safe</b> functions inside handlers. These are mostly raw system calls: <code>write</code>, <code>ftruncate</code>, <code>signal</code>, <code>raise</code>, <code>_exit</code>. That rule explains several details in the code:</p>
+  <ul>
+    <li><b>It uses <code>write(STDERR_FILENO, …)</code>, not <code>std::cerr</code> or <code>printf</code>.</b> Those two use locks and buffers and aren't safe in a handler.</li>
+    <li><b>It only sets an atomic flag.</b> Real work like finalizing the LAZ or joining threads happens in normal code that checks the flag, not in the handler.</li>
+    <li><b>The crash data is pre-computed into atomics.</b> The fatal handler can't ask the writer object anything. It only reads two lock-free values that the writer kept current, then makes one system call.</li>
+    <li><b>The statics are initialized up front.</b> <code>InstallSignalHandlers()</code> calls <code>StopRequested()</code>, <code>CrashTruncateFd()</code> and <code>CrashTruncateSize()</code> once beforehand. The first call to a function-local static runs a guarded initialization that may take a lock, and that must not happen for the first time inside a handler.</li>
+  </ul>
+  <p><b>How it fits the architecture.</b> Signals belong to the operating system, so they're handled in <code>src/app</code>, not in the core. The application layer never sees a signal: it only gets an abstract <code>StopToken</code>. Signals are just the first <b>input channel</b> of the <code>ScannerController</code>. Later, push buttons and the phone will call <code>StartRecording</code> / <code>StopRecording</code> on the same interface, and the recording code won't need to change.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Event</th><th>What happens</th><th>Result on disk</th></tr>
+    <tr><td>Ctrl-C / <code>kill</code> / SSH drop (first)</td><td>flag set → loop ends → normal finalize</td><td>complete <code>lidar</code> / <code>imu</code> / <code>timing</code> set</td></tr>
+    <tr><td>Same signal again</td><td>default action → process dies</td><td>temp file finalized on the next start into <code>recovered_&lt;time&gt;/</code></td></tr>
+    <tr><td>Stop during start-up</td><td>exit before files are created</td><td>nothing (no empty pair for dMapper)</td></tr>
+    <tr><td>Crash (segfault, abort…)</td><td>CSV truncated to its last full row → dies</td><td>clean CSV; points recovered on the next start</td></tr>
+    <tr><td><code>kill -9</code> / power loss</td><td>can't be caught</td><td>partial CSV row trimmed and points recovered on the next start</td></tr>
+  </table></div>
+
+  <h3 id="c-atomics">Atomics</h3>
+  <p>When two threads (or a thread and a signal handler) read and write the same plain variable, the result is undefined: the compiler may keep the value in a register, and the CPU may reorder or tear the access. <code>std::atomic&lt;T&gt;</code> makes each read and write indivisible and visible to the other side. dLidar uses atomics where a lock is impossible or overkill: the stop flag (written by the signal handler, read by the capture loop), the crash-guard file descriptor and size (written by the writer, read by the fatal handler), and the <code>StopToken</code>. <code>exchange(true)</code> in the stop handler sets the flag and returns the old value in one step, which is how the handler tells the first signal from the second.</p>
+
+  <h3 id="c-threads">Threads, mutexes and condition variables</h3>
+  <p>The L2 sends ~64,000 points/s over UDP, and the socket's buffer is small. If the thread that reads packets stopped to write to a slow SD card, packets would be lost. dLidar therefore splits the work into threads (see <a href="#threads">Threads and states</a>) and connects them with <b>producer–consumer queues</b>:</p>
+  <ul>
+    <li>A <b>mutex</b> (<code>std::mutex</code>) protects the queue: only one thread at a time may push or pop. <code>std::lock_guard</code> / <code>std::unique_lock</code> take the lock and release it automatically at the end of the scope.</li>
+    <li>A <b>condition variable</b> (<code>std::condition_variable</code>) lets the consumer sleep until there is work: the writer waits with <code>cv_.wait(lock, [&amp;]{ return !queue_.empty() || !capturing_; })</code> and the capture thread wakes it after each push. The predicate guards against spurious wake-ups and tells the writer when to stop.</li>
+    <li><b>Two queue policies.</b> The chunk queue in <code>RecordSession</code> is unbounded and <i>never</i> drops data; it only warns past 50 waiting chunks. The queues of async output channels in <code>EventHub</code> are bounded (64 events) and drop the <i>oldest</i> event when full, because a stuck LED or Bluetooth link must never block or slow a recording.</li>
+  </ul>
+  <p>The <code>ScannerController</code> uses the same tools for its state: every command takes the mutex, reads the state and decides (a start is accepted only in Idle or Error), so commands from several input channels can't race each other.</p>
+
+  <h3 id="c-exceptions">Exceptions at thread boundaries</h3>
+  <p>An exception that leaves the function of a <code>std::thread</code> calls <code>std::terminate</code>, which kills the whole process without cleanup. Every thread function in dLidar (controller worker, writer, async event channels) therefore ends in <code>catch (const std::exception &amp;)</code> and <code>catch (...)</code>. A failure turns into a warning and the Error state; the chunks already captured are written and the process stays ready for a new start. Exceptions from an output channel are caught and ignored, so a broken display can't end a recording.</p>
+
+  <h3 id="c-raii">RAII: cleanup in destructors</h3>
+  <p><i>Resource Acquisition Is Initialization</i>: an object acquires a resource (file, thread, lock) in its constructor and releases it in its destructor, which C++ runs automatically when the object goes out of scope, also during an exception. Examples: <code>~ContinuousDataWriter</code> calls <code>fsync</code> and closes the CSV; <code>~ScannerController</code> stops and joins its worker thread; the lock guards release their mutex. In <code>main.cpp</code> the controller lives in its own <code>{ … }</code> block, so its thread is joined before <code>sensor.Stop()</code> runs. Member order matters too: <code>worker_</code> is declared last in <code>ScannerController</code>, so the thread starts only after every member it uses exists.</p>
+
+  <h3 id="c-ports">Interfaces, ports and fakes</h3>
+  <p>A port is a C++ class with only pure virtual functions (<code>virtual bool Open() = 0;</code>) and a virtual destructor. The core calls the port; at run time the call goes to whatever object was passed in. This is <b>dependency inversion</b>: <code>RecordSession</code> depends on <code>LidarSensor</code>, not on the Unitree SDK, so the SDK can't leak into the core. It also makes testing without hardware possible: the tests pass <code>FakeSensor</code> and <code>MemoryStorage</code>, and <code>bin/replay_capture</code> passes a <code>SyntheticL2Source</code> that replays a packet log through the real <code>UnitreeL2Sensor</code>.</p>
+
+  <h3 id="c-files">Crash-safe files</h3>
+  <p>Power can fail between any two instructions, so every file is written so that what is on disk is always either complete or recoverable:</p>
+  <ul>
+    <li><b>Write to a temporary name, then rename.</b> <code>lidarNNNN.laz.tmp</code> and <code>timingNNNN.json.tmp</code> are renamed when complete. A rename within one file system is atomic: the final name either doesn't exist or points to the complete file, never a half-written one.</li>
+    <li><b>Delete the source last.</b> <code>points_tempNNNN.bin</code> is deleted only after the LAZ is renamed. If finalizing is interrupted, the next start sees the temp file and does it again.</li>
+    <li><b>Whole rows in one <code>write()</code>.</b> The IMU rows of a chunk are formatted into one string and written with one system call. If the write fails, <code>ftruncate</code> cuts the file back to the last committed size; a crash does the same through the signal handler; recovery trims a partial last row after a power loss.</li>
+    <li><b><code>fsync</code></b> on close forces the kernel to put the CSV on the SD card instead of keeping it in its cache.</li>
+    <li><b>A header in the temp file.</b> The 16-byte header tells recovery the record size, so temp files of older builds (32-byte records) can still be finalized.</li>
+  </ul>
+
+  <h3 id="c-clocks">Two host clocks</h3>
+  <p>Every packet's arrival is stamped with two Linux clocks (<code>live_l2_source.cpp</code>). <code>CLOCK_MONOTONIC</code> only ever runs forward at a steady rate and is never stepped, so it is used for all arrival timing, rates and latencies. <code>CLOCK_REALTIME</code> is wall-clock time; NTP or a user can step it (the Pi Zero 2 W has no real-time clock, so its time can jump after boot once NTP syncs), so it is used only as the Unix anchor for <code>timestampUnix</code>. The data itself is timed on a third clock, the L2's own (see <a href="#time">Time, axes and units</a>).</p>
+
+  <h3 id="c-udp">UDP</h3>
+  <p>The L2 talks over UDP: each packet is sent once, with no connection, no acknowledgement and no retransmission. Packets can be lost (a full socket buffer on the Pi, a bad cable) and nothing tells the sender. That's why the reading thread must never block on anything slow, why lost IMU samples are detected from the sequence numbers and timing, and why <code>timingNNNN.json</code> counts drops.</p>
+
+  <h3 id="c-consts">Constants and the <code>k</code> prefix</h3>
+  <p>Names like <code>kMount</code>, <code>kLidarIp</code>, <code>kTargetChunks</code> and <code>kRecordingFormatVersion</code> are compile-time constants (<code>constexpr</code> / <code>const</code>). The <code>k</code> prefix is the <a href="https://google.github.io/styleguide/cppguide.html#Constant_Names">Google C++ Style Guide</a> rule for constants; it goes back to Hungarian notation and the early Mac Toolbox. Read a <code>k…</code> name as "fixed configuration value": the device settings in <code>src/app/device_config.h</code> are hardcoded, not read from a file. Many small headers are header-only and use <code>inline</code> functions and variables, so one definition is shared by every file that includes them; a function-local <code>static</code> (as in <code>StopRequested()</code>) is created on first use and exists once per program.</p>
+
+  <h3 id="c-fp">Reproducible floating point</h3>
+  <p>Modern CPUs have a <i>fused multiply-add</i> (FMA) instruction that computes <code>a*b + c</code> with one rounding instead of two. Whether the compiler uses it depends on the optimisation level and how the code is split, so the same source could give results differing in the last bit between the <code>-O0</code> <code>bin/dLidar</code> and the <code>-O2</code> replay tools. Every target is built with <code>-ffp-contract=off</code>, which forbids that contraction. Results are then bit-identical across builds, and <code>tools/golden_replay.sh</code> can compare recordings byte by byte. The mount (<code>AxisMap</code>) follows the same idea: it only selects and negates axes, so values keep their exact bits.</p>
 
   <h2 id="more">More documents</h2>
   <ul>
