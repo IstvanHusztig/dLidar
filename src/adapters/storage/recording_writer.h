@@ -2,7 +2,7 @@
 
 // Writes one recording: imuNNNN.csv, points_tempNNNN.bin -> lidarNNNN.laz,
 // timingNNNN.json, packetsNNNN.bin and (if the sensor has diagnostics)
-// packetstateNNNN.tsv (docs/l2-recording-format.md).
+// packetstateNNNN.tsv (docs/recording-format.md).
 #include "adapters/storage/crash_guard.h"
 #include "adapters/storage/laz_encoder.h"
 #include "adapters/storage/recording_files.h"
@@ -91,7 +91,7 @@ namespace dlidar
                 std::cerr << "Error: Could not open temporary binary file.\n";
                 return false;
             }
-            WritePointsTempHeader(bin_file);
+            WritePointsTempHeader(bin_file, profile.sensor_id);
             bin_file.flush();
 
             // 3. Packet timing log (diagnostics only; a failure is not fatal)

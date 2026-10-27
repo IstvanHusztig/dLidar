@@ -7,7 +7,7 @@
 namespace dlidar
 {
     // What a recording's files say about the sensor that made it
-    // (docs/l2-recording-format.md). Each sensor adapter defines one; the
+    // (docs/recording-format.md). Each sensor adapter defines one; the
     // storage writes it, and recovery picks it by the id stored in the points
     // temp file, so a leftover is finished as the sensor that recorded it.
     struct RecordingProfile

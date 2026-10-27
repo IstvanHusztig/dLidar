@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Compares a format 1 and a format 2 recording made from the same packets
-(tools/compare_recording_formats.sh) and checks the format 2 additions.
+"""Compares an older-format and a newer-format L2 recording made from the
+same packets (format 1 vs 2: tools/compare_recording_formats.sh; format 2 vs
+3: the base/ and new/ recordings of tools/golden_replay.sh) and checks the
+additions.
 
     python3 tools/verify_recording_format.py OLD_DIR NEW_DIR
 
 Each directory holds one recording with session number 0001. Checks: the
 standard LAZ content, imu0001.csv and packets0001.bin are identical; old
-timing keys are kept; no new .csv/.las/.laz; the extra bytes have the
-documented names/types and agree with xyz and packetstate0001.tsv; the
-sidecar has one row per point packet. Needs laspy with a LAZ backend
+timing keys are kept (recording_format_version may only increase); the extra
+byte values are identical if the old recording has them; no new
+.csv/.las/.laz; the extra bytes have the documented names/types and agree
+with xyz and packetstate0001.tsv; the sidecar has one row per point packet. Needs laspy with a LAZ backend
 (pip install "laspy[lazrs]" numpy). Exit status 0 if every check passes.
 """
 import sys, os, json, filecmp
@@ -45,7 +48,14 @@ check(filecmp.cmp(os.path.join(old_dir, "imu0001.csv"), os.path.join(new_dir, "i
 check(filecmp.cmp(os.path.join(old_dir, "packets0001.bin"), os.path.join(new_dir, "packets0001.bin"), shallow=False), "packets0001.bin byte-identical")
 jo = json.load(open(os.path.join(old_dir, "timing0001.json")))
 jn = json.load(open(os.path.join(new_dir, "timing0001.json")))
-check(all(k in jn and jn[k] == v for k, v in jo.items()), "timing0001.json: every old key kept with the same value")
+fv = "recording_format_version"
+check(all(k in jn and jn[k] == v for k, v in jo.items() if k != fv), "timing0001.json: every old key kept with the same value")
+check(jn.get(fv, 1) >= jo.get(fv, 1), f"recording_format_version {jo.get(fv, 1)} -> {jn.get(fv, 1)}")
+names_o = [d.name for d in ho.point_format.extra_dimensions]
+if names_o:
+    check(names_o == [d.name for d in hn.point_format.extra_dimensions], "same extra dimensions as the old recording")
+    for name in names_o:
+        check(np.array_equal(np.asarray(o[name]), np.asarray(n[name])), f"extra byte {name} identical point for point")
 print("     added keys:", {k: jn[k] for k in jn if k not in jo})
 new_files = sorted(set(os.listdir(new_dir)) - set(os.listdir(old_dir)))
 print("     files only in new:", new_files)

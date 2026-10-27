@@ -2,7 +2,6 @@
 #include "adapters/storage/laz_encoder.h"
 
 #include "adapters/storage/recording_files.h"
-#include "domain/recording/recording_info.h"
 
 #include <dll/laszip_api.h>
 
@@ -112,8 +111,13 @@ namespace dlidar
                 header->point_data_record_length = 28 + kLazExtraBytes;
                 memset(header->generating_software, 0, sizeof header->generating_software);
                 snprintf(header->generating_software, sizeof header->generating_software, "dLidar recording format %d",
-                         kRecordingFormatVersion);
+                         layout.format_version);
                 laszip_preserve_generating_software(laszip_writer, 1);
+            }
+            if (layout.format_version >= 3)
+            {
+                memset(header->system_identifier, 0, sizeof header->system_identifier);
+                snprintf(header->system_identifier, sizeof header->system_identifier, "%s", profile.las_system_identifier);
             }
 
             if (laszip_open_writer(laszip_writer, laz_path.c_str(), 1))

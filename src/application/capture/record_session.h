@@ -74,6 +74,11 @@ namespace dlidar
                 else if (!stop.StopRequested())
                 {
                     SensorInfo info = sensor_.Info();
+                    if (info.versions.imu_position_m) // sensor frame -> output frame
+                    {
+                        std::array<float, 3> &p = *info.versions.imu_position_m;
+                        config_.setup.mount.ApplyInPlace(p[0], p[1], p[2]);
+                    }
                     assembler_ = std::make_unique<ChunkAssembler>(sensor_, config_.timing, info.versions, config_.setup.mount,
                                                                   config_.setup.filter.value_or(info.default_filter));
                     writer = std::thread([this] { WriterLoop(); });

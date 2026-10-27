@@ -50,7 +50,9 @@ namespace dlidar
 
     struct SensorInfo
     {
-        RecordingInfo versions;      // identity strings for timingNNNN.json
+        // Identity for timingNNNN.json: model, versions, and the IMU position
+        // in the sensor frame (the core maps it through the mount).
+        RecordingInfo versions;
         PointFilter default_filter;  // the sensor's blind zone, range and intensity floor
     };
 

@@ -7,7 +7,7 @@ context: |
   The recordings are processed by dMapper, our SLAM solution (https://github.com/IstvanHusztig/dMapper).
   Any change to output files, units, axes or timestamps must state its effect on dMapper.
   The recording format may only add data. Format 1 fields and the IMU CSV must stay identical
-  (see docs/l2-recording-format.md).
+  (see docs/recording-format.md).
   CLAUDE.md is the main project reference.
 
 # Project context (optional)

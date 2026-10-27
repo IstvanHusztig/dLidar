@@ -9,6 +9,7 @@
 #include "recording_events.h"
 #include "../check.h"
 
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <functional>
@@ -290,6 +291,34 @@ void TestLensMonitor()
     CHECK(e.size() == 1 && e[0] == "warning:WARNING: lens dirty percentage = 7.5 % (threshold 5 %) - clean the sensor housing, points may be degraded.",
           "%zu warnings: %s", e.size(), e.empty() ? "" : e[0].c_str());
 }
+// The timing report names the sensor and, if the sensor gives it, the IMU
+// position mapped through the mount (format 3); without one the key is absent.
+void TestRecordingIdentity()
+{
+    printf("the timing report names the sensor and its IMU position\n");
+    for (bool with_position : {false, true})
+    {
+        FakeSensor sensor;
+        sensor.versions.sensor_model = "fake_sensor";
+        if (with_position)
+            sensor.versions.imu_position_m = std::array<float, 3>{0.011f, 0.02329f, -0.04412f};
+        Script(sensor);
+        MemoryStorage storage;
+        RecordingEvents events;
+        SessionConfig config = Config();
+        config.setup.mount = AxisMap{Axis::PosZ, Axis::PosY, Axis::NegX}; // front = sensor +Z, up = sensor -X
+        RecordSession session(sensor, storage, events, config);
+        CHECK(session.Run(StopToken()), "run failed");
+        std::string report = storage.chunks.empty() ? std::string() : storage.chunks.back().timing_report;
+        const std::string head = "{\n  \"recording_format_version\": 3,\n  \"sensor_model\": \"fake_sensor\",\n";
+        CHECK(report.compare(0, head.size(), head) == 0, "%s", report.substr(0, 120).c_str());
+        bool has = report.find("\"imu_position_m\"") != std::string::npos;
+        CHECK(has == with_position, "imu_position_m present %d, expected %d", has, with_position);
+        if (with_position)
+            CHECK(report.find("\"imu_position_m\": [-0.04412, 0.02329, -0.01100],\n") != std::string::npos, "%s",
+                  report.substr(0, 300).c_str());
+    }
+}
 } // namespace
 
 int main()
@@ -302,5 +331,6 @@ int main()
     TestSensorSilent();
     TestSensorRestarted();
     TestLensMonitor();
+    TestRecordingIdentity();
     return FinishTests("Record session");
 }

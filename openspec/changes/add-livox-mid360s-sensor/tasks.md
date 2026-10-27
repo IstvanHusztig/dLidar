@@ -46,7 +46,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 ## 4. Recording format 3
 
-- [ ] 4.1 Make these changes:
+- [x] 4.1 Make these changes:
   - set `kRecordingFormatVersion = 3`;
   - give `RecordingInfo` the fields `sensor_model` and an optional `imu_position_m`, and have `AddRecordingInfo` write `sensor_model` after `recording_format_version` and `imu_position_m` only when set;
   - have `SensorInfo` carry the model and the IMU position in the sensor frame;
@@ -54,14 +54,14 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - fill `sensor_model` in `UnitreeL2Sensor`; the L2 has no IMU position.
 
   Extend `tests/application/test_capture_timing.cpp` or `test_record_session.cpp`: with `FakeSensor`, the key is present when a position is given, absent when not, and mapped by the mount. Verify with ctest.
-- [ ] 4.2 Write points temp files with magic `dLptsv3\n` and the sensor id in the reserved u32. `DetectPointsTempLayout` returns the id (1 for format 1 and 2 files). Recovery picks the matching profile, and an unknown id keeps the temp file and reports it. Set the LAS `system_identifier` from the profile. Extend `test_datawriter`:
+- [x] 4.2 Write points temp files with magic `dLptsv3\n` and the sensor id in the reserved u32. `DetectPointsTempLayout` returns the id (1 for format 1 and 2 files). Recovery picks the matching profile, and an unknown id keeps the temp file and reports it. Set the LAS `system_identifier` from the profile. Extend `test_datawriter`:
   - format 1, 2 and 3 leftovers are each finalized;
   - a format 3 leftover with sensor id 2 gets profile 2's descriptions even when the current profile is the L2's;
   - an unknown id is kept.
 
   Verify with ctest `datawriter`.
 - [ ] 4.3 Run `tools/golden_replay.sh` against the commit before group 4 and `tools/verify_recording_format.py` on its `base/rec` and `new/rec` (`compare_recording_formats.sh` only builds format 1 revisions; the verifier is generalized so the format version may increase and the extra-byte values are compared). The standard LAZ fields, the extra-byte values and the IMU CSV must be identical. The golden replay may differ only in the timing JSON (`recording_format_version`, `sensor_model`) and the LAZ header (`system_identifier`, `generating_software`). Record both outputs in the commit message, and update the golden base in `tools/golden_replay.sh`'s default to this commit.
-- [ ] 4.4 Turn `docs/l2-recording-format.md` into the recording format reference:
+- [x] 4.4 Turn `docs/l2-recording-format.md` into the recording format reference:
   - the format 3 section;
   - the timing JSON keys;
   - the temp header;

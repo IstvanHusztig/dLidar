@@ -10,6 +10,7 @@ namespace dlidar
     {
         SensorInfo info;
         info.versions = source_->Versions();
+        info.versions.sensor_model = l2::kRecordingProfile.sensor_model; // the L2's IMU position is not known
         info.default_filter = l2::kDefaultFilter;
         return info;
     }

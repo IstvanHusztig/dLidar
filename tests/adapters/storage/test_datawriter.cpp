@@ -17,6 +17,7 @@
 #include "adapters/unitree_l2/l2_packet_state.h"
 
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <random>
 #include <sstream>
@@ -168,9 +169,11 @@ bool CsvIsClean(const std::string &path, size_t *rows_out, std::string *why)
 }
 
 // Reads lidar0001.laz in dir and checks it against Point(i): the standard
-// fields always, the format 2 extra bytes if `extra`.
-uint64_t CheckLaz(const std::string &dir, uint64_t expected_total, bool extra = true)
+// fields always, the extra bytes from format 2 on, the format in
+// generating_software and (format 3) the L2's system identifier.
+uint64_t CheckLaz(const std::string &dir, uint64_t expected_total, int format = 3)
 {
+    const bool extra = format >= 2;
     uint64_t index = 0;
     {
         std::string path = JoinPath(dir, LazName(1));
@@ -189,8 +192,11 @@ uint64_t CheckLaz(const std::string &dir, uint64_t expected_total, bool extra = 
         CHECK(header->point_data_record_length == (extra ? 48 : 28), "record length %d", header->point_data_record_length);
         CHECK(pt->num_extra_bytes == (extra ? 20 : 0), "%d extra bytes", pt->num_extra_bytes);
         if (extra)
-            CHECK(std::string(header->generating_software).find("format 2") != std::string::npos, "generating_software '%.32s'",
-                  header->generating_software);
+            CHECK(std::string(header->generating_software) == "dLidar recording format " + std::to_string(format),
+                  "generating_software '%.32s', expected format %d", header->generating_software, format);
+        CHECK(std::string(header->system_identifier, strnlen(header->system_identifier, 32)) ==
+                  (format >= 3 ? kRecordingProfile.las_system_identifier : ""),
+              "system_identifier '%.32s' for format %d", header->system_identifier, format);
         for (laszip_U32 i = 0; i < header->number_of_point_records; i++, index++)
         {
             laszip_read_point(reader);
@@ -358,14 +364,23 @@ void TestSigintFinalizes()
 // A temp file left by an earlier build (recording format 1: no header, 32-byte
 // records) or by a crash of this one, with a partial last point and a partial
 // CSV row, is converted to lidar0001.laz on the next start.
-void TestLeftoverTempConverted(bool format1)
+void TestLeftoverTempConverted(int format)
 {
-    printf("leftover points_temp0001.bin (%s) -> lidar0001.laz on next start\n", format1 ? "format 1" : "format 2");
+    printf("leftover points_temp0001.bin (format %d) -> lidar0001.laz on next start\n", format);
+    const bool format1 = format == 1;
     std::string dir = MakeTempDir();
     {
         std::ofstream bin(JoinPath(dir, PointsTempName(1)), std::ios::binary);
-        if (!format1)
-            WritePointsTempHeader(bin);
+        if (format == 2)
+        {
+            char header[kPointsTempHeaderSize] = {}; // magic v2, record size, 4 zero bytes
+            uint32_t record_size = sizeof(PointRecord);
+            memcpy(header, kPointsTempMagicV2, sizeof kPointsTempMagicV2);
+            memcpy(header + 8, &record_size, sizeof record_size);
+            bin.write(header, sizeof header);
+        }
+        else if (format == 3)
+            WritePointsTempHeader(bin, kRecordingProfile.sensor_id);
         for (int64_t i = 0; i < 25000; i++)
         {
             if (format1)
@@ -394,11 +409,51 @@ void TestLeftoverTempConverted(bool format1)
     CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why) && rows == 10, "%s rows %zu", why.c_str(), rows);
     CHECK(fs::exists(JoinPath(dir, LazName(1))), "missing lidar0001.laz");
     CHECK(!fs::exists(JoinPath(dir, PointsTempName(1))), "temp file left");
-    CheckLaz(dir, 25000, !format1);
+    CheckLaz(dir, 25000, format);
 
     // Nothing left to recover: a second start does nothing.
     CHECK(RecoverInterruptedRecording(dir, true, {kRecordingProfile}), "second recovery");
     CHECK(fs::exists(JoinPath(dir, ImuCsvName(1))), "CSV moved without a temp file");
+    fs::remove_all(dir);
+}
+
+// A leftover is finished as the sensor that recorded it (the id in its temp
+// header), not the current one; an unknown sensor id keeps the temp file.
+void TestLeftoverOtherSensor()
+{
+    printf("a leftover of another sensor is finished with its profile; an unknown one is kept\n");
+    const RecordingProfile other{2, "other_sensor", "Other Sensor",
+                                 {"other range", "other raw", "other index", "other seq", "other alpha", "other theta"},
+                                 "other_a\tother_b\n"};
+    std::string dir = MakeTempDir();
+    {
+        std::ofstream bin(JoinPath(dir, PointsTempName(1)), std::ios::binary);
+        WritePointsTempHeader(bin, other.sensor_id);
+        for (int64_t i = 0; i < 1000; i++)
+        {
+            PointRecord p = Point(i);
+            bin.write(reinterpret_cast<const char *>(&p), sizeof p);
+        }
+        std::ofstream(JoinPath(dir, PacketStateName(1))) << other.packet_state_header << "1\t2"; // partial row
+    }
+    FileRecordingStorage storage(dir, kRecordingProfile, {kRecordingProfile, other});
+    CHECK(storage.RecoverLeftovers(false), "recovery");
+    std::string laz = ReadFile(JoinPath(dir, LazName(1)));
+    CHECK(laz.find("other raw") != std::string::npos && laz.find("Other Sensor") != std::string::npos &&
+              laz.find("range as sent by the L2") == std::string::npos,
+          "the LAZ has the other sensor's descriptions and system identifier");
+    CHECK(ReadFile(JoinPath(dir, PacketStateName(1))) == other.packet_state_header, "packetstate trimmed to its header");
+    fs::remove_all(dir);
+
+    dir = MakeTempDir();
+    {
+        std::ofstream bin(JoinPath(dir, PointsTempName(1)), std::ios::binary);
+        WritePointsTempHeader(bin, 9);
+        PointRecord p = Point(0);
+        bin.write(reinterpret_cast<const char *>(&p), sizeof p);
+    }
+    CHECK(!RecoverInterruptedRecording(dir, false, {kRecordingProfile, other}), "an unknown sensor id fails");
+    CHECK(fs::exists(JoinPath(dir, PointsTempName(1))) && !fs::exists(JoinPath(dir, LazName(1))), "its temp file is kept");
     fs::remove_all(dir);
 }
 
@@ -423,7 +478,7 @@ void TestSessionNumbering()
     CHECK(ImuCsvName(2) == "imu0002.csv" && LazName(2) == "lidar0002.laz", "names");
 
     // A leftover temp file of session 4 is finalized in place as lidar0004.laz.
-    { std::ofstream bin(JoinPath(dir, PointsTempName(4)), std::ios::binary); WritePointsTempHeader(bin); PointRecord p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
+    { std::ofstream bin(JoinPath(dir, PointsTempName(4)), std::ios::binary); WritePointsTempHeader(bin, kRecordingProfile.sensor_id); PointRecord p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
     CHECK(NextSessionIndex(dir) == 5, "next after leftover");
     CHECK(RecoverInterruptedRecording(dir, false, {kRecordingProfile}), "recovery");
     CHECK(fs::exists(JoinPath(dir, LazName(4))), "no lidar0004.laz");
@@ -565,7 +620,9 @@ void TestRecordingInfo()
     info.work_mode = 0;
     std::string report = "{\n  \"format_version\": 1,\n  \"imu_time_source\": \"sensor\"\n}\n";
     std::string j = AddRecordingInfo(report, info);
-    CHECK(j.find("\"recording_format_version\": 2,") != std::string::npos, "%s", j.c_str());
+    CHECK(j.find("\"recording_format_version\": 3,\n  \"sensor_model\": \"unknown\",\n") != std::string::npos, "%s",
+          j.c_str());
+    CHECK(j.find("imu_position_m") == std::string::npos, "no IMU position unless the sensor gives one: %s", j.c_str());
     CHECK(j.find("\"lidar_firmware_version\": \"2.3.\\\"4\\\"\",") != std::string::npos, "%s", j.c_str());
     CHECK(j.find("\"lidar_hardware_version\": \"unknown\",") != std::string::npos, "%s", j.c_str());
     CHECK(j.find("\"work_mode\": 0,") != std::string::npos, "%s", j.c_str());
@@ -591,7 +648,7 @@ void TestNoDiagnostics()
     CHECK(fs::exists(JoinPath(dir, LazName(1))) && fs::exists(JoinPath(dir, ImuCsvName(1))), "recording files");
     CHECK(!fs::exists(JoinPath(dir, PacketStateName(1))), "packetstate file written without diagnostics");
 
-    { std::ofstream bin(JoinPath(dir, PointsTempName(2)), std::ios::binary); WritePointsTempHeader(bin); PointRecord p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
+    { std::ofstream bin(JoinPath(dir, PointsTempName(2)), std::ios::binary); WritePointsTempHeader(bin, kRecordingProfile.sensor_id); PointRecord p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
     FileRecordingStorage storage(dir, no_diagnostics, {no_diagnostics});
     CHECK(storage.RecoverLeftovers(false), "recovery");
     CHECK(fs::exists(JoinPath(dir, LazName(2))) && !fs::exists(JoinPath(dir, PacketStateName(2))), "recovered without packetstate");
@@ -605,8 +662,10 @@ int main()
     TestKilledMidWrite();
     TestCrashTruncatesCsv();
     TestSigintFinalizes();
-    TestLeftoverTempConverted(true);
-    TestLeftoverTempConverted(false);
+    TestLeftoverTempConverted(1);
+    TestLeftoverTempConverted(2);
+    TestLeftoverTempConverted(3);
+    TestLeftoverOtherSensor();
     TestSessionNumbering();
     TestTimingFiles();
     TestPacketStateFile();

@@ -1,7 +1,7 @@
 #pragma once
 
 // File names, session numbering, IMU CSV rows, text-file trimming and the
-// points temp layout of a recording (docs/l2-recording-format.md).
+// points temp layout of a recording (docs/recording-format.md).
 #include "domain/recording/imu_sample.h"
 #include "domain/recording/point_record.h"
 #include "domain/recording/recording_profile.h"
@@ -186,10 +186,13 @@ namespace dlidar
 
     inline int64_t TrimPartialCsvLine(const std::string &csv_path) { return TrimPartialLine(csv_path, kImuCsvHeader); }
 
-    // points_tempNNNN.bin since recording format 2: kPointsTempMagic, the record
-    // size (uint32) and 4 reserved bytes, then PointRecord records. A temp file
-    // without the magic is from an older build: bare 32-byte PointDLidarV1 records.
-    const char kPointsTempMagic[8] = {'d', 'L', 'p', 't', 's', 'v', '2', '\n'};
+    // points_tempNNNN.bin since recording format 3: kPointsTempMagic, the record
+    // size (uint32) and the RecordingProfile's sensor id (uint32), then
+    // PointRecord records. Format 2 files have kPointsTempMagicV2 and 4 zero
+    // bytes in place of the id (they are all L2 recordings). A temp file
+    // without a magic is from an older build: bare 32-byte PointDLidarV1 records.
+    const char kPointsTempMagic[8] = {'d', 'L', 'p', 't', 's', 'v', '3', '\n'};
+    const char kPointsTempMagicV2[8] = {'d', 'L', 'p', 't', 's', 'v', '2', '\n'};
     const uint64_t kPointsTempHeaderSize = 16;
 
     // The point record of format 1 temp files.
@@ -207,17 +210,19 @@ namespace dlidar
     struct PointsTempLayout
     {
         uint32_t sensor_id = kPreFormat3SensorId; // the RecordingProfile that recorded it
+        int format_version = 3;   // the recording format it was written in (1, 2 or 3)
         bool extra = true;        // format 2 records, with the extra-bytes fields
         uint64_t data_offset = 0; // first record
         size_t record_size = sizeof(PointRecord);
     };
 
-    inline void WritePointsTempHeader(std::ostream &out)
+    inline void WritePointsTempHeader(std::ostream &out, uint32_t sensor_id)
     {
         char header[kPointsTempHeaderSize] = {};
         memcpy(header, kPointsTempMagic, sizeof kPointsTempMagic);
         uint32_t record_size = sizeof(PointRecord);
         memcpy(header + 8, &record_size, sizeof record_size);
+        memcpy(header + 12, &sensor_id, sizeof sensor_id);
         out.write(header, sizeof header);
     }
 
@@ -232,8 +237,15 @@ namespace dlidar
         if (n > 0 && !in.read(header, (std::streamsize)n))
             return false;
         size_t m = std::min(n, sizeof kPointsTempMagic);
-        if (memcmp(header, kPointsTempMagic, m) == 0 && (n == kPointsTempHeaderSize || n == bytes))
+        bool v3 = memcmp(header, kPointsTempMagic, m) == 0, v2 = memcmp(header, kPointsTempMagicV2, m) == 0;
+        if ((v3 || v2) && (n == kPointsTempHeaderSize || n == bytes))
         {
+            // A header cut before its sensor id holds no points; it is finished
+            // as an L2 recording, whichever sensor started it.
+            layout.format_version = v3 && n >= sizeof kPointsTempMagic ? 3 : 2;
+            layout.sensor_id = kPreFormat3SensorId;
+            if (layout.format_version == 3 && n == kPointsTempHeaderSize)
+                memcpy(&layout.sensor_id, header + 12, sizeof layout.sensor_id);
             layout.extra = true;
             layout.data_offset = std::min<uint64_t>(bytes, kPointsTempHeaderSize);
             uint32_t record_size = sizeof(PointRecord);
@@ -248,6 +260,8 @@ namespace dlidar
             layout.record_size = record_size;
             return true;
         }
+        layout.format_version = 1;
+        layout.sensor_id = kPreFormat3SensorId;
         layout.extra = false;
         layout.data_offset = 0;
         layout.record_size = sizeof(PointDLidarV1);

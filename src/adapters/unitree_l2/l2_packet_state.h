@@ -15,7 +15,7 @@ using unitree_lidar_sdk::LidarPointData;
 
 // One row of packetstateNNNN.tsv: the fields of a point packet other than its
 // ranges and intensities, as received (recording format 2,
-// docs/l2-recording-format.md).
+// docs/recording-format.md).
 struct PointPacketState
 {
     int64_t l2_stamp_ns; // DataInfo.stamp, absolute L2 clock

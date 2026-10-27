@@ -5,7 +5,7 @@
 
 namespace dlidar
 {
-    // One recorded point (recording format 2, docs/l2-recording-format.md).
+    // One recorded point (recording format 2, docs/recording-format.md).
     // Written as-is to points_tempNNNN.bin, so the layout is fixed. The fields
     // from `range` on go into the LAZ extra bytes; they follow the L2's
     // conventions, and a sensor that has no such value sets it to 0.
