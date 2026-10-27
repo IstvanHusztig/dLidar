@@ -71,10 +71,10 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 ## 5. Livox adapter without the SDK library (conversion, sensor, synthetic source)
 
-- [ ] 5.1 Add `external/Livox-SDK2` as a git submodule, pinned to the latest master commit that has `kLivoxLidarTypeMid360s` and builds with GCC 12, and record its hash and date. Copy nothing: the adapter includes the submodule's `include/` on `dlidar_livox` only. Verify:
+- [x] 5.1 Add `external/Livox-SDK2` as a git submodule, pinned to the latest master commit that has `kLivoxLidarTypeMid360s` and builds with GCC 12, and record its hash and date. Copy nothing: the adapter includes the submodule's `include/` on `dlidar_livox` only. Verify:
   - `git submodule status` shows the pin;
   - `grep kLivoxLidarTypeMid360s external/Livox-SDK2/include/livox_lidar_def.h` finds it.
-- [ ] 5.2 Write `src/adapters/livox_mid360s/livox_packet_source.h` and `livox_conversion.{h,cpp}` (design D7): `ParsePoints`, `ParseImu`, the per-point time, `raw_range` saturation, alpha/theta, packet seq, the tag filter, and the length and data-type checks. Write `livox::kDefaultFilter` (0.1 m, 100 m, intensity 0). Add `tests/adapters/livox_mid360s/test_livox_conversion.cpp`, with hand-built packed packets checking:
+- [x] 5.2 Write `src/adapters/livox_mid360s/livox_packet_source.h` and `livox_conversion.{h,cpp}` (design D7): `ParsePoints`, `ParseImu`, the per-point time, `raw_range` saturation, alpha/theta, packet seq, the tag filter, and the length and data-type checks. Write `livox::kDefaultFilter` (0.1 m, 100 m, intensity 0). Add `tests/adapters/livox_mid360s/test_livox_conversion.cpp`, with hand-built packed packets checking:
   - the units, (1000, −2000, 500) mm → (1, −2, 0.5) m;
   - range √5.25;
   - point i's time T + i·D/95;
@@ -84,17 +84,17 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - a wrong length and data types 2/3, which are skipped and counted.
 
   Verify with ctest `livox_conversion`.
-- [ ] 5.3 Write `livox_packet_state.h` (header, rows, `livox::kRecordingProfile` with sensor id 2, model `livox_mid360s` and the Mid-360S descriptions), and `livox_mid360s_sensor.{h,cpp}` (`LidarSensor` plus diagnostics, IMU seq unwrap, `Info()` with the IMU position (0.011, 0.02329, −0.04412) m). Add a CMake target `dlidar_livox`, without the SDK library yet. Verify:
+- [x] 5.3 Write `livox_packet_state.h` (header, rows, `livox::kRecordingProfile` with sensor id 2, model `livox_mid360s` and the Mid-360S descriptions), and `livox_mid360s_sensor.{h,cpp}` (`LidarSensor` plus diagnostics, IMU seq unwrap, `Info()` with the IMU position (0.011, 0.02329, −0.04412) m). Add a CMake target `dlidar_livox`, without the SDK library yet. Verify:
   - ctest `architecture` passes;
   - a test feeding a scripted source checks the `Polled` records, `Points()`, the seq unwrap across 65535 → 0, and the diagnostics rows.
-- [ ] 5.4 Write `synthetic_livox_source.{h,cpp}`. It produces packed point packets (96 points, about 2083/s) and IMU packets (200 Hz) on a simulated Mid-360S clock, with rate error and offset, batched or stalled delivery and lost packets; it can also replay a `packetsNNNN.bin`. Add `tests/adapters/livox_mid360s/test_livox_time_alignment.cpp`, the counterpart of `test_l2_time_alignment.cpp`, running 10 min through `LivoxMid360sSensor` and `CaptureTiming`:
+- [x] 5.4 Write `synthetic_livox_source.{h,cpp}`: it replays a `packetsNNNN.bin` (of any sensor) as packed Mid-360S packets (96 rays of a 360°×−7…52° pattern hitting a box room, an IMU at rest), with a shared `livox_packet_builder.h`. As for the L2, the simulated Mid-360S lives in the test: `tests/adapters/livox_mid360s/test_livox_time_alignment.cpp` builds point packets (96 points, about 2083/s) and IMU packets (200 Hz) on its own clock, with rate error and offset, stalled delivery and lost packets.
   - auto mode picks `sensor`;
   - the IMU and point times agree on the sensor clock;
   - the fallback triggers when the IMU stamps are corrupted;
   - lost packets show as gaps.
 
   Verify with ctest `livox_time_alignment`.
-- [ ] 5.5 Add the Mid-360S case to `sensor_factory.cpp` for profiles, and make `replay_capture --sensor=livox_mid360s` use `SyntheticLivoxSource`. Verify that `bin/replay_capture packets0001.bin /tmp/x 60 --sensor=livox_mid360s` writes a complete format 3 recording:
+- [x] 5.5 Add the Mid-360S case to `sensor_factory.cpp` for profiles, and make `replay_capture --sensor=livox_mid360s` use `SyntheticLivoxSource`. Verify that `bin/replay_capture packets0001.bin /tmp/x 60 --sensor=livox_mid360s` writes a complete format 3 recording:
   - `sensor_model livox_mid360s`;
   - the IMU position key;
   - `packetstate` with the Livox columns;
@@ -126,11 +126,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 - [ ] 7.1 Clean build from a fresh clone (`git clone --recursive`, `cmake --preset ninja`, `cmake --build build`) and full ctest; verify everything passes.
 - [ ] 7.2 `bin/dLidar` with no settings file on the L2 rig: start-up, recording, Ctrl-C finalization; verify the files are complete, `timingNNNN.json` says format 3 / `unitree_l2`, and `tools/check_imu_timestamps.py` is clean.
-- [ ] 7.3 Measure resources with `replay_capture --sensor=livox_mid360s` over 300 s of synthetic data on the Pi 5, under `/usr/bin/time -v` and inside `systemd-run --scope -p MemoryMax=900M`, writing to the SD card. Verify:
-  - no backlog warning;
-  - peak RSS is recorded;
-  - the temp write rate is about 9.6 MB/s;
-  - the finalization time is recorded in `docs/livox_mid360s.md`.
+- [ ] 7.3 Measure resources with `replay_capture --sensor=livox_mid360s` over 300 s of synthetic data at Mid-360S rates on the Pi 5, inside `systemd-run --user --scope -p MemoryMax=900M`, writing to the SD card (`/usr/bin/time` is not installed: peak RSS from `getrusage` and `/proc`). The replay is unpaced (7.5× real time), so its chunk backlog and peak RSS are upper bounds and no console channel shows the backlog warning; the paced check is 8.4. Measured: capture 39.8 s, finalization 95.5 s, peak RSS 529 MB, SD card 51.7 MB/s sustained (5× the needed 9.6 MB/s); recorded in `docs/livox_mid360s.md`.
 
 ## 8. Bring-up with the Mid-360S (when connected)
 

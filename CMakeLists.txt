@@ -33,6 +33,17 @@ add_library(dlidar_l2 STATIC
 set_target_properties(dlidar_l2 PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_l2 PUBLIC dlidar_core ${UNITREE_SDK_LIB})
 
+# Livox Mid-360S adapter (src/adapters/livox_mid360s): the only code that sees
+# Livox-SDK2 (git submodule external/Livox-SDK2).
+set(LIVOX_SDK_DIR ${PROJECT_SOURCE_DIR}/external/Livox-SDK2)
+add_library(dlidar_livox STATIC
+    src/adapters/livox_mid360s/livox_conversion.cpp
+    src/adapters/livox_mid360s/livox_mid360s_sensor.cpp
+    src/adapters/livox_mid360s/synthetic_livox_source.cpp)
+set_target_properties(dlidar_livox PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_include_directories(dlidar_livox PUBLIC ${LIVOX_SDK_DIR}/include)
+target_link_libraries(dlidar_livox PUBLIC dlidar_core)
+
 # Storage adapter (src/adapters/storage): recording files; the only code that sees LASzip.
 add_library(dlidar_storage STATIC
     src/adapters/storage/laz_encoder.cpp
@@ -53,7 +64,7 @@ set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_B
 target_link_libraries(dlidar_app PUBLIC dlidar_core)
 
 add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
-target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_storage dlidar_console)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_storage dlidar_console)
 
 # Tests (no sensor needed): ctest --test-dir build
 enable_testing()
@@ -90,7 +101,7 @@ target_link_libraries(replay_packets dlidar_core)
 # new recording (tools/compare_recording_formats.sh compares formats with it).
 add_executable(replay_capture tools/replay_capture.cpp)
 target_compile_options(replay_capture PRIVATE -O2)
-target_link_libraries(replay_capture dlidar_l2 dlidar_storage)
+target_link_libraries(replay_capture dlidar_l2 dlidar_livox dlidar_storage)
 
 add_executable(test_capture_timing tests/application/test_capture_timing.cpp)
 set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
@@ -113,6 +124,14 @@ add_executable(test_settings tests/app/test_settings.cpp)
 set_target_properties(test_settings PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_settings dlidar_app)
 add_test(NAME settings COMMAND test_settings)
+
+foreach(t livox_conversion livox_sensor livox_time_alignment)
+add_executable(test_${t} tests/adapters/livox_mid360s/test_${t}.cpp)
+set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_${t} dlidar_livox)
+add_test(NAME ${t} COMMAND test_${t})
+endforeach()
+target_compile_options(test_livox_time_alignment PRIVATE -O2)
 
 # Domain unit tests (src/domain only, dlidar_core).
 foreach(t axis_map point_filter)

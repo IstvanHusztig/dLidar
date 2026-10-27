@@ -2,16 +2,19 @@
 // seq, host arrival times, time_increment, point_num) through the capture
 // code into a new recording in out_dir (which must exist). No sensor needed.
 //
-//   bin/replay_capture ~/PointCloudDump/packets0001.bin out_dir [seconds] [target_chunks] [--sensor=unitree_l2]
+//   bin/replay_capture ~/PointCloudDump/packets0001.bin out_dir [seconds] [target_chunks] [--sensor=unitree_l2|livox_mid360s]
 //
-// --sensor picks the sensor whose synthetic packets are replayed (default and
-// for now the only one: unitree_l2).
+// --sensor picks the sensor whose synthetic packets are replayed (default
+// unitree_l2; livox_mid360s: SyntheticLivoxSource -> LivoxMid360sSensor, with
+// the log's timing and its own mount default).
 // Production path: SyntheticL2Source (synthetic, deterministic packet
 // contents) -> UnitreeL2Sensor (the L2 adapter) -> ScannerController /
 // RecordSession -> FileRecordingStorage, with the device's mount. No console
 // channel is registered, so only the adapters print. Host times come from the
 // log, so two builds fed the same log write the same recording
 // (tools/golden_replay.sh).
+#include "adapters/livox_mid360s/livox_mid360s_sensor.h"
+#include "adapters/livox_mid360s/synthetic_livox_source.h"
 #include "adapters/storage/file_recording_storage.h"
 #include "adapters/storage/packet_log.h"
 #include "adapters/unitree_l2/synthetic_l2_source.h"
@@ -28,7 +31,8 @@
 
 int main(int argc, char **argv)
 {
-    const char *usage = "usage: replay_capture packetsNNNN.bin out_dir [seconds] [target_chunks] [--sensor=unitree_l2]\n";
+    const char *usage =
+        "usage: replay_capture packetsNNNN.bin out_dir [seconds] [target_chunks] [--sensor=unitree_l2|livox_mid360s]\n";
     std::vector<const char *> args; // the positional arguments
     std::string sensor_name = "unitree_l2";
     for (int i = 1; i < argc; i++)
@@ -39,7 +43,8 @@ int main(int argc, char **argv)
         else
             args.push_back(argv[i]);
     }
-    if (args.size() < 2 || sensor_name != "unitree_l2")
+    bool livox = sensor_name == "livox_mid360s";
+    if (args.size() < 2 || (!livox && sensor_name != "unitree_l2"))
     {
         fprintf(stderr, "%s", usage);
         return 2;
@@ -52,14 +57,20 @@ int main(int argc, char **argv)
     dlidar::SessionConfig config;
     config.timing.log = false;
     config.timing.host.log = false;
-    config.setup.mount = kMount;
+    config.setup.mount = livox ? kLivoxMount : kMount;
     config.target_chunks = args.size() > 3 ? atoi(args[3]) : 800;
 
-    dlidar::UnitreeL2Sensor sensor(std::make_unique<dlidar::SyntheticL2Source>(std::move(log), seconds));
-    dlidar::FileRecordingStorage storage(args[1], dlidar::l2::kRecordingProfile, {dlidar::l2::kRecordingProfile});
+    std::unique_ptr<dlidar::LidarSensor> sensor;
+    if (livox)
+        sensor = std::make_unique<dlidar::LivoxMid360sSensor>(
+            std::make_unique<dlidar::livox::SyntheticLivoxSource>(std::move(log), seconds));
+    else
+        sensor = std::make_unique<dlidar::UnitreeL2Sensor>(std::make_unique<dlidar::SyntheticL2Source>(std::move(log), seconds));
+    const dlidar::RecordingProfile &profile = livox ? dlidar::livox::kRecordingProfile : dlidar::l2::kRecordingProfile;
+    dlidar::FileRecordingStorage storage(args[1], profile, {dlidar::l2::kRecordingProfile, dlidar::livox::kRecordingProfile});
     dlidar::EventHub hub; // no output channels
 
-    dlidar::ScannerController controller(sensor, storage, hub, config);
+    dlidar::ScannerController controller(*sensor, storage, hub, config);
     controller.StartRecording();
     controller.WaitIdle();
     return controller.Status().last_ok ? 0 : 1;

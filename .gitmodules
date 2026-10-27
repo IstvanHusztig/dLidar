@@ -1,3 +1,6 @@
 [submodule "LASzip"]
 	path = 3rd
 	url = https://github.com/LASzip/LASzip.git
+[submodule "external/Livox-SDK2"]
+	path = external/Livox-SDK2
+	url = https://github.com/Livox-SDK/Livox-SDK2.git

@@ -1,5 +1,6 @@
 #include "app/sensor_factory.h"
 
+#include "adapters/livox_mid360s/livox_packet_state.h"
 #include "adapters/unitree_l2/l2_packet_state.h"
 #include "adapters/unitree_l2/live_l2_source.h"
 #include "adapters/unitree_l2/unitree_l2_sensor.h"
@@ -10,21 +11,16 @@ dlidar::RecordingProfile ProfileFor(const DeviceSettings &settings)
 {
 	switch (settings.sensor)
 	{
-	case SensorKind::UnitreeL2:
-		return dlidar::l2::kRecordingProfile;
+	case SensorKind::LivoxMid360s:
+		return dlidar::livox::kRecordingProfile;
 	default:
-	{
-		// Until its adapter exists: nothing is recorded with it (OpenSensor fails).
-		dlidar::RecordingProfile p;
-		p.sensor_model = SensorKindName(settings.sensor);
-		return p;
-	}
+		return dlidar::l2::kRecordingProfile;
 	}
 }
 
 std::vector<dlidar::RecordingProfile> AllProfiles()
 {
-	return {dlidar::l2::kRecordingProfile};
+	return {dlidar::l2::kRecordingProfile, dlidar::livox::kRecordingProfile};
 }
 
 std::unique_ptr<dlidar::LidarSensor> OpenSensor(const DeviceSettings &settings)
