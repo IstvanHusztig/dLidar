@@ -78,8 +78,8 @@ Enforcement:
 **App (`src/app/`)**
 - `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters. Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
 - `button_commands.h`: what a short and a long press do (start/stop by state; save, then `PowerOff()` from `power.cpp`).
-- `settings.h/.cpp`: the settings file `~/.config/dlidar/dlidar.toml` (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the chunk limit, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
-- `device_config.h`: the settings' built-in defaults (the L2's endpoints, work mode and mount, the chunk limit).
+- `settings.h/.cpp`: the settings file `~/.config/dlidar/dlidar.toml` (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the button and LED pins, the Mid-360S IMU setting, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
+- `device_config.h`: the settings' built-in defaults (the sensors' endpoints, work mode and mount, the button and LED pins, the Mid-360S IMU setting).
 - `sensor_factory.h/.cpp`: the only code that knows every sensor adapter; opens the sensor the settings choose.
 - `signals.h`: SIGINT/SIGTERM/SIGHUP stop (a second signal kills); fatal signals truncate the CSV.
 
