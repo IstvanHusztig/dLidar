@@ -124,7 +124,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 ## 7. Integration checks without hardware
 
-- [ ] 7.1 Clean build from a fresh clone (`git clone --recursive`, `cmake --preset ninja`, `cmake --build build`) and full ctest; verify everything passes.
+- [x] 7.1 Clean build from a fresh clone (`git clone --recursive`, `cmake --preset ninja`, `cmake --build build`) and full ctest; verify everything passes.
 - [ ] 7.2 `bin/dLidar` with no settings file on the L2 rig: start-up, recording, Ctrl-C finalization; verify the files are complete, `timingNNNN.json` says format 3 / `unitree_l2`, and `tools/check_imu_timestamps.py` is clean.
 - [x] 7.3 Measure resources with `replay_capture --sensor=livox_mid360s` over 300 s of synthetic data at Mid-360S rates on the Pi 5, inside `systemd-run --user --scope -p MemoryMax=900M`, writing to the SD card (`/usr/bin/time` is not installed: peak RSS from `getrusage` and `/proc`). The replay is unpaced (7.5× real time), so its chunk backlog and peak RSS are upper bounds and no console channel shows the backlog warning; the paced check is 8.4. Measured: capture 39.8 s, finalization 95.5 s, peak RSS 529 MB, SD card 51.7 MB/s sustained (5× the needed 9.6 MB/s); recorded in `docs/livox_mid360s.md`.
 
