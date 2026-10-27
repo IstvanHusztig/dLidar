@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-dLidar is a C++17 capture tool for a **Unitree L2 LiDAR** (running on a Raspberry Pi / aarch64). It connects to the sensor over UDP, streams point-cloud and IMU packets, and writes a single LAZ point cloud plus an IMU CSV. The output is post-processed by **dMapper**, our SLAM solution. Its code is on GitHub next to dLidar: https://github.com/IstvanHusztig/dMapper. Check it when a change affects what dMapper reads (file names, units, axes, timestamps). The capture runs on a Raspberry Pi Zero 2 W; development and testing happen on a Raspberry Pi 5. Changes are planned with OpenSpec (`openspec/`, `/opsx:*` commands; the CLI is in `~/.local/node/bin` on the Pi 5). The README says the project is still in development and not production ready.
+dLidar is a C++17 capture tool for a **Unitree L2 LiDAR** (running on a Raspberry Pi / aarch64). It connects to the sensor over UDP, streams point-cloud and IMU packets, and writes a single LAZ point cloud plus an IMU CSV. The output is post-processed by **dMapper**, our SLAM solution. Its code is on GitHub next to dLidar: https://github.com/IstvanHusztig/dMapper. Check it when a change affects what dMapper reads (file names, units, axes, timestamps). The capture runs on a Raspberry Pi 5 with 1 or 2 GB RAM on the device; development and testing happen on a Raspberry Pi 5 (the dev board). Changes are planned with OpenSpec (`openspec/`, `/opsx:*` commands; the CLI is in `~/.local/node/bin` on the Pi 5). The README says the project is still in development and not production ready.
 
 ## Build & Run
 
@@ -46,5 +46,5 @@ Clean Architecture; read `docs/architecture.md` first (layers, ports, data flow,
 
 ## Reference Docs
 
-- `docs/how-dlidar-works.html`: overview for readers new to dLidar: what a recording does step by step, the files, failure handling, and how the functionality spreads across the layers. Keep it in step with `docs/architecture.md`.
+- `docs/manual.html`: the dLidar manual, for readers new to dLidar: what a recording does step by step, the files, failure handling, and how the functionality spreads across the layers. Keep it in step with `docs/architecture.md`.
 - `docs/unitree_l2_slam_tuning.md`: L2 hardware specs, the SLAM tuning targets, and how dLidar's output units, frames and timestamps match the SLAM config.
