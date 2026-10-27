@@ -78,11 +78,31 @@ void TestClearAndOversized()
         pool.Push(HostTime{i, i}, b, 100);
     CHECK(pool.Slots() == slots, "freed slots are reused: %zu -> %zu", slots, pool.Slots());
 }
+// Between recordings: pushes are dropped (counted), turning accepting off
+// drops the queue, and the pool does not grow however much arrives.
+void TestIdle()
+{
+    LivoxPacketPool pool(4, 2);
+    uint8_t b[100] = {1};
+    for (int i = 0; i < 3; i++)
+        pool.Push(HostTime{i, i}, b, sizeof b);
+    pool.SetAccepting(false);
+    CHECK(pool.Queued() == 0 && !pool.Accepting(), "stop drops the queue: %zu queued", pool.Queued());
+    size_t slots = pool.Slots();
+    for (int i = 0; i < 23000; i++) // 10 s of Mid-360S packets
+        pool.Push(HostTime{i, i}, b, sizeof b);
+    CHECK(pool.DroppedIdle() == 23000 && pool.Queued() == 0 && pool.Slots() == slots && !pool.TakeGrowWarning(),
+          "idle: %llu dropped, %zu queued, %zu slots", (unsigned long long)pool.DroppedIdle(), pool.Queued(), pool.Slots());
+    pool.SetAccepting(true);
+    pool.Push(HostTime{7, 7}, b, sizeof b);
+    CHECK(pool.Pop(std::chrono::milliseconds(0)) && pool.Arrival().mono_ns == 7, "accepted again after Prepare");
+}
 } // namespace
 
 int main()
 {
     TestClearAndOversized();
+    TestIdle();
     TestBurstsAndStalls();
     return FinishTests("Livox packet pool");
 }

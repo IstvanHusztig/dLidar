@@ -1,6 +1,7 @@
 // LivoxMid360sSensor on scripted packets: the Polled records and Points(),
 // the IMU seq widened across the 16-bit wrap, the diagnostics rows, the
 // identity, and how other data types and broken packets are handled.
+#include "adapters/livox_mid360s/livox_imu_range.h"
 #include "adapters/livox_mid360s/livox_mid360s_sensor.h"
 #include "adapters/livox_mid360s/livox_packet_builder.h"
 #include "scripted_livox_source.h"
@@ -107,11 +108,26 @@ void TestInfoAndLowConfidence()
     sensor.ConvertPoints(kT, kDefaultFilter, out);
     CHECK(out.empty(), "drop_low_confidence drops rain/fog/dust points: %zu", out.size());
 }
+void TestImuRangeCodes()
+{
+    ImuRangeCodes c{};
+    CHECK(ToImuRangeCodes(500, 8, 2000, c) && c.rate == kLivoxLidarImuOutRate500Hz && c.accel == kLivoxLidarAccelRange8G &&
+              c.gyro == kLivoxLidarGyroRange2000Dps,
+          "the defaults");
+    CHECK(ToImuRangeCodes(50, 32, 15.625, c) && c.rate == kLivoxLidarImuOutRate50Hz && c.accel == kLivoxLidarAccelRange32G &&
+              c.gyro == kLivoxLidarGyroRange15_625Dps,
+          "the other ends");
+    CHECK(ToImuRangeCodes(100, 4, 62.5, c) && c.rate == kLivoxLidarImuOutRate100Hz && c.gyro == kLivoxLidarGyroRange62_5Dps,
+          "62.5 deg/s");
+    CHECK(!ToImuRangeCodes(400, 8, 2000, c) && !ToImuRangeCodes(500, 2, 2000, c) && !ToImuRangeCodes(500, 8, 300, c),
+          "unsupported values");
+}
 } // namespace
 
 int main()
 {
     TestPollAndDiagnostics();
     TestInfoAndLowConfidence();
+    TestImuRangeCodes();
     return FinishTests("Livox sensor");
 }

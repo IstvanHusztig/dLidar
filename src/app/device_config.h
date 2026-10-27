@@ -22,6 +22,11 @@ const unsigned short kLocalPort = 6201;
 // Sent with setLidarWorkMode at start-up; recorded in timingNNNN.json.
 const uint32_t kLidarWorkMode = 0;
 
+// The push button (GPIO 17, header pin 11, to GND) and the status LED (GPIO
+// 27, header pin 13, through 330 ohm to GND); docs/manual.html, "Wiring and pinout".
+const int kButtonGpio = 17;
+const int kLedGpio = 27;
+
 // The Livox Mid-360S: mounted in the same orientation as the L2 (to be
 // confirmed at bring-up, docs/livox_mid360s.md). The host's address and
 // ports are Livox's recommended ones; the sensor's own ports are fixed
@@ -33,7 +38,8 @@ const unsigned short kLivoxHostPushPort = 56201;
 const unsigned short kLivoxHostPointPort = 56301;
 const unsigned short kLivoxHostImuPort = 56401;
 const unsigned short kLivoxHostLogPort = 56501;
-
-// A recording ends after this many chunks or on Ctrl-C. Temporary: a push button will start
-// and stop recordings.
-const int kTargetChunks = 1500;
+// The Mid-360S IMU, set at every start-up: 500 Hz for handheld SLAM (the
+// sensor's own default is 200 Hz), +-8 g, +-2000 deg/s so fast turns do not clip.
+const int kLivoxImuRateHz = 500;
+const int kLivoxImuAccelRangeG = 8;
+const double kLivoxImuGyroRangeDps = 2000;

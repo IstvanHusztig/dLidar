@@ -2,6 +2,7 @@
 
 #include "adapters/livox_mid360s/livox_packet_source.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -18,6 +19,8 @@ namespace dlidar::livox
     // when every slot is in use the pool grows by another block (dropping
     // would break the recording, as for the chunk queue). The first growth
     // is reported once (TakeGrowWarning), so the capture thread can warn.
+    // Between recordings the pool is set not to accept: packets are then
+    // dropped (counted), so it cannot grow while nobody reads it.
     class LivoxPacketPool
     {
     public:
@@ -34,6 +37,11 @@ namespace dlidar::livox
         // counted and not queued.
         void Push(const HostTime &arrival, const uint8_t *data, size_t size)
         {
+            if (!accepting_.load(std::memory_order_relaxed))
+            {
+                dropped_idle_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
             if (size > kSlotBytes)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -86,6 +94,17 @@ namespace dlidar::livox
             return n;
         }
 
+        // Packets are queued only while accepting; turning it off also drops
+        // what is queued.
+        void SetAccepting(bool accepting)
+        {
+            accepting_ = accepting;
+            if (!accepting)
+                Clear();
+        }
+        bool Accepting() const { return accepting_; }
+        uint64_t DroppedIdle() const { return dropped_idle_; }
+
         // True once, after the pool first had to grow.
         bool TakeGrowWarning()
         {
@@ -130,6 +149,8 @@ namespace dlidar::livox
         size_t slots_ = 0, initial_ = 0;
         bool grew_ = false, warn_ = false;
         uint64_t oversized_ = 0;
+        std::atomic<bool> accepting_{true};
+        std::atomic<uint64_t> dropped_idle_{0};
 
         void Grow(size_t n) // with mutex_ held (or in the constructor)
         {

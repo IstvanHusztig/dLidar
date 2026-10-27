@@ -1,0 +1,11 @@
+// Lets the dLidar service user power the Pi down (the button's long press).
+// Install: replace USER, then
+//   sudo cp systemd/50-dlidar-poweroff.rules /etc/polkit-1/rules.d/
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.power-off-ignore-inhibit") &&
+        subject.user == "USER") {
+        return polkit.Result.YES;
+    }
+});

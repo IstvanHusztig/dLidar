@@ -36,11 +36,15 @@ void TestDefaults()
 	CHECK(s.unitree_l2.lidar_ip == kLidarIp && s.unitree_l2.lidar_port == kLidarPort, "L2 address");
 	CHECK(s.unitree_l2.local_ip == kLocalIp && s.unitree_l2.local_port == kLocalPort, "host address");
 	CHECK(s.unitree_l2.work_mode == kLidarWorkMode && Same(s.unitree_l2.mount, kMount), "work mode and mount");
-	CHECK(s.target_chunks == kTargetChunks && s.imu_time == dlidar::ImuTimeline::Mode::Auto, "limits");
+	CHECK(s.imu_time == dlidar::ImuTimeline::Mode::Auto, "IMU time mode");
 	CHECK(Same(s.Mount(), kMount), "the chosen sensor's mount");
 	CHECK(s.livox_mid360s.lidar_ip.empty() && s.livox_mid360s.host_ip == "192.168.1.50", "Livox addresses");
 	CHECK(s.livox_mid360s.cmd_data_port == 56101 && s.livox_mid360s.log_data_port == 56501, "Livox ports");
 	CHECK(!s.livox_mid360s.drop_low_confidence, "low-confidence points kept by default");
+	CHECK(s.gpio.button_gpio == 17 && s.gpio.led_gpio == 27, "button and LED pins");
+	CHECK(s.livox_mid360s.imu_rate_hz == 500 && s.livox_mid360s.imu_accel_range_g == 8 &&
+			  s.livox_mid360s.imu_gyro_range_dps == 2000,
+		  "IMU defaults");
 	CHECK(s.source == "built-in defaults", "%s", s.source.c_str());
 
 	// An empty file or one with only comments changes nothing.
@@ -55,8 +59,7 @@ void TestFullFile()
 	const char *text = "# dLidar settings\n"
 					   "[device]\n"
 					   "sensor = \"livox_mid360s\"   # the Mid-360S\n"
-					   "target_chunks = 300\n"
-					   "imu_time = \"sensor\"\n"
+					   					   "imu_time = \"sensor\"\n"
 					   "\n"
 					   "[unitree_l2]\n"
 					   "lidar_ip = \"10.0.0.62\"\n"
@@ -75,11 +78,14 @@ void TestFullFile()
 					   "imu_data_port = 4\n"
 					   "log_data_port = 65535\n"
 					   "mount = \"-Y +X +Z\"\n"
-					   "drop_low_confidence = true\n";
+					   "drop_low_confidence = true\n"
+					   "imu_rate_hz = 200\n"
+					   "imu_accel_range_g = 16\n"
+					   "imu_gyro_range_dps = 62.5\n";
 	DeviceSettings s;
 	std::string error = ParseError(text, &s);
 	CHECK(error.empty(), "%s", error.c_str());
-	CHECK(s.sensor == SensorKind::LivoxMid360s && s.target_chunks == 300 &&
+	CHECK(s.sensor == SensorKind::LivoxMid360s &&
 			  s.imu_time == dlidar::ImuTimeline::Mode::Sensor,
 		  "[device]");
 	CHECK(s.unitree_l2.lidar_ip == "10.0.0.62" && s.unitree_l2.lidar_port == 7101 &&
@@ -89,15 +95,22 @@ void TestFullFile()
 	CHECK(s.livox_mid360s.lidar_ip == "192.168.1.112" && s.livox_mid360s.host_ip == "192.168.1.5" &&
 			  s.livox_mid360s.cmd_data_port == 1 && s.livox_mid360s.push_msg_port == 2 &&
 			  s.livox_mid360s.point_data_port == 3 && s.livox_mid360s.imu_data_port == 4 &&
-			  s.livox_mid360s.log_data_port == 65535 && s.livox_mid360s.drop_low_confidence,
+			  s.livox_mid360s.log_data_port == 65535 && s.livox_mid360s.drop_low_confidence &&
+			  s.livox_mid360s.imu_rate_hz == 200 && s.livox_mid360s.imu_accel_range_g == 16 &&
+			  s.livox_mid360s.imu_gyro_range_dps == 62.5,
 		  "[livox_mid360s]");
 	CHECK(s.Mount().Text() == "-Y +X +Z", "the chosen sensor's mount %s", s.Mount().Text().c_str());
 	CHECK(s.source == "dlidar.toml", "%s", s.source.c_str());
 
+	DeviceSettings g;
+	CHECK(ParseError("[button]\ngpio = 22\n[led]\ngpio = 23\n", &g).empty() && g.gpio.button_gpio == 22 &&
+			  g.gpio.led_gpio == 23,
+		  "other pins");
+
 	// Keys may be left out; they keep their defaults. Strings take escapes.
 	CHECK(ParseError("[livox_mid360s]\nlidar_ip = \"\"\n", &s).empty() && s.livox_mid360s.lidar_ip.empty(),
 		  "empty Livox IP means: the first one found");
-	CHECK(ParseError("[device]\nsensor=\"unitree_l2\"\n", &s).empty() && s.target_chunks == kTargetChunks,
+	CHECK(ParseError("[device]\nsensor=\"unitree_l2\"\n", &s).empty() && s.unitree_l2.lidar_port == kLidarPort,
 		  "no blanks around =, other keys default");
 }
 
@@ -117,11 +130,11 @@ void TestUnsupported()
 		{"[[device]]\n", ":1:", "arrays of tables"},
 		{"[device]\nsensor = \"unitree_l2\" extra\n", ":2:", "after the string"},
 		{"[device]\nsensor = \"unitree_l2\n", ":2:", "unterminated"},
-		{"[device]\ntarget_chunks = 1_000\n", ":2:", "not a value"},
-		{"[device]\ntarget_chunks = 1e3\n", ":2:", "not a value"},
-		{"[device]\ntarget_chunks\n", ":2:", "key = value"},
+		{"[unitree_l2]\nwork_mode = 1_000\n", ":2:", "not a value"},
+		{"[unitree_l2]\nwork_mode = 1e3\n", ":2:", "not a value"},
+		{"[unitree_l2]\nwork_mode\n", ":2:", "key = value"},
 		{"[device]\n = 5\n", ":2:", "missing key"},
-		{"[device]\ntarget_chunks =\n", ":2:", "missing value"},
+		{"[unitree_l2]\nwork_mode =\n", ":2:", "missing value"},
 		{"sensor = \"unitree_l2\"\n", ":1:", "outside a section"},
 	};
 	for (const Case &c : cases)
@@ -143,12 +156,12 @@ void TestUnknownAndBadValues()
 		{"[unitree_l2]\nlidar_iq = \"192.168.0.62\"\n", ":2:", "unknown key \"lidar_iq\""},
 		{"[device]\nmount = \"+Z +Y -X\"\n", ":2:", "unknown key \"mount\" in [device]"},
 		{"[device]\n[device]\n", ":2:", "appears twice"},
-		{"[device]\ntarget_chunks = 5\ntarget_chunks = 6\n", ":3:", "appears twice"},
+		{"[unitree_l2]\nwork_mode = 5\nwork_mode = 6\n", ":3:", "appears twice"},
 		{"[device]\nsensor = \"velodyne\"\n", ":2:", "\"unitree_l2\" or \"livox_mid360s\""},
 		{"[device]\nsensor = 1\n", ":2:", "must be a string"},
-		{"[device]\ntarget_chunks = \"200\"\n", ":2:", "must be an integer"},
-		{"[device]\ntarget_chunks = 2.5\n", ":2:", "must be an integer, not a decimal"},
-		{"[device]\ntarget_chunks = 0\n", ":2:", "from 1"},
+		{"[unitree_l2]\nwork_mode = \"200\"\n", ":2:", "must be an integer"},
+		{"[unitree_l2]\nwork_mode = 2.5\n", ":2:", "must be an integer, not a decimal"},
+		{"[device]\ntarget_chunks = 1500\n", ":2:", "no longer supported: recordings are started and stopped with the button"},
 		{"[device]\nimu_time = \"later\"\n", ":2:", "\"auto\", \"sensor\" or \"host\""},
 		{"[unitree_l2]\nlidar_port = 0\n", ":2:", "lidar_port: must be a port from 1 to 65535"},
 		{"[unitree_l2]\nlocal_port = 65536\n", ":2:", "local_port: must be a port from 1 to 65535"},
@@ -160,6 +173,14 @@ void TestUnknownAndBadValues()
 		{"[livox_mid360s]\nmount = \"Z Y X\"\n", ":2:", "three signed axes"},
 		{"[livox_mid360s]\ndrop_low_confidence = 1\n", ":2:", "true or false"},
 		{"[livox_mid360s]\nhost_ip = \"\"\n", ":2:", "IPv4 address"},
+		{"[livox_mid360s]\nimu_rate_hz = 400\n", ":2:", "must be one of 50, 100, 200, 500"},
+		{"[button]\ngpio = 28\n", ":2:", "0 to 27"},
+		{"[led]\ngpio = \"13\"\n", ":2:", "must be an integer"},
+		{"[button]\ngpio = 5\n\n[led]\ngpio = 5\n", ":5:", "the LED and the button need different lines"},
+		{"[led]\ngpio = 17\n", ":2:", "both 17"},
+		{"[livox_mid360s]\nimu_rate_hz = 500.0\n", ":2:", "must be an integer"},
+		{"[livox_mid360s]\nimu_accel_range_g = 2\n", ":2:", "must be one of 4, 8, 16, 32"},
+		{"[livox_mid360s]\nimu_gyro_range_dps = 300\n", ":2:", "must be one of 2000, 1000, 500, 250, 125, 62.5, 31.25, 15.625"},
 	};
 	for (const Case &c : cases)
 	{
@@ -170,7 +191,7 @@ void TestUnknownAndBadValues()
 	// A failed file leaves the settings untouched.
 	DeviceSettings s = DefaultSettings();
 	std::string error;
-	CHECK(!ParseSettings("[device]\nsensor = \"livox_mid360s\"\ntarget_chunks = 0\n", "x", s, error) &&
+	CHECK(!ParseSettings("[device]\nsensor = \"livox_mid360s\"\ntarget_chunks = 1500\n", "x", s, error) &&
 			  s.sensor == SensorKind::UnitreeL2,
 		  "settings unchanged after an error");
 }

@@ -43,15 +43,25 @@ struct LivoxMid360sSettings
 	unsigned short log_data_port = 0;
 	dlidar::AxisMap mount;
 	bool drop_low_confidence = false;
+	int imu_rate_hz = 0;           // 50, 100, 200 or 500
+	int imu_accel_range_g = 0;     // 4, 8, 16 or 32
+	double imu_gyro_range_dps = 0; // 2000, 1000, 500, 250, 125, 62.5, 31.25 or 15.625
+};
+
+// The push button and the status LED on the Pi's 40-pin header (docs/manual.html, "Wiring and pinout").
+struct GpioSettings
+{
+	int button_gpio = 0; // to GND, internal pull-up
+	int led_gpio = 0;    // through a resistor to GND, active high
 };
 
 struct DeviceSettings
 {
 	SensorKind sensor = SensorKind::UnitreeL2;
-	int target_chunks = 0;
 	dlidar::ImuTimeline::Mode imu_time = dlidar::ImuTimeline::Mode::Auto;
 	UnitreeL2Settings unitree_l2;
 	LivoxMid360sSettings livox_mid360s;
+	GpioSettings gpio;
 	std::string source; // the file read, or "built-in defaults"
 
 	// The chosen sensor's mount.

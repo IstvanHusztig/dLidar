@@ -44,6 +44,7 @@ namespace dlidar
         LensDirty,
         StorageFailed,
         StorageSlow,     // chunks pile up in memory
+        StorageLowSpace, // the disk is nearly full; the recording was stopped and is saved
         SensorFailed,
         SensorSilent,    // no points during the recording; it was stopped
         RecordingFailed  // an internal error ended the recording

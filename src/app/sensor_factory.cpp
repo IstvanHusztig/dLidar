@@ -53,6 +53,9 @@ std::unique_ptr<dlidar::LidarSensor> OpenSensor(const DeviceSettings &settings)
 		livox.point_data_port = s.point_data_port;
 		livox.imu_data_port = s.imu_data_port;
 		livox.log_data_port = s.log_data_port;
+		livox.imu_rate_hz = s.imu_rate_hz;
+		livox.imu_accel_range_g = s.imu_accel_range_g;
+		livox.imu_gyro_range_dps = s.imu_gyro_range_dps;
 		std::unique_ptr<dlidar::livox::LiveLivoxSource> source = dlidar::livox::LiveLivoxSource::Open(livox);
 		if (!source)
 			return nullptr;

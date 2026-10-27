@@ -628,6 +628,37 @@ void TestRecordingInfo()
     CHECK(j.find("\"work_mode\": 0,") != std::string::npos, "%s", j.c_str());
     CHECK(j.find("\"format_version\": 1,\n  \"imu_time_source\": \"sensor\"\n}\n") != std::string::npos, "%s", j.c_str());
 }
+// Free space: a recording is not opened below the margin (no file), and
+// HasRoom says no once the space left is less than finishing it needs.
+void TestFreeSpace()
+{
+    printf("low disk space: no start below the margin, a stop when finishing would not fit\n");
+    const uint64_t MB = 1024 * 1024;
+    std::string dir = MakeTempDir();
+    {
+        FileRecordingStorage storage(dir, kRecordingProfile, {kRecordingProfile});
+        storage.free_bytes = [&](const std::string &) { return 400 * MB; };
+        CHECK(!storage.Open(), "opened with 400 MB free");
+        CHECK(fs::is_empty(dir), "files created although the recording was refused");
+    }
+    {
+        uint64_t free = 600 * MB;
+        FileRecordingStorage storage(dir, kRecordingProfile, {kRecordingProfile});
+        storage.free_bytes = [&](const std::string &) { return free; };
+        CHECK(storage.Open(), "open with 600 MB free");
+        int64_t imu = 0, pts = 0;
+        storage.Append(Chunk(0, imu, pts, 10, 100));
+        std::string why;
+        CHECK(storage.HasRoom(why) && why.empty(), "room with 600 MB free");
+        free = 499 * MB;
+        CHECK(!storage.HasRoom(why) && why.find("499 MB free") != std::string::npos &&
+                  why.find("500 MB needed") != std::string::npos,
+              "no room: %s", why.c_str());
+        CHECK(storage.Close(), "close");
+    }
+    fs::remove_all(dir);
+}
+
 // A sensor without diagnostics (no packetstate header): the recording has no
 // packetstate file and recovers like any other.
 void TestNoDiagnostics()
@@ -671,6 +702,7 @@ int main()
     TestPacketStateFile();
     TestRecordingInfo();
     TestNoDiagnostics();
+    TestFreeSpace();
     printf(g_failures ? "Data writer: %d checks FAILED\n" : "Data writer: all checks passed\n", g_failures);
     return g_failures ? 1 : 0;
 }

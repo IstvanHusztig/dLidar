@@ -46,7 +46,7 @@ Enforcement:
 **Application (`src/application/`)**
 - `ports/`:
   - `LidarSensor`: the sensor contract.
-  - `RecordingStorage`.
+  - `RecordingStorage`; `HasRoom` (after each `Append`, on the writer thread) stops a recording that would not fit on the disk, which is then saved normally.
   - `DeviceEvents`: an output channel.
   - `StopToken`.
 - `capture/`:
@@ -71,9 +71,13 @@ Enforcement:
   - `livox_conversion` and `livox_packet_state` handle the Mid-360S packets (only the SDK's packed structs).
 - `storage/`: `FileRecordingStorage`, `ContinuousDataWriter`, the LAZ encoder (the only LASzip user), recovery, packet log reading, and the crash guard.
 - `console/`: `ConsoleEvents`, the texts `bin/dLidar` prints.
+- `gpio/`: the push button and the status LED on the Pi's header (`docs/manual.html`, "Wiring and pinout"). `GpioLine` is the only code that sees `<linux/gpio.h>` (kernel GPIO uAPI v2, no library).
+  - `ButtonInput` (input channel): its own thread, `PressDetector` (pure: debounce, short and long press), callbacks.
+  - `StatusLed` (output channel, `hub.AddAsync`): its own 50 ms thread, `LedOn` (pure: on while a recording starts and runs, 2 Hz while saving, three flashes after a failure).
 
 **App (`src/app/`)**
-- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters, one recording.
+- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters. Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
+- `button_commands.h`: what a short and a long press do (start/stop by state; save, then `PowerOff()` from `power.cpp`).
 - `settings.h/.cpp`: the settings file `~/.config/dlidar/dlidar.toml` (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the chunk limit, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
 - `device_config.h`: the settings' built-in defaults (the L2's endpoints, work mode and mount, the chunk limit).
 - `sensor_factory.h/.cpp`: the only code that knows every sensor adapter; opens the sensor the settings choose.
@@ -153,5 +157,5 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 - `PointRecord` and the LAZ extra bytes keep the L2's layout (such as `raw_range` as uint16 mm); since format 3 each sensor defines what they mean (`RecordingProfile`, the Mid-360S puts distance and azimuth/elevation there). A sensor with other per-point data needs a new format.
 - The Mid-360S's lens/window status (HMS code 0x0104) is not read: the port's `LensDirtiness()` is a percentage, the Mid-360S gives a warning level.
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
-- A daemon mode (wait idle for buttons/phone), GPIO and Bluetooth adapters.
-- The signal stop flag stays set once raised, so it ends every later recording too. Right for the CLI; a daemon mode needs its own exit command.
+- A Bluetooth/phone adapter.
+- The signal stop flag stays set once raised, so it ends every later recording too. Right for both modes: a signal ends the service.

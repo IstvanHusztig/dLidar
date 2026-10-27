@@ -96,6 +96,8 @@
     <li><a href="#what">What it does</a></li>
     <li><a href="#settings">Settings</a></li>
     <li><a href="#sensors">Connecting a sensor</a></li>
+    <li><a href="#wiring">Wiring and pinout</a></li>
+    <li><a href="#service">Running as a service</a></li>
     <li><a href="#recording">A recording, step by step</a></li>
     <li><a href="#time">Time, axes and units</a></li>
     <li><a href="#files">The files</a></li>
@@ -122,7 +124,7 @@
   </div>
 
   <p>The sensor is mounted vertically: its own +Z axis points forward (the L2's cable outlet points up). dLidar rotates every point and IMU sample into the device frame: <b>+X forward, +Y left, +Z up</b> (<code>mount</code> in the settings). The steps below are the L2's; the Mid-360S's start-up differs and is described in <a href="#sensors">Connecting a sensor</a>.</p>
-  <p>Today a recording is started by launching <code>./bin/dLidar</code>. It ends after <code>target_chunks</code> chunks (default 1500, see <a href="#settings">Settings</a>) or on Ctrl-C. Push buttons, status LEDs and a Bluetooth link to a phone are planned, and the architecture is prepared for them.</p>
+  <p>Today a recording is started by launching <code>./bin/dLidar</code>. It has no length limit: it ends on Ctrl-C or when the sensor fails. A push button and a status LED are being added (see <a href="#wiring">Wiring and pinout</a>); a Bluetooth link to a phone is planned, and the architecture is prepared for it.</p>
 
   <h2 id="settings">Settings</h2>
   <p>dLidar reads its settings from <code>~/.config/dlidar/dlidar.toml</code>, or from the file given with <code>./bin/dLidar --config PATH</code>. Without that file it uses the built-in defaults (<code>src/app/device_config.h</code>): the Unitree L2 as it has always been set up. A key that is left out keeps its default. At start-up dLidar prints which settings it used (<code>settings: ... (sensor ...)</code>).</p>
@@ -131,7 +133,6 @@
     <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
     <tr><td colspan="3"><b><code>[device]</code></b></td></tr>
     <tr><td><code>sensor</code></td><td><code>"unitree_l2"</code></td><td>The LiDAR in use: <code>"unitree_l2"</code> or <code>"livox_mid360s"</code>. Only that sensor's section is used; the other one is still checked.</td></tr>
-    <tr><td><code>target_chunks</code></td><td><code>1500</code></td><td>A recording ends after this many chunks of at least 14,000 points (1 to 1,000,000), or on Ctrl-C. Temporary until a push button starts and stops recordings.</td></tr>
     <tr><td><code>imu_time</code></td><td><code>"auto"</code></td><td>How IMU samples are timed: <code>"auto"</code>, <code>"sensor"</code> or <code>"host"</code> (see <a href="#time">Time, axes and units</a>). <code>--imu-time=...</code> on the command line overrides it.</td></tr>
     <tr><td colspan="3"><b><code>[unitree_l2]</code></b></td></tr>
     <tr><td><code>lidar_ip</code>, <code>lidar_port</code></td><td><code>"192.168.0.62"</code>, <code>6101</code></td><td>The L2's address.</td></tr>
@@ -144,12 +145,14 @@
     <tr><td><code>cmd_data_port</code>, <code>push_msg_port</code>, <code>point_data_port</code>, <code>imu_data_port</code>, <code>log_data_port</code></td><td><code>56101</code>, <code>56201</code>, <code>56301</code>, <code>56401</code>, <code>56501</code></td><td>The Pi's ports for the sensor's commands, status messages, points, IMU and log.</td></tr>
     <tr><td><code>mount</code></td><td><code>"+Z +Y -X"</code></td><td>As for the L2; the default assumes the same orientation as the L2 and is confirmed at bring-up.</td></tr>
     <tr><td><code>drop_low_confidence</code></td><td><code>false</code></td><td><code>true</code>: drop the points the sensor flags as low confidence (glued objects, rain/fog/dust).</td></tr>
+    <tr><td><code>imu_rate_hz</code></td><td><code>500</code></td><td>IMU output rate, set at every start-up: 50, 100, 200 or 500 Hz (the sensor's own default is 200 Hz). Needs Mid-360S firmware V35.1.0112 or newer; otherwise a warning, and the sensor keeps its rate.</td></tr>
+    <tr><td><code>imu_accel_range_g</code></td><td><code>8</code></td><td>Accelerometer full scale: 4, 8, 16 or 32 g.</td></tr>
+    <tr><td><code>imu_gyro_range_dps</code></td><td><code>2000</code></td><td>Gyroscope full scale: 2000, 1000, 500, 250, 125, 62.5, 31.25 or 15.625 °/s.</td></tr>
   </table></div>
-  <p>An example that switches to the Mid-360S and shortens recordings:</p>
+  <p>An example that switches to the Mid-360S:</p>
 <pre id="settings-example"><code># ~/.config/dlidar/dlidar.toml
 [device]
 sensor = "livox_mid360s"
-target_chunks = 600
 
 [livox_mid360s]
 host_ip = "192.168.1.50"
@@ -168,6 +171,41 @@ mount = "+Z +Y -X"
     <tr><td>Details</td><td><a href="unitree_l2_slam_tuning.md">unitree_l2_slam_tuning.md</a></td><td><a href="livox_mid360s.md">livox_mid360s.md</a>, with the bring-up checklist</td></tr>
   </table></div>
   <p>The recording files are the same for both; <code>sensor_model</code> in <code>timingNNNN.json</code> and the LAZ system identifier say which sensor made them. A recording that was interrupted is finished as the sensor that recorded it, even after the settings were switched.</p>
+
+  <h2 id="wiring">Wiring and pinout</h2>
+  <div class="card caveat">The button and the LED are implemented (change <code>push-button-recording</code>) but not yet tested with the real parts; see <a href="#service">Running as a service</a>.</div>
+  <p>The push button and the status LED connect to the Raspberry Pi 5's 40-pin header. Both pins can be changed in the settings (<code>[button] gpio</code>, <code>[led] gpio</code>). The Pi's GPIO lines work at <b>3.3 V and are not 5 V tolerant</b>: never connect them to 5 V.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Part</th><th>Signal</th><th>GPIO (BCM)</th><th>Header pin</th><th>Connect to</th></tr>
+    <tr><td rowspan="2">Push button</td><td>input, internal pull-up, low = pressed</td><td>GPIO 17</td><td>11</td><td>one contact of the button</td></tr>
+    <tr><td>ground</td><td>—</td><td>9 (GND)</td><td>the other contact</td></tr>
+    <tr><td rowspan="2">Status LED</td><td>output, high = lit</td><td>GPIO 27</td><td>13</td><td>330 Ω resistor → LED anode (long leg)</td></tr>
+    <tr><td>ground</td><td>—</td><td>14 (GND)</td><td>LED cathode (short leg, flat side)</td></tr>
+    <tr><td>LiDAR</td><td>data</td><td>—</td><td>Ethernet port</td><td>the sensor's Ethernet cable; the sensor has its own power supply (Mid-360S: 9–27 V DC), not from the Pi's header</td></tr>
+  </table></div>
+  <p>The button needs no resistor: dLidar switches on the Pi's internal pull-up, and the contact pulls the line to GND. The 330 Ω resistor limits the LED current to about 4 mA (a red or green LED at about 2 V); for a blue or white LED (about 3 V) use 100 Ω. Pins 9, 11 and 13 are neighbours on the odd-numbered row of the header, and pin 14 is next to pin 13 on the even row, so all four wires fit in the 2×3 block of pins 9–14. The service user must be in group <code>gpio</code> to use the lines.</p>
+  <p>What the button does: a short press starts a recording, the next short press stops and saves it, and holding it for 5 s saves any recording and powers the Pi down. What the LED shows: <b>on</b> = a recording was started (also while the sensor starts up), <b>blinking</b> (2 Hz) = the recording is being saved, <b>off</b> = idle, <b>three fast flashes, then off</b> = the recording failed.</p>
+
+  <h2 id="service">Running as a service</h2>
+  <p>On the device, dLidar runs as a systemd service: it starts at boot, recovers any unfinished recording, opens the sensor, the button and the LED, and waits. There is no length limit; a recording runs until it is stopped.</p>
+  <div class="table-wrap"><table>
+    <tr><th>You do</th><th>dLidar does</th><th>LED</th></tr>
+    <tr><td>short press (Idle)</td><td>starts a recording: sensor start-up, then recording</td><td>on</td></tr>
+    <tr><td>short press (recording)</td><td>stops it and saves the files (LAZ finalization takes about 0.3× the recording time on the Mid-360S)</td><td>blinking, then off</td></tr>
+    <tr><td>short press (saving)</td><td>nothing: the press is ignored</td><td>blinking</td></tr>
+    <tr><td>hold 5 s</td><td>saves any recording, then powers the Pi down</td><td>blinking, then off</td></tr>
+    <tr><td>—</td><td>a recording failed (sensor not found, no points for 10 s, storage error)</td><td>3 fast flashes, then off</td></tr>
+    <tr><td>—</td><td>the disk is nearly full (less than half the points temp file plus 500 MB free): stops and saves the recording</td><td>blinking, then off</td></tr>
+  </table></div>
+  <p>A press during the sensor start-up stops the recording before it begins (no files). systemd's stop (shutdown, <code>systemctl stop dlidar</code>) saves a running recording before dLidar exits.</p>
+  <p><b>Install</b> (once, on the device; replace <code>USER</code> and <code>REPO</code> in both files with the user name and the repository path):</p>
+<pre><code>sudo usermod -aG gpio USER                    # the button and LED lines
+sudo cp systemd/dlidar.service /etc/systemd/system/
+sudo cp systemd/50-dlidar-poweroff.rules /etc/polkit-1/rules.d/   # long press may power down
+sudo systemctl daemon-reload
+sudo systemctl enable --now dlidar
+journalctl -fu dlidar                          # what it does, live</code></pre>
+  <p>For a test over SSH without the service: <code>sudo systemctl stop dlidar</code>, then <code>./bin/dLidar --once</code> starts one recording at once and saves it on Ctrl-C. Without access to the GPIO lines, the service mode stops with a message naming the <code>gpio</code> group; without the LED (wrong pin, not wired) it runs anyway with a warning.</p>
 
   <h2 id="recording">A recording, step by step</h2>
   <p>The colour on the left of each step shows which layer does the work (see <a href="#architecture">Architecture</a>).</p>

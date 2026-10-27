@@ -1,6 +1,7 @@
 #include "adapters/livox_mid360s/live_livox_source.h"
 
 #include "adapters/livox_mid360s/livox_conversion.h"
+#include "adapters/livox_mid360s/livox_imu_range.h"
 
 #include <livox_lidar_api.h>
 
@@ -61,6 +62,13 @@ namespace dlidar::livox
                    host + "    ]\n  }\n}\n";
         }
 
+        std::string Number(double v)
+        {
+            char t[32];
+            snprintf(t, sizeof t, "%g", v);
+            return t;
+        }
+
         bool SleepUnlessStopped(std::chrono::milliseconds d, const StopToken &stop)
         {
             auto until = std::chrono::steady_clock::now() + d;
@@ -82,7 +90,10 @@ namespace dlidar::livox
             return nullptr;
         }
         std::unique_ptr<LiveLivoxSource> source(new LiveLivoxSource(config));
-        const char *dir = getenv("XDG_RUNTIME_DIR");
+        // systemd's RuntimeDirectory, a login session's runtime dir, or /tmp.
+        const char *dir = getenv("RUNTIME_DIRECTORY");
+        if (!dir || !*dir)
+            dir = getenv("XDG_RUNTIME_DIR");
         source->config_path_ = std::string(dir && *dir ? dir : "/tmp") + "/dlidar_livox_" + std::to_string(getpid()) + ".json";
         {
             std::ofstream f(source->config_path_);
@@ -95,6 +106,7 @@ namespace dlidar::livox
             }
         }
         DisableLivoxSdkConsoleLogger();
+        source->pool_.SetAccepting(false); // until a recording's Prepare
         // Never a null path: LivoxLidarSdkInit(nullptr, host_ip) crashes on
         // device detection (Livox-SDK2 issue #135).
         if (!LivoxLidarSdkInit(source->config_path_.c_str(), config.host_ip.c_str()))
@@ -138,9 +150,8 @@ namespace dlidar::livox
         if (!info)
             return;
         auto *self = static_cast<LiveLivoxSource *>(client_data);
+        // The latest announcement wins: after a sensor reboot its handle may change.
         std::lock_guard<std::mutex> lock(self->device_mutex_);
-        if (self->found_)
-            return;
         self->found_ = true;
         self->handle_ = handle;
         self->dev_type_ = info->dev_type;
@@ -218,9 +229,17 @@ namespace dlidar::livox
     bool LiveLivoxSource::Prepare(const StopToken &stop)
     {
         using Clock = std::chrono::steady_clock;
-        // 1. The sensor announces itself.
-        std::cout << "searching for a Mid-360S on " << config_.host_ip
-                  << (config_.lidar_ip.empty() ? std::string() : " at " + config_.lidar_ip) << " ..." << std::endl;
+        stopped_ = false;
+        pool_.SetAccepting(true);
+        // 1. The sensor announces itself (once; later recordings reuse it).
+        bool known;
+        {
+            std::lock_guard<std::mutex> lock(device_mutex_);
+            known = found_;
+        }
+        if (!known)
+            std::cout << "searching for a Mid-360S on " << config_.host_ip
+                      << (config_.lidar_ip.empty() ? std::string() : " at " + config_.lidar_ip) << " ..." << std::endl;
         Clock::time_point start = Clock::now();
         uint32_t handle = 0;
         uint8_t dev_type = 0;
@@ -232,8 +251,9 @@ namespace dlidar::livox
                 {
                     handle = handle_;
                     dev_type = dev_type_;
-                    std::cout << "found Livox device type " << (int)dev_type_ << ", SN " << sn_ << ", at " << found_ip_
-                              << std::endl;
+                    if (!known)
+                        std::cout << "found Livox device type " << (int)dev_type_ << ", SN " << sn_ << ", at " << found_ip_
+                                  << std::endl;
                     break;
                 }
             }
@@ -263,6 +283,20 @@ namespace dlidar::livox
             info_.work_mode = kLivoxLidarNormal;
         p = NewPending();
         Await(p, EnableLivoxLidarImuData(handle, &OnControl, p), "IMU data on");
+        ImuRangeCodes imu{};
+        std::string imu_setting = std::to_string(config_.imu_rate_hz) + " Hz, +-" + std::to_string(config_.imu_accel_range_g) +
+                                  " g, +-" + Number(config_.imu_gyro_range_dps) + " deg/s";
+        std::string imu_what = "the IMU setting " + imu_setting;
+        bool imu_ok = false;
+        if (ToImuRangeCodes(config_.imu_rate_hz, config_.imu_accel_range_g, config_.imu_gyro_range_dps, imu))
+        {
+            p = NewPending();
+            imu_ok = Await(p, SetLivoxLidarImuRange(handle, imu.rate, imu.accel, imu.gyro, &OnControl, p),
+                           (imu_what + " (needs firmware V35.1.0112+; the sensor keeps its IMU setting)").c_str());
+        }
+        else
+            std::cerr << "WARNING: " << imu_what << " is not supported by the Mid-360S; the sensor keeps its IMU setting."
+                      << std::endl;
         p = NewPending();
         Await(p, SetLivoxLidarPclDataType(handle, kLivoxLidarCartesianCoordinateHighData, &OnControl, p),
               "point data type Cartesian high");
@@ -275,7 +309,8 @@ namespace dlidar::livox
         }
         info_.lidar_hardware_version = "Mid-360S SN " + sn_;
         std::cout << "Mid-360S firmware " << info_.lidar_firmware_version << ", SDK " << info_.sdk_version << ", work mode "
-                  << info_.work_mode << std::endl;
+                  << info_.work_mode << ", IMU " << (imu_ok ? imu_setting : std::string("as the sensor has it"))
+                  << std::endl;
         if (stop.StopRequested())
             return true;
 
@@ -322,6 +357,8 @@ namespace dlidar::livox
 
     void LiveLivoxSource::Stop()
     {
+        // Packets from now on are dropped until the next Prepare.
+        pool_.SetAccepting(false);
         if (stopped_)
             return;
         stopped_ = true;

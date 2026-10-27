@@ -11,7 +11,7 @@ How dLidar records the Livox Mid-360S, the second supported sensor next to the U
 | Range | 0.1 m blind zone (0.1–0.2 m reference only), 40 m at 10 % reflectivity, 100 m cut-off | Mid-360S spec sheet |
 | FoV | 360° horizontal, −7°…52° vertical | spec sheet |
 | Points | 200,000 points/s, first return, 10 Hz frames; 96 points per UDP packet (~2,083 packets/s) | spec sheet, Livox protocol |
-| IMU | ICM40609, 200 Hz at power-on (50/100/200/500 Hz settable); gyro rad/s, accel g | spec sheet, protocol |
+| IMU | ICM40609, 200 Hz at power-on (50/100/200/500 Hz settable; dLidar sets 500 Hz); gyro rad/s, accel g | spec sheet, protocol |
 | Time | Packet stamp in ns, `time_type` 0: since power-on, 1: PTP, 2: GPS. dLidar uses the stamps as they come (no sync needed: IMU and points share the clock). | protocol |
 | Network | Sensor 192.168.1.1XX (XX: last two digits of the serial number), ports 56100–56500; host ports 56101–56501 | user manual |
 | Power | 6.5 W typical, up to 14 W self-heating (−20…0 °C), 9–27 V | spec sheet |
@@ -29,7 +29,8 @@ How dLidar records the Livox Mid-360S, the second supported sensor next to the U
     3. Wait for Cartesian point packets: no packet for 10 s, or no points within 60 s, fails.
     4. Drop the backlog for 2 s.
   - **Commands are best effort:** Livox-SDK2 issue #125 reports that commands time out on a Mid-360S while data still flows. A command without an answer only prints a warning, and only "no data" fails the start. After power-on the sensor samples with the IMU on.
-  - **`Stop`** sets work mode sleep (best effort).
+  - **IMU:** `SetLivoxLidarImuRange` sets the IMU at every start-up, default 500 Hz, ±8 g, ±2000 °/s (`imu_rate_hz`, `imu_accel_range_g`, `imu_gyro_range_dps`). It needs firmware V35.1.0112+; without an answer the sensor keeps its rate (200 Hz from the factory) and a warning says so.
+  - **`Stop`** sets work mode sleep (best effort). Between recordings the source stays open, but its packets are dropped (`LivoxPacketPool::SetAccepting`), so the pool cannot grow while the service waits; each recording runs the start-up again (the search is skipped once the sensor is known).
   - **SDK configuration:** written from the settings as JSON to `$XDG_RUNTIME_DIR` (or `/tmp`) and passed by path; `LivoxLidarSdkInit(nullptr, ...)` crashes (issue #135).
   - **Ctrl-C:** during the start-up it stops the start within ~10 ms, but `LivoxLidarSdkUninit` takes another ~1.1 s while the SDK joins its threads.
 - **`LivoxMid360sSensor`** (`livox_mid360s_sensor.cpp`) is the `LidarSensor`:
@@ -66,10 +67,10 @@ Each point has a tag byte with three 2-bit confidence fields: bits 0–1 glued o
 ## What the recordings contain
 
 - **Files and units:** the same files, units, axes and timestamp rules as the L2 (`docs/recording-format.md`), with `sensor_model` `livox_mid360s` and the LAS system identifier `Livox Mid-360S`.
-- **IMU:** 200 Hz in the IMU CSV, against about 890 Hz on the L2.
+- **IMU:** 500 Hz in the IMU CSV (200 Hz if the firmware ignores the setting), against about 890 Hz on the L2.
 - **Points:** ring (`user_data`) is always 1. The extra bytes hold the distance, the azimuth/elevation and the packet's frame/udp counters.
 - **Default filter:** 0.1 m to 100 m, no intensity floor (`livox::kDefaultFilter`); tune it at bring-up.
-- **Recording length:** 1,500 chunks of 14,000 points last about 105 s at 200,000 points/s (`target_chunks` in the settings).
+- **Recording length:** no limit; a recording ends on a stop (the push button, once `push-button-recording` is done), a failure or low disk space. Finalization takes about 0.32× the recording length (measured below).
 - **Load:** the temp file grows by about 9.6 MB/s, about 3× the L2.
 
 ## Build
@@ -108,7 +109,7 @@ Give the Pi an address in 192.168.1.0/24 on the Mid-360S's Ethernet link (defaul
    - A wall in front of the device appears at +X in the LAZ.
    - Set `mount` in the settings (and the default in `src/app/device_config.h` if it differs), then repeat.
 3. **Timing:**
-   - `timingNNNN.json` shows `imu_time_source` `sensor`, the auto checks passed, and `imu_period_ns_l2` ≈ 5,000,000.
+   - `timingNNNN.json` shows `imu_time_source` `sensor`, the auto checks passed, and `imu_period_ns_l2` ≈ 2,000,000 (500 Hz), or ≈ 5,000,000 with a "did not confirm the IMU setting" warning (older firmware: note it here).
    - In `packetstateNNNN.tsv`, the stamp of packet k+1 minus that of packet k ≈ `time_interval_100ns · 100 · 96 / 95` ns (within ~1 µs): this confirms the per-point time formula.
    - `bin/replay_packets packetsNNNN.bin` shows no unexpected gaps.
 4. **Resources:** over a 5 min recording on a 1 GB Pi 5 (or the dev Pi 5 under `systemd-run --scope -p MemoryMax=900M`), record peak RSS (`/usr/bin/time -v`), CPU, and any backlog or "packet buffer grew" warnings here.

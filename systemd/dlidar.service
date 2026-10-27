@@ -1,0 +1,28 @@
+# dLidar as the scanner's service: waits for the push button (docs/manual.html,
+# "Running as a service"). Install: replace USER and REPO below, then
+#   sudo cp systemd/dlidar.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now dlidar
+[Unit]
+Description=dLidar LiDAR scanner (push button recording)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=USER
+# The button and LED lines (/dev/gpiochip*, group gpio).
+SupplementaryGroups=gpio
+WorkingDirectory=REPO
+ExecStart=REPO/bin/dLidar
+# SIGTERM saves a running recording before exiting; saving a 1 h Mid-360S
+# recording takes ~20 min, so give it time.
+KillSignal=SIGTERM
+TimeoutStopSec=3600
+# Restart after a crash, or when the sensor's network link was not up yet.
+Restart=on-failure
+RestartSec=5
+# A private runtime directory for the Livox SDK configuration file.
+RuntimeDirectory=dlidar
+
+[Install]
+WantedBy=multi-user.target

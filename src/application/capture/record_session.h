@@ -24,10 +24,10 @@ namespace dlidar
     {
         ImuTimeline::Config timing;
         CaptureSetup setup;
-        // A recording ends after this many chunks (200: ~1 min at 20 Hz, 18
-        // scans per chunk) or on a stop. Temporary until a button starts and
-        // stops recordings.
-        int target_chunks = 200;
+        // 0: no limit, the recording runs until a stop, a failure or low disk
+        // space (the device). Otherwise it ends after this many chunks (the
+        // replay tool and tests).
+        int target_chunks = 0;
         // No point from the sensor for this long (host time) ends the
         // recording: it lost power or its connection, or it restarted and
         // sends only IMU packets.
@@ -146,6 +146,7 @@ namespace dlidar
         bool backlog_warned_ = false;
         std::atomic<bool> writer_ok_{false};
         std::atomic<bool> writer_failed_{false}; // stops the capture
+        std::atomic<bool> low_space_{false};     // the storage has no room: stop, then finish normally
         bool sensor_silent_ = false;               // the watchdog stopped the capture
 
         // ~40 MB of points waiting: the storage is far slower than the sensor.
@@ -161,7 +162,8 @@ namespace dlidar
         {
             LensMonitor lens;
             auto last_points = std::chrono::steady_clock::now();
-            while (assembler_->ChunksProduced() < config_.target_chunks && !stop.StopRequested() && !writer_failed_)
+            while ((config_.target_chunks == 0 || assembler_->ChunksProduced() < config_.target_chunks) &&
+                   !stop.StopRequested() && !writer_failed_ && !low_space_)
             {
                 Polled p = sensor_.Poll();
                 if (p.kind == PacketKind::EndOfStream)
@@ -251,6 +253,13 @@ namespace dlidar
                         queue_.pop();
                     }
                     storage_.Append(chunk);
+                    std::string why;
+                    if (!low_space_ && !storage_.HasRoom(why))
+                    {
+                        low_space_ = true;
+                        events_.OnWarning({WarningKind::StorageLowSpace,
+                                           "WARNING: " + why + "; the recording was stopped and is being saved."});
+                    }
                 }
                 writer_ok_ = storage_.Close();
             }

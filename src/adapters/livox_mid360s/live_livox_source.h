@@ -24,6 +24,10 @@ namespace dlidar::livox
         unsigned short point_data_port = 56301;
         unsigned short imu_data_port = 56401;
         unsigned short log_data_port = 56501;
+        // The IMU setting sent at every start-up (SetLivoxLidarImuRange).
+        int imu_rate_hz = 500;            // 50, 100, 200, 500
+        int imu_accel_range_g = 8;        // 4, 8, 16, 32
+        double imu_gyro_range_dps = 2000; // 2000 ... 15.625
     };
 
     // The Mid-360S over UDP through Livox-SDK2 (the only user of its library).

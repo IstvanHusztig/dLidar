@@ -21,6 +21,16 @@ namespace dlidar
         // failed; the data is then kept for RecoverLeftovers.
         virtual bool Close() = 0;
 
+        // After each Append, on the same thread: false (with the reason in
+        // `why`) when the recording must stop to leave room for finishing it,
+        // such as a nearly full disk. The recording is then stopped and
+        // closed normally.
+        virtual bool HasRoom(std::string &why)
+        {
+            (void)why;
+            return true;
+        }
+
         // Finishes recordings left unfinished by a crash, kill or power loss.
         // With move_aside each goes into its own subfolder, out of the way of
         // new recordings. False if something was found and failed.

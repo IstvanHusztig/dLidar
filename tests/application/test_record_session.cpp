@@ -319,6 +319,51 @@ void TestRecordingIdentity()
                   report.substr(0, 300).c_str());
     }
 }
+// target_chunks 0: no length limit; the recording ends only when the stream
+// does (or on a stop), with every chunk written.
+void TestNoChunkLimit()
+{
+    printf("target_chunks 0 records until the stream ends\n");
+    FakeSensor sensor;
+    for (int i = 0; i < 240; i++) // 72000 points: five full chunks and a rest
+    {
+        int64_t t = i * 3000000LL;
+        sensor.AddImu(10 + t, kS0 + t + 2000, (uint32_t)i, 9.80665f, 0.01f * i);
+        sensor.AddPoints(20 + t, kS0 + t + 1000, (uint32_t)i, 300);
+    }
+    MemoryStorage storage;
+    RecordingEvents events;
+    RecordSession session(sensor, storage, events, Config(0));
+    CHECK(session.Run(StopToken()), "run failed");
+    size_t points = 0;
+    for (const SensorChunk &c : storage.chunks)
+        points += c.points.size();
+    CHECK(storage.chunks.size() == 6 && points == 72000 && storage.closes == 1, "%zu chunks, %zu points",
+          storage.chunks.size(), points);
+}
+// No room left after chunk 3 of an endless recording: the capture stops,
+// everything captured is written and closed, and the recording ends in Idle
+// (not Error). Low space is the only thing that ends it.
+void TestLowSpace()
+{
+    printf("low space stops the recording, which is finished normally\n");
+    FakeSensor sensor;
+    sensor.endless = true;
+    sensor.on_poll = [](int) { std::this_thread::sleep_for(std::chrono::microseconds(50)); };
+    MemoryStorage storage;
+    storage.room_for = 3;
+    RecordingEvents events;
+    RecordSession session(sensor, storage, events, Config(0));
+    CHECK(session.Run(StopToken()), "a low-space stop is not a failure");
+    CHECK(storage.chunks.size() >= 3 && storage.chunks.size() < 20 && storage.closes == 1, "%zu chunks, %d closes",
+          storage.chunks.size(), storage.closes);
+    int warnings = 0;
+    for (const std::string &e : events.Events())
+        warnings += e.find("warning:WARNING: the memory is full; the recording was stopped") == 0;
+    std::vector<std::string> states = events.States();
+    CHECK(warnings == 1 && !states.empty() && states.back() == "idle", "%d warnings, last state %s", warnings,
+          states.empty() ? "-" : states.back().c_str());
+}
 } // namespace
 
 int main()
@@ -332,5 +377,7 @@ int main()
     TestSensorRestarted();
     TestLensMonitor();
     TestRecordingIdentity();
+    TestNoChunkLimit();
+    TestLowSpace();
     return FinishTests("Record session");
 }

@@ -100,6 +100,27 @@ Key Mount(const char *section, dlidar::AxisMap *(*field)(DeviceSettings &))
 			}};
 }
 
+// One of `allowed` (integers, or decimals too when `decimal`); stored in `out`.
+std::string OneOf(const Value &v, const std::vector<double> &allowed, bool decimal, double &out)
+{
+	if (v.type != Value::Integer && !(decimal && v.type == Value::Decimal))
+		return std::string("must be ") + (decimal ? "a number" : "an integer") + ", not " + TypeName(v.type);
+	double x = v.type == Value::Integer ? (double)v.integer : strtod(v.text.c_str(), nullptr);
+	std::string list;
+	for (double a : allowed)
+	{
+		if (x == a)
+		{
+			out = x;
+			return std::string();
+		}
+		char t[32];
+		snprintf(t, sizeof t, "%g", a);
+		list += (list.empty() ? "" : ", ") + std::string(t);
+	}
+	return "must be one of " + list;
+}
+
 const std::vector<Key> &Schema()
 {
 	using S = DeviceSettings;
@@ -117,15 +138,31 @@ const std::vector<Key> &Schema()
 				 return "\"" + v.text + "\" is not supported; use \"unitree_l2\" or \"livox_mid360s\"";
 			 return std::string();
 		 }},
-		{"device", "target_chunks",
+		{"button", "gpio",
 		 [](const Value &v, S &s) {
 			 std::string e = Expect(v, Value::Integer);
 			 if (!e.empty())
 				 return e;
-			 if (v.integer < 1 || v.integer > 1000000)
-				 return std::string("must be from 1 to 1000000");
-			 s.target_chunks = (int)v.integer;
+			 if (v.integer < 0 || v.integer > 27)
+				 return std::string("must be a GPIO of the 40-pin header, 0 to 27");
+			 s.gpio.button_gpio = (int)v.integer;
 			 return std::string();
+		 }},
+		{"led", "gpio",
+		 [](const Value &v, S &s) {
+			 std::string e = Expect(v, Value::Integer);
+			 if (!e.empty())
+				 return e;
+			 if (v.integer < 0 || v.integer > 27)
+				 return std::string("must be a GPIO of the 40-pin header, 0 to 27");
+			 s.gpio.led_gpio = (int)v.integer;
+			 return std::string();
+		 }},
+		// Removed: recordings have no length limit any more.
+		{"device", "target_chunks",
+		 [](const Value &, S &) {
+			 return std::string("is no longer supported: recordings are started and stopped with the button "
+								"([button]); remove target_chunks");
 		 }},
 		{"device", "imu_time",
 		 [](const Value &v, S &s) {
@@ -167,6 +204,26 @@ const std::vector<Key> &Schema()
 		Port("livox_mid360s", "imu_data_port", [](S &s) { return &s.livox_mid360s.imu_data_port; }),
 		Port("livox_mid360s", "log_data_port", [](S &s) { return &s.livox_mid360s.log_data_port; }),
 		Mount("livox_mid360s", [](S &s) { return &s.livox_mid360s.mount; }),
+		{"livox_mid360s", "imu_rate_hz",
+		 [](const Value &v, S &s) {
+			 double x = 0;
+			 std::string e = OneOf(v, {50, 100, 200, 500}, false, x);
+			 if (e.empty())
+				 s.livox_mid360s.imu_rate_hz = (int)x;
+			 return e;
+		 }},
+		{"livox_mid360s", "imu_accel_range_g",
+		 [](const Value &v, S &s) {
+			 double x = 0;
+			 std::string e = OneOf(v, {4, 8, 16, 32}, false, x);
+			 if (e.empty())
+				 s.livox_mid360s.imu_accel_range_g = (int)x;
+			 return e;
+		 }},
+		{"livox_mid360s", "imu_gyro_range_dps",
+		 [](const Value &v, S &s) {
+			 return OneOf(v, {2000, 1000, 500, 250, 125, 62.5, 31.25, 15.625}, true, s.livox_mid360s.imu_gyro_range_dps);
+		 }},
 		{"livox_mid360s", "drop_low_confidence",
 		 [](const Value &v, S &s) {
 			 std::string e = Expect(v, Value::Boolean);
@@ -295,7 +352,6 @@ DeviceSettings DefaultSettings()
 {
 	DeviceSettings s;
 	s.sensor = SensorKind::UnitreeL2;
-	s.target_chunks = kTargetChunks;
 	s.unitree_l2.lidar_ip = kLidarIp;
 	s.unitree_l2.lidar_port = kLidarPort;
 	s.unitree_l2.local_ip = kLocalIp;
@@ -309,6 +365,11 @@ DeviceSettings DefaultSettings()
 	s.livox_mid360s.imu_data_port = kLivoxHostImuPort;
 	s.livox_mid360s.log_data_port = kLivoxHostLogPort;
 	s.livox_mid360s.mount = kLivoxMount;
+	s.gpio.button_gpio = kButtonGpio;
+	s.gpio.led_gpio = kLedGpio;
+	s.livox_mid360s.imu_rate_hz = kLivoxImuRateHz;
+	s.livox_mid360s.imu_accel_range_g = kLivoxImuAccelRangeG;
+	s.livox_mid360s.imu_gyro_range_dps = kLivoxImuGyroRangeDps;
 	s.source = "built-in defaults";
 	return s;
 }
@@ -325,7 +386,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 	std::istringstream in(text);
 	std::string line, section;
 	std::vector<std::string> seen_sections, seen_keys;
-	int number = 0;
+	int number = 0, gpio_line = 0;
 	auto fail = [&](const std::string &problem) {
 		error = name + ":" + std::to_string(number) + ": " + problem;
 		return false;
@@ -348,7 +409,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			for (const Key &k : Schema())
 				known = known || sec == k.section;
 			if (!known)
-				return fail("unknown section [" + sec + "]; known: [device], [unitree_l2], [livox_mid360s]");
+				return fail("unknown section [" + sec + "]; known: [device], [unitree_l2], [livox_mid360s], [button], [led]");
 			for (const std::string &done : seen_sections)
 				if (done == sec)
 					return fail("section [" + sec + "] appears twice");
@@ -366,7 +427,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			if (!IsBareKeyChar(c))
 				return fail(c == '.' ? "dotted keys are not supported" : "\"" + key + "\" is not a plain key");
 		if (section.empty())
-			return fail("key \"" + key + "\" is outside a section; put it under [device], [unitree_l2] or [livox_mid360s]");
+			return fail("key \"" + key + "\" is outside a section; put it under [device], [unitree_l2], [livox_mid360s], [button] or [led]");
 		const Key *known = nullptr;
 		for (const Key &k : Schema())
 			if (section == k.section && key == k.name)
@@ -384,6 +445,14 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			problem = known->set(v, s);
 		if (!problem.empty())
 			return fail(key + ": " + problem);
+		if (section == "button" || section == "led")
+			gpio_line = number;
+	}
+	if (s.gpio.button_gpio == s.gpio.led_gpio)
+	{
+		number = gpio_line;
+		return fail("[button] gpio and [led] gpio are both " + std::to_string(s.gpio.led_gpio) +
+					"; the LED and the button need different lines");
 	}
 	s.source = name;
 	settings = s;

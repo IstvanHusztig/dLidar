@@ -62,6 +62,8 @@ namespace dlidar
         ~ContinuousDataWriter() { CloseCsv(); }
 
         int SessionIndex() const { return session; }
+        // Size of the points temp file so far (header and the points appended).
+        uint64_t PointsTempBytes() const { return kPointsTempHeaderSize + total_points * sizeof(PointRecord); }
 
         // Starts a recording in `dir`: imuNNNN.csv and the points temp file, with
         // NNNN the next free session number.
