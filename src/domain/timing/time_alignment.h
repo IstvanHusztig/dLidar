@@ -29,6 +29,10 @@ namespace dlidar
 // delivery latency plus the L2-to-host clock offset, and drifted with the
 // clocks' rate difference.
 //
+// "L2 clock" here and in the report keys (zero_l2_ns, imu_period_ns_l2,
+// map_l2_per_host_ppm) means the sensor's own clock, whichever sensor it is;
+// the names are kept so tools reading older reports keep working.
+//
 // ImuTimeline writes every IMU time on the L2 clock, relative to `zero` (the
 // L2 stamp of the first point packet, the recording's time zero):
 // - Sensor: t = IMU stamp - zero + imu_offset_ns. Nothing is rebuilt,

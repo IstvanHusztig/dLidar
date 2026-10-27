@@ -4,7 +4,9 @@
 
 #include <stdint.h>
 
-// How the scanning device is built. Shared by bin/dLidar and the replay tool.
+// The built-in defaults of the device settings (src/app/settings.h): used when
+// there is no settings file, and for every key a settings file leaves out.
+// Shared by bin/dLidar and the replay tool.
 
 // The L2 is mounted with its +Z axis to the front, its cable outlet up (so its
 // +X points down) and its +Y to the left: output +X front, +Y left, +Z up.
@@ -19,6 +21,18 @@ const unsigned short kLocalPort = 6201;
 
 // Sent with setLidarWorkMode at start-up; recorded in timingNNNN.json.
 const uint32_t kLidarWorkMode = 0;
+
+// The Livox Mid-360S: mounted in the same orientation as the L2 (to be
+// confirmed at bring-up, docs/livox_mid360s.md). The host's address and
+// ports are Livox's recommended ones; the sensor's own ports are fixed
+// (56100-56500) and its IP is found on the network.
+const dlidar::AxisMap kLivoxMount{dlidar::Axis::PosZ, dlidar::Axis::PosY, dlidar::Axis::NegX};
+const char *const kLivoxHostIp = "192.168.1.50";
+const unsigned short kLivoxHostCmdPort = 56101;
+const unsigned short kLivoxHostPushPort = 56201;
+const unsigned short kLivoxHostPointPort = 56301;
+const unsigned short kLivoxHostImuPort = 56401;
+const unsigned short kLivoxHostLogPort = 56501;
 
 // A recording ends after this many chunks or on Ctrl-C. Temporary: a push button will start
 // and stop recordings.

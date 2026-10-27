@@ -13,8 +13,8 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 ## 2. Settings file and sensor factory (L2 only, byte-identical)
 
-- [ ] 2.1 Add `ParseAxisMap(text, AxisMap&, std::string& error)` to `src/domain/geometry/axis_map.h`, the inverse of `Describe()`. Extend `tests/domain/test_axis_map.cpp`: all 48 signed permutations round-trip through `Describe`; `"+Z +Y -X"` equals today's `kMount`; malformed text (`"+Z +Y"`, `"+Z +Z -X"`, `"Z Y X"`, extra spaces) is rejected with a message. Verify with ctest `axis_map`.
-- [ ] 2.2 Write `src/app/settings.{h,cpp}`, the TOML subset of design D1, using one schema table per section: `[device]` `sensor`, `target_chunks`, `imu_time`; `[unitree_l2]` `lidar_ip`, `lidar_port`, `local_ip`, `local_port`, `work_mode`, `mount`; `[livox_mid360s]` `lidar_ip`, `host_ip`, the five host ports, `mount`, `drop_low_confidence`. The defaults are today's `device_config.h` values (Mid-360S: 192.168.1.50 host, 56101–56501, mount `"+Z +Y -X"`). Add `tests/app/test_settings.cpp` covering:
+- [x] 2.1 Add `ParseAxisMap(text, AxisMap&, std::string& error)` to `src/domain/geometry/axis_map.h`, the inverse of `Describe()`. Extend `tests/domain/test_axis_map.cpp`: all 48 signed permutations round-trip through `Describe`; `"+Z +Y -X"` equals today's `kMount`; malformed text (`"+Z +Y"`, `"+Z +Z -X"`, `"Z Y X"`, extra spaces) is rejected with a message. Verify with ctest `axis_map`.
+- [x] 2.2 Write `src/app/settings.{h,cpp}`, the TOML subset of design D1, using one schema table per section: `[device]` `sensor`, `target_chunks`, `imu_time`; `[unitree_l2]` `lidar_ip`, `lidar_port`, `local_ip`, `local_port`, `work_mode`, `mount`; `[livox_mid360s]` `lidar_ip`, `host_ip`, the five host ports, `mount`, `drop_low_confidence`. The defaults are today's `device_config.h` values (Mid-360S: 192.168.1.50 host, 56101–56501, mount `"+Z +Y -X"`). Add `tests/app/test_settings.cpp` covering:
   - no file means the defaults;
   - a full file;
   - comments and blank lines;
@@ -26,7 +26,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - an unknown sensor.
 
   Add a CMake target `dlidar_app_settings` (the `src/app` sources besides `main.cpp`) so the test links it. Verify with ctest `settings`.
-- [ ] 2.3 Write `src/app/sensor_factory.{h,cpp}` with only the L2 case for now (design D3): `ParseSensorKind`, `OpenSensor(const DeviceSettings&)`, and the packet-state header for the storage. Change `main.cpp`:
+- [x] 2.3 Write `src/app/sensor_factory.{h,cpp}` with only the L2 case for now (design D3): `ParseSensorKind`, `OpenSensor(const DeviceSettings&)`, and the packet-state header for the storage. Change `main.cpp`:
   - load the settings first (`--config PATH`, else `~/.config/dlidar/dlidar.toml` if present);
   - print the source ("settings: <path>" or "settings: built-in defaults") to stderr, so the console log that golden compares is unchanged;
   - map the settings to `SessionConfig`, letting `--imu-time` override `imu_time`;
@@ -36,13 +36,13 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - `bin/dLidar --config /nonexistent` exits 2 before touching the output directory;
   - a file with a typo exits 2 with the line number;
   - `tools/golden_replay.sh` is identical.
-- [ ] 2.4 Add `--sensor=unitree_l2` to `tools/replay_capture.cpp` (the default; other values are rejected until group 5). Rewrite the comments in `src/domain/recording/packet_timing.h` (102/104 are dLidar's packet codes, shared with the L2) and in `time_alignment.h` (the `_l2` keys mean "the sensor's clock"). Verify `tools/golden_replay.sh` is identical.
-- [ ] 2.5 Document the settings file: every key, its default and its range. It goes in `docs/manual.html` (new "Settings" section), `docs/architecture.md` (`src/app`: settings and factory; "How to add a sensor" step 4 names the factory) and `CLAUDE.md` (Runtime Assumptions: from the settings file, defaults in `device_config.h`). Verify that an example file copied from the manual is read without error by `bin/dLidar --config` (stop it with Ctrl-C during the L2 start-up).
+- [x] 2.4 Add `--sensor=unitree_l2` to `tools/replay_capture.cpp` (the default; other values are rejected until group 5). Rewrite the comments in `src/domain/recording/packet_timing.h` (102/104 are dLidar's packet codes, shared with the L2) and in `time_alignment.h` (the `_l2` keys mean "the sensor's clock"). Verify `tools/golden_replay.sh` is identical.
+- [x] 2.5 Document the settings file: every key, its default and its range. It goes in `docs/manual.html` (new "Settings" section), `docs/architecture.md` (`src/app`: settings and factory; "How to add a sensor" step 4 names the factory) and `CLAUDE.md` (Runtime Assumptions: from the settings file, defaults in `device_config.h`). Verify that an example file copied from the manual is read without error by `bin/dLidar --config` (stop it with Ctrl-C during the L2 start-up).
 
 ## 3. Recording profile (refactor, byte-identical)
 
-- [ ] 3.1 Add `src/domain/recording/recording_profile.h` (design D4), with a static_assert on the LAS 31-character limits for each text. Add `l2::kRecordingProfile` in `src/adapters/unitree_l2/l2_packet_state.h`, holding today's `kLazExtraAttributes` descriptions, the packet-state header, sensor id 1 and model `unitree_l2`. Verify the build passes.
-- [ ] 3.2 Make `FileRecordingStorage`, `ContinuousDataWriter`, `RecoverInterruptedRecording` and `laz_encoder.cpp` take a current `RecordingProfile` plus the list of known profiles, in place of the bare header and the fixed descriptions. Do not use the system identifier yet, so the bytes are unchanged. Update `main.cpp`, `replay_capture.cpp` and `tests/adapters/storage/test_datawriter.cpp`. Verify that ctest `datawriter` passes and `tools/golden_replay.sh` is identical.
+- [x] 3.1 Add `src/domain/recording/recording_profile.h` (design D4), with a static_assert on the LAS 31-character limits for each text. Add `l2::kRecordingProfile` in `src/adapters/unitree_l2/l2_packet_state.h`, holding today's `kLazExtraAttributes` descriptions, the packet-state header, sensor id 1 and model `unitree_l2`. Verify the build passes.
+- [x] 3.2 Make `FileRecordingStorage`, `ContinuousDataWriter`, `RecoverInterruptedRecording` and `laz_encoder.cpp` take a current `RecordingProfile` plus the list of known profiles, in place of the bare header and the fixed descriptions. Do not use the system identifier yet, so the bytes are unchanged. Update `main.cpp`, `replay_capture.cpp` and `tests/adapters/storage/test_datawriter.cpp`. Verify that ctest `datawriter` passes and `tools/golden_replay.sh` is identical.
 
 ## 4. Recording format 3
 

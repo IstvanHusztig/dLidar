@@ -2,8 +2,10 @@
 // seq, host arrival times, time_increment, point_num) through the capture
 // code into a new recording in out_dir (which must exist). No sensor needed.
 //
-//   bin/replay_capture ~/PointCloudDump/packets0001.bin out_dir [seconds] [target_chunks]
+//   bin/replay_capture ~/PointCloudDump/packets0001.bin out_dir [seconds] [target_chunks] [--sensor=unitree_l2]
 //
+// --sensor picks the sensor whose synthetic packets are replayed (default and
+// for now the only one: unitree_l2).
 // Production path: SyntheticL2Source (synthetic, deterministic packet
 // contents) -> UnitreeL2Sensor (the L2 adapter) -> ScannerController /
 // RecordSession -> FileRecordingStorage, with the device's mount. No console
@@ -21,27 +23,40 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <string>
+#include <vector>
 
 int main(int argc, char **argv)
 {
-    if (argc < 3)
+    const char *usage = "usage: replay_capture packetsNNNN.bin out_dir [seconds] [target_chunks] [--sensor=unitree_l2]\n";
+    std::vector<const char *> args; // the positional arguments
+    std::string sensor_name = "unitree_l2";
+    for (int i = 1; i < argc; i++)
     {
-        fprintf(stderr, "usage: replay_capture packetsNNNN.bin out_dir [seconds] [target_chunks]\n");
+        std::string arg = argv[i];
+        if (arg.compare(0, 9, "--sensor=") == 0)
+            sensor_name = arg.substr(9);
+        else
+            args.push_back(argv[i]);
+    }
+    if (args.size() < 2 || sensor_name != "unitree_l2")
+    {
+        fprintf(stderr, "%s", usage);
         return 2;
     }
     std::vector<dlidar::PacketTiming> log;
-    if (!dlidar::ReadPacketLog(argv[1], log) || log.empty())
+    if (!dlidar::ReadPacketLog(args[0], log) || log.empty())
         return 1;
-    double seconds = argc > 3 ? atof(argv[3]) : 1e9;
+    double seconds = args.size() > 2 ? atof(args[2]) : 1e9;
 
     dlidar::SessionConfig config;
     config.timing.log = false;
     config.timing.host.log = false;
     config.setup.mount = kMount;
-    config.target_chunks = argc > 4 ? atoi(argv[4]) : 800;
+    config.target_chunks = args.size() > 3 ? atoi(args[3]) : 800;
 
     dlidar::UnitreeL2Sensor sensor(std::make_unique<dlidar::SyntheticL2Source>(std::move(log), seconds));
-    dlidar::FileRecordingStorage storage(argv[2], dlidar::l2::kPacketStateHeader);
+    dlidar::FileRecordingStorage storage(args[1], dlidar::l2::kRecordingProfile, {dlidar::l2::kRecordingProfile});
     dlidar::EventHub hub; // no output channels
 
     dlidar::ScannerController controller(sensor, storage, hub, config);

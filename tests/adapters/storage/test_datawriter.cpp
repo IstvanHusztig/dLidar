@@ -26,6 +26,7 @@ using namespace unitree_lidar_sdk;
 using dlidar::l2::AppendPacketStateRow;
 using dlidar::l2::MakePointPacketState;
 using dlidar::l2::kPacketStateHeader;
+using dlidar::l2::kRecordingProfile;
 using namespace dlidar;
 
 namespace fs = std::filesystem;
@@ -247,7 +248,7 @@ void TestKilledMidWrite()
         pid_t pid = fork();
         if (pid == 0)
         {
-            ContinuousDataWriter w(kPacketStateHeader);
+            ContinuousDataWriter w(kRecordingProfile);
             if (!w.Open(dir))
                 _exit(3);
             int64_t imu = 0, pts = 0;
@@ -263,7 +264,7 @@ void TestKilledMidWrite()
         partial_before_recovery += !text.empty() && text.back() != '\n';
         uint64_t temp_bytes = fs::file_size(JoinPath(dir, PointsTempName(1)));
 
-        CHECK(RecoverInterruptedRecording(dir, false, kPacketStateHeader), "run %d", run);
+        CHECK(RecoverInterruptedRecording(dir, false, {kRecordingProfile}), "run %d", run);
         size_t rows = 0;
         std::string why;
         CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why), "run %d: %s", run, why.c_str());
@@ -285,7 +286,7 @@ void TestCrashTruncatesCsv()
     if (pid == 0)
     {
         InstallSignalHandlers();
-        ContinuousDataWriter w(kPacketStateHeader);
+        ContinuousDataWriter w(kRecordingProfile);
         if (!w.Open(dir))
             _exit(3);
         int64_t imu = 0, pts = 0;
@@ -306,7 +307,7 @@ void TestCrashTruncatesCsv()
 
     // Points of the crashed recording are finalized on the next start, in
     // their own directory so the next recording cannot overwrite them.
-    CHECK(RecoverInterruptedRecording(dir, true, kPacketStateHeader), "recovery");
+    CHECK(RecoverInterruptedRecording(dir, true, {kRecordingProfile}), "recovery");
     fs::path recovered;
     for (const auto &e : fs::directory_iterator(dir))
         if (e.is_directory() && e.path().filename().string().rfind("recovered_", 0) == 0)
@@ -332,7 +333,7 @@ void TestSigintFinalizes()
     if (pid == 0)
     {
         InstallSignalHandlers();
-        ContinuousDataWriter w(kPacketStateHeader);
+        ContinuousDataWriter w(kRecordingProfile);
         if (!w.Open(dir))
             _exit(3);
         int64_t imu = 0, pts = 0;
@@ -387,7 +388,7 @@ void TestLeftoverTempConverted(bool format1)
     }
     CHECK(sizeof(PointRecord) == 48 && sizeof(PointDLidarV1) == 32, "PointRecord is %zu bytes", sizeof(PointRecord));
 
-    CHECK(RecoverInterruptedRecording(dir, false, kPacketStateHeader), "recovery");
+    CHECK(RecoverInterruptedRecording(dir, false, {kRecordingProfile}), "recovery");
     size_t rows = 0;
     std::string why;
     CHECK(CsvIsClean(JoinPath(dir, ImuCsvName(1)), &rows, &why) && rows == 10, "%s rows %zu", why.c_str(), rows);
@@ -396,7 +397,7 @@ void TestLeftoverTempConverted(bool format1)
     CheckLaz(dir, 25000, !format1);
 
     // Nothing left to recover: a second start does nothing.
-    CHECK(RecoverInterruptedRecording(dir, true, kPacketStateHeader), "second recovery");
+    CHECK(RecoverInterruptedRecording(dir, true, {kRecordingProfile}), "second recovery");
     CHECK(fs::exists(JoinPath(dir, ImuCsvName(1))), "CSV moved without a temp file");
     fs::remove_all(dir);
 }
@@ -410,7 +411,7 @@ void TestSessionNumbering()
     CHECK(NextSessionIndex(dir) == 1, "first session is not 1");
     for (int expect = 1; expect <= 3; expect++)
     {
-        ContinuousDataWriter w(kPacketStateHeader);
+        ContinuousDataWriter w(kRecordingProfile);
         CHECK(w.Open(dir), "open %d", expect);
         CHECK(w.SessionIndex() == expect, "session %d got %d", expect, w.SessionIndex());
         int64_t imu = 0, pts = 0;
@@ -424,7 +425,7 @@ void TestSessionNumbering()
     // A leftover temp file of session 4 is finalized in place as lidar0004.laz.
     { std::ofstream bin(JoinPath(dir, PointsTempName(4)), std::ios::binary); WritePointsTempHeader(bin); PointRecord p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
     CHECK(NextSessionIndex(dir) == 5, "next after leftover");
-    CHECK(RecoverInterruptedRecording(dir, false, kPacketStateHeader), "recovery");
+    CHECK(RecoverInterruptedRecording(dir, false, {kRecordingProfile}), "recovery");
     CHECK(fs::exists(JoinPath(dir, LazName(4))), "no lidar0004.laz");
     CHECK(NextSessionIndex(dir) == 5, "next after recovery");
     fs::remove_all(dir);
@@ -437,7 +438,7 @@ void TestTimingFiles()
     printf("packetsNNNN.bin and timingNNNN.json written and recovered\n");
     std::string dir = MakeTempDir();
     {
-        ContinuousDataWriter w(kPacketStateHeader);
+        ContinuousDataWriter w(kRecordingProfile);
         CHECK(w.Open(dir), "open");
         int64_t imu = 0, pts = 0;
         SensorChunk c = Chunk(0, imu, pts, 10, 100);
@@ -461,7 +462,7 @@ void TestTimingFiles()
         std::ofstream(JoinPath(dir, TimingName(2))) << "{}";
         std::ofstream(JoinPath(dir, PacketLogName(2)), std::ios::binary).write(kPacketLogMagic, sizeof kPacketLogMagic);
     }
-    CHECK(RecoverInterruptedRecording(dir, true, kPacketStateHeader), "recovery");
+    CHECK(RecoverInterruptedRecording(dir, true, {kRecordingProfile}), "recovery");
     fs::path recovered;
     for (const auto &e : fs::directory_iterator(dir))
         if (e.is_directory())
@@ -490,7 +491,7 @@ void TestPacketStateFile()
     d.com_horizontal_angle_step = 2.7e-4f;
     const int64_t zero = 1791547057721602864;
     {
-        ContinuousDataWriter w(kPacketStateHeader);
+        ContinuousDataWriter w(kRecordingProfile);
         CHECK(w.Open(dir), "open");
         int64_t imu = 0, pts = 0;
         SensorChunk c = Chunk(0, imu, pts, 10, 100);
@@ -536,7 +537,7 @@ void TestPacketStateFile()
         std::ofstream(JoinPath(dir, PointsTempName(2)), std::ios::binary);
         std::ofstream(JoinPath(dir, PacketStateName(2))) << kPacketStateHeader << "123\t456\t7";
     }
-    CHECK(RecoverInterruptedRecording(dir, true, kPacketStateHeader), "recovery");
+    CHECK(RecoverInterruptedRecording(dir, true, {kRecordingProfile}), "recovery");
     fs::path recovered;
     for (const auto &e : fs::directory_iterator(dir))
         if (e.is_directory())
@@ -576,8 +577,10 @@ void TestNoDiagnostics()
 {
     printf("a sensor without diagnostics writes no packetstate file\n");
     std::string dir = MakeTempDir();
+    RecordingProfile no_diagnostics = kRecordingProfile;
+    no_diagnostics.packet_state_header = "";
     {
-        FileRecordingStorage storage(dir, "");
+        FileRecordingStorage storage(dir, no_diagnostics, {no_diagnostics});
         CHECK(storage.Open(), "open");
         int64_t imu = 0, pts = 0;
         SensorChunk c = Chunk(0, imu, pts, 10, 100);
@@ -589,7 +592,7 @@ void TestNoDiagnostics()
     CHECK(!fs::exists(JoinPath(dir, PacketStateName(1))), "packetstate file written without diagnostics");
 
     { std::ofstream bin(JoinPath(dir, PointsTempName(2)), std::ios::binary); WritePointsTempHeader(bin); PointRecord p = Point(0); bin.write(reinterpret_cast<const char *>(&p), sizeof p); }
-    FileRecordingStorage storage(dir, "");
+    FileRecordingStorage storage(dir, no_diagnostics, {no_diagnostics});
     CHECK(storage.RecoverLeftovers(false), "recovery");
     CHECK(fs::exists(JoinPath(dir, LazName(2))) && !fs::exists(JoinPath(dir, PacketStateName(2))), "recovered without packetstate");
     fs::remove_all(dir);

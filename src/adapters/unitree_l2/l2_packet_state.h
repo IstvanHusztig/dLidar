@@ -1,6 +1,7 @@
 #pragma once
 
 #include "adapters/unitree_l2/vendor/unitree_lidar_protocol.h"
+#include "domain/recording/recording_profile.h"
 
 #include <cinttypes>
 #include <cstdio>
@@ -51,12 +52,23 @@ inline PointPacketState MakePointPacketState(const LidarPointData &d)
     return s;
 }
 
-const char *const kPacketStateHeader =
+constexpr const char *kPacketStateHeader =
     "stamp_ns\tl2_stamp_ns\tseq\tpoint_num\ttime_increment\tscan_period\trange_min\trange_max\t"
     "apd_temperature\tapd_voltage\tlaser_voltage\timu_temperature\tdirty_index\tpacket_lost_up\tpacket_lost_down\t"
     "sys_rotation_period\tcom_rotation_period\t"
     "range_scale\trange_bias\ta_axis_dist\tb_axis_dist\ttheta_angle_bias\talpha_angle_bias\tbeta_angle\txi_angle\t"
     "angle_min\tangle_increment\tcom_horizontal_angle_start\tcom_horizontal_angle_step\n";
+
+// What the L2's recordings say about it (src/domain/recording/recording_profile.h).
+constexpr RecordingProfile kRecordingProfile{
+    kPreFormat3SensorId,
+    "unitree_l2",
+    "Unitree L2",
+    {"range_scale*(raw+bias) [m]", "range as sent by the L2 [mm]", "index of point in packet", "point packet info.seq",
+     "alpha scan angle incl bias, rad", "theta scan angle incl bias, rad"},
+    kPacketStateHeader,
+};
+static_assert(FitsLas(kRecordingProfile), "LAS texts are at most 31 characters");
 
 // One tab-separated row. stamp_ns is relative to `zero_ns` (the zero of the
 // LAZ gps_time and the IMU timestamp). Floats are printed with 9 significant

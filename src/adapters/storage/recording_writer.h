@@ -7,6 +7,7 @@
 #include "adapters/storage/laz_encoder.h"
 #include "adapters/storage/recording_files.h"
 #include "domain/recording/packet_timing.h"
+#include "domain/recording/recording_profile.h"
 #include "domain/recording/sensor_chunk.h"
 
 #include <fstream>
@@ -28,7 +29,8 @@ namespace dlidar
         std::ofstream bin_file;
         std::ofstream packet_file;
         std::ofstream state_file;
-        std::string packet_state_header; // the sensor's diagnostics header; empty: no packetstate file
+        RecordingProfile profile;                // the sensor that records
+        std::vector<RecordingProfile> profiles; // every known sensor, to finalize a temp file
 
         uint64_t total_points = 0;
 
@@ -53,8 +55,10 @@ namespace dlidar
         }
 
     public:
-        explicit ContinuousDataWriter(std::string packet_state_header = std::string())
-            : packet_state_header(std::move(packet_state_header)) {}
+        // `profiles` lists every sensor whose temp files can be finalized; it
+        // must contain `profile` (default: only `profile`).
+        explicit ContinuousDataWriter(const RecordingProfile &profile, std::vector<RecordingProfile> profiles = {})
+            : profile(profile), profiles(profiles.empty() ? std::vector<RecordingProfile>{profile} : std::move(profiles)) {}
         ~ContinuousDataWriter() { CloseCsv(); }
 
         int SessionIndex() const { return session; }
@@ -98,12 +102,12 @@ namespace dlidar
                 std::cerr << "WARNING: could not open " << PacketLogName(session) << ", packet timing not logged." << std::endl;
 
             // 4. Point packet state and calibration (not fatal either)
-            if (!packet_state_header.empty())
+            if (*profile.packet_state_header)
             {
                 state_file.open(JoinPath(dir, PacketStateName(session)), std::ios::out | std::ios::binary | std::ios::trunc);
                 if (state_file.is_open())
                 {
-                    state_file << packet_state_header;
+                    state_file << profile.packet_state_header;
                     state_file.flush();
                 }
                 else
@@ -232,7 +236,7 @@ namespace dlidar
                       << decreasing_points << " backward point times." << std::endl;
 
             std::cout << "\nCapture finished. " << total_points << " points recorded." << std::endl;
-            if (!FinalizePointsTemp(bin_filename, out_dir, session))
+            if (!FinalizePointsTemp(bin_filename, out_dir, session, profiles))
                 return false;
 
             std::cout << "Packaging complete." << std::endl;

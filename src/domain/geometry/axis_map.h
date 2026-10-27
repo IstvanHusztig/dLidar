@@ -68,6 +68,9 @@ namespace dlidar
             return "front=" + Name(front) + " left=" + Name(left) + " up=" + Name(up);
         }
 
+        // "+Z +Y -X": the settings file's form, read back by ParseAxisMap.
+        std::string Text() const { return Name(front) + " " + Name(left) + " " + Name(up); }
+
         static int Index(Axis a) { return (int)a / 2; }
         static int Sign(Axis a) { return (int)a % 2 ? -1 : 1; }
 
@@ -84,4 +87,37 @@ namespace dlidar
             return std::string(Sign(a) < 0 ? "-" : "+") + "XYZ"[Index(a)];
         }
     };
+
+    // Reads AxisMap::Text()'s form: three signed axes separated by single
+    // spaces, the sensor axes that become output +X, +Y and +Z. False with a
+    // message if it is not that or repeats an axis; whether it is a rotation
+    // (not a mirror) is IsProperRotation()'s question.
+    inline bool ParseAxisMap(const std::string &text, AxisMap &out, std::string &error)
+    {
+        Axis axes[3];
+        if (text.size() != 8 || text[2] != ' ' || text[5] != ' ')
+        {
+            error = "expected three signed axes like \"+Z +Y -X\"";
+            return false;
+        }
+        for (int i = 0; i < 3; i++)
+        {
+            char sign = text[i * 3], name = text[i * 3 + 1];
+            if ((sign != '+' && sign != '-') || name < 'X' || name > 'Z')
+            {
+                error = "expected three signed axes like \"+Z +Y -X\"";
+                return false;
+            }
+            axes[i] = (Axis)((name - 'X') * 2 + (sign == '-'));
+        }
+        AxisMap m{axes[0], axes[1], axes[2]};
+        if (AxisMap::Index(m.front) == AxisMap::Index(m.left) || AxisMap::Index(m.front) == AxisMap::Index(m.up) ||
+            AxisMap::Index(m.left) == AxisMap::Index(m.up))
+        {
+            error = "uses an axis twice";
+            return false;
+        }
+        out = m;
+        return true;
+    }
 }

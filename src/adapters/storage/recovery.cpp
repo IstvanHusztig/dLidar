@@ -11,7 +11,7 @@ namespace dlidar
     // the packet state TSV to their last complete rows and converts the points
     // temp file into lidarNNNN.laz.
     // With move_aside both go into a recovered_<time> subdirectory.
-    bool RecoverSession(const std::string &dir, int index, bool move_aside, const std::string &packet_state_header)
+    bool RecoverSession(const std::string &dir, int index, bool move_aside, const std::vector<RecordingProfile> &profiles)
     {
         std::string temp_path = JoinPath(dir, PointsTempName(index));
         std::string csv_path = JoinPath(dir, ImuCsvName(index));
@@ -20,6 +20,24 @@ namespace dlidar
             return true;
 
         std::cout << "Found an unfinished recording " << index << " in " << dir << ", finalizing it." << std::endl;
+
+        // The sensor that recorded it, from the temp file's header.
+        PointsTempLayout layout;
+        {
+            std::ifstream in(temp_path, std::ios::in | std::ios::binary);
+            if (!in.is_open() || !DetectPointsTempLayout(in, (uint64_t)st.st_size, layout))
+            {
+                std::cerr << "Error: cannot read the header of " << temp_path << std::endl;
+                return false;
+            }
+        }
+        const RecordingProfile *profile = FindProfile(profiles, layout.sensor_id);
+        if (!profile)
+        {
+            std::cerr << "Error: " << temp_path << " is from a sensor this build does not know (sensor id "
+                      << layout.sensor_id << "); it is kept." << std::endl;
+            return false;
+        }
 
         if (access(csv_path.c_str(), F_OK) == 0)
         {
@@ -30,7 +48,7 @@ namespace dlidar
                 std::cout << "Removed a partial last row (" << removed << " bytes) from " << csv_path << std::endl;
         }
         std::string state_path = JoinPath(dir, PacketStateName(index));
-        if (access(state_path.c_str(), F_OK) == 0 && TrimPartialLine(state_path, packet_state_header.c_str()) < 0)
+        if (access(state_path.c_str(), F_OK) == 0 && TrimPartialLine(state_path, profile->packet_state_header) < 0)
             std::cerr << "WARNING: could not check " << state_path << " for a partial last row." << std::endl;
 
         std::string target = dir;
@@ -65,17 +83,17 @@ namespace dlidar
             }
         }
 
-        if (!FinalizePointsTemp(temp_path, target, index))
+        if (!FinalizePointsTemp(temp_path, target, index, profiles))
             return false;
         std::cout << "Recovered recording is in " << target << std::endl;
         return true;
     }
 
-    bool RecoverInterruptedRecording(const std::string &dir, bool move_aside, const std::string &packet_state_header)
+    bool RecoverInterruptedRecording(const std::string &dir, bool move_aside, const std::vector<RecordingProfile> &profiles)
     {
         bool ok = true;
         for (int index : LeftoverSessions(dir))
-            ok = RecoverSession(dir, index, move_aside, packet_state_header) && ok;
+            ok = RecoverSession(dir, index, move_aside, profiles) && ok;
         return ok;
     }
 }

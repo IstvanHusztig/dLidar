@@ -14,22 +14,20 @@ namespace dlidar
     {
         // The LAZ extra bytes of recording format 2, in record order. LASzip writes
         // the standard Extra Bytes VLR; readers that don't know them see the plain
-        // LAS 1.2 / point format 1 fields unchanged. Names and descriptions are at
-        // most 31 characters.
+        // LAS 1.2 / point format 1 fields unchanged. Names are the same for every
+        // sensor; the descriptions (at most 31 characters) come from the
+        // sensor's RecordingProfile.
         struct LazExtraAttribute
         {
             laszip_U32 type; // LASzip attribute type: 2 = uint16, 4 = uint32, 8 = float32
             const char *name;
-            const char *description;
         };
         const LazExtraAttribute kLazExtraAttributes[] = {
-            {8, "range", "range_scale*(raw+bias) [m]"},
-            {2, "raw_range", "range as sent by the L2 [mm]"},
-            {2, "sample_index", "index of point in packet"},
-            {4, "packet_seq", "point packet info.seq"},
-            {8, "alpha", "alpha scan angle incl bias, rad"},
-            {8, "theta", "theta scan angle incl bias, rad"},
+            {8, "range"}, {2, "raw_range"}, {2, "sample_index"}, {4, "packet_seq"}, {8, "alpha"}, {8, "theta"},
         };
+        static_assert(sizeof kLazExtraAttributes / sizeof kLazExtraAttributes[0] ==
+                          sizeof RecordingProfile::extra_byte_descriptions / sizeof(const char *),
+                      "one description per extra byte");
         const laszip_U16 kLazExtraBytes = 20;
 
 
@@ -37,8 +35,8 @@ namespace dlidar
         // LAS 1.2 / point format 1 LAZ file, with the format 2 extra bytes if the
         // temp file has them. The header needs the bounds before any point is
         // written, so the range is read twice.
-        inline bool WriteLazChunk(std::ifstream &in, const PointsTempLayout &layout, uint64_t first, uint64_t count,
-                                  const std::string &laz_path)
+        inline bool WriteLazChunk(std::ifstream &in, const PointsTempLayout &layout, const RecordingProfile &profile,
+                                  uint64_t first, uint64_t count, const std::string &laz_path)
         {
             const size_t kBlock = 65536;
             std::vector<PointRecord> block(kBlock);
@@ -101,9 +99,10 @@ namespace dlidar
 
             if (layout.extra)
             {
-                for (const LazExtraAttribute &a : kLazExtraAttributes)
+                for (size_t i = 0; i < sizeof kLazExtraAttributes / sizeof kLazExtraAttributes[0]; i++)
                 {
-                    if (laszip_add_attribute(laszip_writer, a.type, a.name, a.description, 1.0, 0.0))
+                    const LazExtraAttribute &a = kLazExtraAttributes[i];
+                    if (laszip_add_attribute(laszip_writer, a.type, a.name, profile.extra_byte_descriptions[i], 1.0, 0.0))
                     {
                         std::cerr << "DLL ERROR: adding extra bytes attribute " << a.name << "\n";
                         laszip_destroy(laszip_writer);
@@ -187,7 +186,8 @@ namespace dlidar
         memcpy(out + 16, &pt.theta, 4);
     }
 
-    bool FinalizePointsTemp(const std::string &temp_path, const std::string &out_dir, int index)
+    bool FinalizePointsTemp(const std::string &temp_path, const std::string &out_dir, int index,
+                            const std::vector<RecordingProfile> &profiles)
     {
         std::error_code ec;
         uint64_t bytes = std::filesystem::file_size(temp_path, ec);
@@ -209,6 +209,13 @@ namespace dlidar
             std::cerr << "Error: cannot read the header of " << temp_path << std::endl;
             return false;
         }
+        const RecordingProfile *profile = FindProfile(profiles, layout.sensor_id);
+        if (!profile)
+        {
+            std::cerr << "Error: " << temp_path << " is from a sensor this build does not know (sensor id "
+                      << layout.sensor_id << "); it is kept." << std::endl;
+            return false;
+        }
         if (!layout.extra)
             std::cout << temp_path << " is from an older dLidar (recording format 1): no extra bytes in the LAZ." << std::endl;
 
@@ -222,7 +229,7 @@ namespace dlidar
         std::string laz_path = JoinPath(out_dir, LazName(index));
         std::string part_path = laz_path + ".tmp";
         std::cout << "Packaging " << total << " points into " << laz_path << " ..." << std::endl;
-        if (!WriteLazChunk(in, layout, 0, total, part_path))
+        if (!WriteLazChunk(in, layout, *profile, 0, total, part_path))
         {
             std::cerr << "Error: packaging " << laz_path << " failed; " << temp_path
                       << " is kept and will be finalized on the next start." << std::endl;

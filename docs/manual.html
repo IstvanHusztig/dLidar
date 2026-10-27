@@ -94,6 +94,7 @@
 
   <nav><ul>
     <li><a href="#what">What it does</a></li>
+    <li><a href="#settings">Settings</a></li>
     <li><a href="#recording">A recording, step by step</a></li>
     <li><a href="#time">Time, axes and units</a></li>
     <li><a href="#files">The files</a></li>
@@ -120,7 +121,39 @@
   </div>
 
   <p>The L2 is mounted vertically: its own +Z axis points forward and its cable outlet points up. dLidar rotates every point and IMU sample into the device frame: <b>+X forward, +Y left, +Z up</b>.</p>
-  <p>Today a recording is started by launching <code>./bin/dLidar</code>. It ends after 200 chunks (about a minute) or on Ctrl-C. Push buttons, status LEDs and a Bluetooth link to a phone are planned, and the architecture is prepared for them.</p>
+  <p>Today a recording is started by launching <code>./bin/dLidar</code>. It ends after <code>target_chunks</code> chunks (default 1500, see <a href="#settings">Settings</a>) or on Ctrl-C. Push buttons, status LEDs and a Bluetooth link to a phone are planned, and the architecture is prepared for them.</p>
+
+  <h2 id="settings">Settings</h2>
+  <p>dLidar reads its settings from <code>~/.config/dlidar/dlidar.toml</code>, or from the file given with <code>./bin/dLidar --config PATH</code>. Without that file it uses the built-in defaults (<code>src/app/device_config.h</code>): the Unitree L2 as it has always been set up. A key that is left out keeps its default. At start-up dLidar prints which settings it used (<code>settings: ... (sensor ...)</code>).</p>
+  <p>The file is a small subset of TOML: <code>[section]</code> lines, <code>key = value</code> lines with a <code>"string"</code>, an integer, a decimal number or <code>true</code>/<code>false</code>, and <code># comments</code>. Anything else (arrays, inline tables, multi-line strings, dotted keys), an unknown section or key, and a wrong or out-of-range value stop dLidar with the file name and line number before it touches the sensor or any file, so a typo never falls back to a default silently. The file never goes into <code>~/PointCloudDump/</code>.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td colspan="3"><b><code>[device]</code></b></td></tr>
+    <tr><td><code>sensor</code></td><td><code>"unitree_l2"</code></td><td>The LiDAR in use: <code>"unitree_l2"</code> or <code>"livox_mid360s"</code>. Only that sensor's section is used; the other one is still checked.</td></tr>
+    <tr><td><code>target_chunks</code></td><td><code>1500</code></td><td>A recording ends after this many chunks of at least 14,000 points (1 to 1,000,000), or on Ctrl-C. Temporary until a push button starts and stops recordings.</td></tr>
+    <tr><td><code>imu_time</code></td><td><code>"auto"</code></td><td>How IMU samples are timed: <code>"auto"</code>, <code>"sensor"</code> or <code>"host"</code> (see <a href="#time">Time, axes and units</a>). <code>--imu-time=...</code> on the command line overrides it.</td></tr>
+    <tr><td colspan="3"><b><code>[unitree_l2]</code></b></td></tr>
+    <tr><td><code>lidar_ip</code>, <code>lidar_port</code></td><td><code>"192.168.0.62"</code>, <code>6101</code></td><td>The L2's address.</td></tr>
+    <tr><td><code>local_ip</code>, <code>local_port</code></td><td><code>"192.168.0.2"</code>, <code>6201</code></td><td>The Pi's address on the L2's link.</td></tr>
+    <tr><td><code>work_mode</code></td><td><code>0</code></td><td>Sent to the L2 with <code>setLidarWorkMode</code>; recorded in <code>timingNNNN.json</code>.</td></tr>
+    <tr><td><code>mount</code></td><td><code>"+Z +Y -X"</code></td><td>How the sensor is mounted: the sensor axes that become the device's +X (front), +Y (left) and +Z (up). The default is the vertical mount (+Z to the front, cable outlet up). It must be a rotation; a mirrored mapping is rejected.</td></tr>
+    <tr><td colspan="3"><b><code>[livox_mid360s]</code></b></td></tr>
+    <tr><td><code>lidar_ip</code></td><td><code>""</code></td><td>The Mid-360S's address (192.168.1.1XX, XX from its serial number); empty: the first one found on the network.</td></tr>
+    <tr><td><code>host_ip</code></td><td><code>"192.168.1.50"</code></td><td>The Pi's address on the Mid-360S's link.</td></tr>
+    <tr><td><code>cmd_data_port</code>, <code>push_msg_port</code>, <code>point_data_port</code>, <code>imu_data_port</code>, <code>log_data_port</code></td><td><code>56101</code>, <code>56201</code>, <code>56301</code>, <code>56401</code>, <code>56501</code></td><td>The Pi's ports for the sensor's commands, status messages, points, IMU and log.</td></tr>
+    <tr><td><code>mount</code></td><td><code>"+Z +Y -X"</code></td><td>As for the L2; the default assumes the same orientation as the L2 and is confirmed at bring-up.</td></tr>
+    <tr><td><code>drop_low_confidence</code></td><td><code>false</code></td><td><code>true</code>: drop the points the sensor flags as low confidence (glued objects, rain/fog/dust).</td></tr>
+  </table></div>
+  <p>An example that switches to the Mid-360S and shortens recordings:</p>
+<pre id="settings-example"><code># ~/.config/dlidar/dlidar.toml
+[device]
+sensor = "livox_mid360s"
+target_chunks = 600
+
+[livox_mid360s]
+host_ip = "192.168.1.50"
+mount = "+Z +Y -X"
+</code></pre>
 
   <h2 id="recording">A recording, step by step</h2>
   <p>The colour on the left of each step shows which layer does the work (see <a href="#architecture">Architecture</a>).</p>

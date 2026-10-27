@@ -7,8 +7,8 @@
 namespace dlidar
 {
     // Timing of one received packet; also the record of packetsNNNN.bin, so the
-    // layout is fixed. The fields follow the L2 (its packet type codes and
-    // point packet fields); another sensor fills them with its equivalents.
+    // layout is fixed. The fields follow the L2's point packet fields; another
+    // sensor fills them with its equivalents and uses the same type codes.
     struct PacketTiming
     {
         int64_t host_mono_ns; // CLOCK_MONOTONIC when the packet was received
@@ -26,8 +26,10 @@ namespace dlidar
                       offsetof(PacketTiming, point_num) == 36,
                   "packet log record field offsets");
 
-    const uint32_t kPacketTypePoints = 102; // L2 LIDAR_POINT_DATA_PACKET_TYPE
-    const uint32_t kPacketTypeImu = 104;    // L2 LIDAR_IMU_DATA_PACKET_TYPE
+    // dLidar's packet type codes for every sensor; the values are the L2's own
+    // (LIDAR_POINT_DATA_PACKET_TYPE, LIDAR_IMU_DATA_PACKET_TYPE), so older logs read the same.
+    const uint32_t kPacketTypePoints = 102;
+    const uint32_t kPacketTypeImu = 104;
     const char kPacketLogMagic[8] = {'d', 'L', 'p', 'k', 't', 'v', '1', '\n'};
 
     // Sensor time of a point packet's last point, relative to its first.

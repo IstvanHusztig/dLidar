@@ -46,9 +46,14 @@ add_library(dlidar_console STATIC src/adapters/console/console_events.cpp)
 set_target_properties(dlidar_console PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_console PUBLIC dlidar_core)
 
-# The device application: composition root in src/app.
-add_executable(dLidar src/app/main.cpp)
-target_link_libraries(dLidar dlidar_l2 dlidar_storage dlidar_console)
+# The device application: composition root in src/app. dlidar_app holds its
+# parts besides main() (settings file), so tests can link them.
+add_library(dlidar_app STATIC src/app/settings.cpp)
+set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_app PUBLIC dlidar_core)
+
+add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_storage dlidar_console)
 
 # Tests (no sensor needed): ctest --test-dir build
 enable_testing()
@@ -103,6 +108,11 @@ add_executable(test_l2_conversion tests/adapters/unitree_l2/test_l2_conversion.c
 set_target_properties(test_l2_conversion PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_l2_conversion dlidar_l2)
 add_test(NAME l2_conversion COMMAND test_l2_conversion)
+
+add_executable(test_settings tests/app/test_settings.cpp)
+set_target_properties(test_settings PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_settings dlidar_app)
+add_test(NAME settings COMMAND test_settings)
 
 # Domain unit tests (src/domain only, dlidar_core).
 foreach(t axis_map point_filter)

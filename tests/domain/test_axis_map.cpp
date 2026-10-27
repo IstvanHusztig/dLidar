@@ -1,6 +1,7 @@
 // AxisMap: every signed axis permutation is classified (24 proper rotations,
 // 24 mirrors), Apply() is select-and-negate (bits, -0.0 and NaN signs kept),
-// and the L2 vertical mount maps exactly as the old VERTICAL code did.
+// the L2 vertical mount maps exactly as the old VERTICAL code did, and the
+// settings text form round-trips through ParseAxisMap.
 #include "domain/geometry/axis_map.h"
 #include "../check.h"
 
@@ -111,6 +112,45 @@ void TestVerticalL2()
         }
     CHECK(Text(-0.0f) == "-0.00000000000000000", "-0.0 prints with its sign: %s", Text(-0.0f).c_str());
 }
+// ParseAxisMap reads Text() back for every signed permutation and rejects
+// anything else with a message.
+void TestParse()
+{
+    int parsed = 0;
+    for (int a = 0; a < 6; a++)
+        for (int b = 0; b < 6; b++)
+            for (int c = 0; c < 6; c++)
+            {
+                AxisMap m{(Axis)a, (Axis)b, (Axis)c}, back{};
+                if (a / 2 == b / 2 || a / 2 == c / 2 || b / 2 == c / 2)
+                    continue;
+                std::string error;
+                bool ok = ParseAxisMap(m.Text(), back, error);
+                CHECK(ok && back.front == m.front && back.left == m.left && back.up == m.up, "%s: %s",
+                      m.Text().c_str(), error.c_str());
+                parsed += ok;
+            }
+    CHECK(parsed == 48, "%d of 48 signed permutations round-trip", parsed);
+
+    AxisMap l2{};
+    std::string error;
+    CHECK(ParseAxisMap("+Z +Y -X", l2, error) && l2.front == Axis::PosZ && l2.left == Axis::PosY &&
+              l2.up == Axis::NegX && l2.IsProperRotation(),
+          "the L2 mount text");
+    const AxisMap vertical{Axis::PosZ, Axis::PosY, Axis::NegX};
+    CHECK(vertical.Text() == "+Z +Y -X", "Text() of the L2 mount: %s", vertical.Text().c_str());
+
+    const char *bad[] = {"+Z +Y", "+Z +Z -X", "Z Y X", "+Z  +Y -X", " +Z +Y -X", "+Z +Y -X ", "+z +y -x", "+Z,+Y,-X",
+                         "+Z +Y -W", ""};
+    for (const char *text : bad)
+    {
+        AxisMap m{};
+        error.clear();
+        CHECK(!ParseAxisMap(text, m, error) && !error.empty(), "\"%s\" must be rejected with a message", text);
+    }
+    AxisMap mirror{};
+    CHECK(ParseAxisMap("+X +Y -Z", mirror, error) && !mirror.IsProperRotation(), "a mirror parses but is no rotation");
+}
 } // namespace
 
 int main()
@@ -118,5 +158,6 @@ int main()
     TestClassification();
     TestSelectAndNegate();
     TestVerticalL2();
+    TestParse();
     return FinishTests("AxisMap");
 }

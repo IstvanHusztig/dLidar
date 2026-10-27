@@ -4,6 +4,7 @@
 // points temp layout of a recording (docs/l2-recording-format.md).
 #include "domain/recording/imu_sample.h"
 #include "domain/recording/point_record.h"
+#include "domain/recording/recording_profile.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -205,6 +206,7 @@ namespace dlidar
 
     struct PointsTempLayout
     {
+        uint32_t sensor_id = kPreFormat3SensorId; // the RecordingProfile that recorded it
         bool extra = true;        // format 2 records, with the extra-bytes fields
         uint64_t data_offset = 0; // first record
         size_t record_size = sizeof(PointRecord);

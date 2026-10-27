@@ -69,8 +69,10 @@ Enforcement:
 - `console/`: `ConsoleEvents`, the texts `bin/dLidar` prints.
 
 **App (`src/app/`)**
-- `main.cpp`: CLI flags, recovery of leftovers, building the adapters, one recording.
-- `device_config.h`: endpoints, work mode, mount, chunk limit.
+- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters, one recording.
+- `settings.h/.cpp`: the settings file `~/.config/dlidar/dlidar.toml` (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the chunk limit, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
+- `device_config.h`: the settings' built-in defaults (the L2's endpoints, work mode and mount, the chunk limit).
+- `sensor_factory.h/.cpp`: the only code that knows every sensor adapter; opens the sensor the settings choose.
 - `signals.h`: SIGINT/SIGTERM/SIGHUP stop (a second signal kills); fatal signals truncate the CSV.
 
 ## Data flow of a recording
@@ -129,7 +131,7 @@ Byte-identical recordings come first: a SOLID cleanup that would change output g
    - one record per packet with the host arrival time
 2. Fields of `PointRecord` the sensor does not have are 0.
 3. Provide its default `PointFilter`, and optionally `LensDirtiness()` and `Diagnostics()` (its own `packetstate` columns).
-4. Add a CMake library for it, and select it in `src/app/main.cpp`. Set the mount in `device_config.h`.
+4. Add a CMake library for it, and a case for it in `src/app/sensor_factory.cpp`. Add its section to the settings (`src/app/settings.cpp`, with its defaults in `device_config.h`, and the table in `docs/manual.html`).
 
 No core change is needed; `tests/application/fake_sensor.h` is a minimal example.
 
