@@ -165,7 +165,7 @@ mount = "+Z +Y -X"
     <tr><td>Settings</td><td><code>sensor = "unitree_l2"</code> (the default)</td><td><code>sensor = "livox_mid360s"</code></td></tr>
     <tr><td>Network</td><td>L2 at 192.168.0.62:6101, Pi at 192.168.0.2:6201</td><td>Mid-360S at 192.168.1.1XX (from its serial number), Pi at 192.168.1.50, ports 56101–56501</td></tr>
     <tr><td>Start-up</td><td>Restarts the rotation, prints dirtiness, time delay and versions, drains 2 s</td><td>Waits up to 10 s for the sensor, sets work mode, IMU and point type and queries the firmware (an unanswered command is only a warning), waits for points, drops 2 s of backlog</td></tr>
-    <tr><td>IMU</td><td>~890 Hz</td><td>200 Hz; its position (a few cm from the LiDAR origin) is written to <code>timingNNNN.json</code></td></tr>
+    <tr><td>IMU</td><td>~890 Hz</td><td>500 Hz (set at every start-up, <code>imu_rate_hz</code>; 200 Hz if the firmware is older than V35.1.0112); its position (a few cm from the LiDAR origin) is written to <code>timingNNNN.json</code></td></tr>
     <tr><td>Point filter</td><td>0.1–100 m, intensity ≥ 5</td><td>0.1–100 m; <code>drop_low_confidence</code> drops tagged rain/fog/dust points</td></tr>
     <tr><td>Data rate</td><td>~3 MB/s to the SD card</td><td>~9.6 MB/s to the SD card</td></tr>
     <tr><td>Details</td><td><a href="unitree_l2_slam_tuning.md">unitree_l2_slam_tuning.md</a></td><td><a href="livox_mid360s.md">livox_mid360s.md</a>, with the bring-up checklist</td></tr>
@@ -241,11 +241,11 @@ journalctl -fu dlidar                          # what it does, live</code></pre>
       </div></div>
     <div class="down">↓</div>
     <div class="stage app"><div class="who">6. Chunks<small>ChunkAssembler · LensMonitor</small></div>
-      <div class="what">Collects points (and the IMU samples released with them) into chunks of at least 14,000 points. Each full chunk goes into a queue. Every 10 s the lens dirtiness is checked; above 5% a warning is shown. If no points arrive for 10 s, a watchdog stops the recording.</div></div>
+      <div class="what">Collects points (and the IMU samples released with them) into chunks of at least 14,000 points, the unit handed to the writer thread (chunks no longer limit a recording's length). Each full chunk goes into a queue. Every 10 s the lens dirtiness is checked; above 5% a warning is shown. If no points arrive for 10 s, a watchdog stops the recording.</div></div>
     <div class="down">↓ queue (a separate writer thread, so a slow SD card never delays reading packets)</div>
     <div class="stage adapt"><div class="who">7. Writing<small>FileRecordingStorage</small></div>
       <div class="what">IMU rows are appended to <code>imuNNNN.csv</code>. Points go in raw form to <code>points_tempNNNN.bin</code>, and the packet log and packet state rows are written alongside. Everything on disk is always in a state that can be recovered.</div></div>
-    <div class="down">↓ after 200 chunks or Ctrl-C</div>
+    <div class="down">↓ on a stop: the button, Ctrl-C/SIGTERM, low disk space (there is no length limit)</div>
     <div class="stage adapt"><div class="who">8. Finishing<small>Finalizing · laz_encoder</small></div>
       <div class="what">The L2 stops rotating. The last chunk, the IMU timing summary and <code>timingNNNN.json</code> are written. The temporary point file is compressed into <code>lidarNNNN.laz</code> (written as <code>.laz.tmp</code>, renamed when complete) and is deleted last. The state returns to Idle.</div></div>
   </div>
@@ -290,7 +290,7 @@ journalctl -fu dlidar                          # what it does, live</code></pre>
   <p>The code follows <b>Clean Architecture</b> (Robert C. Martin): the rules of recording sit in the middle and know nothing about the L2, files or the console; those sit outside and plug in through interfaces (<i>ports</i>). That way the LiDAR can be replaced and buttons, LEDs or a phone link can be added without touching the recording logic.</p>
 
   <div class="ring root"><div class="label">app <small>· composition root · <code>src/app/</code></small></div>
-    <div class="items">main.cpp (command line, wiring), device_config.h (IPs, mount, chunk limit), signals.h</div>
+    <div class="items">main.cpp (command line, wiring), device_config.h (default IPs, mount, pins, IMU setting), settings.cpp, sensor_factory.cpp, button_commands.h, signals.h</div>
     <div class="ring adapt"><div class="label">adapters <small>· the outside world · <code>src/adapters/</code></small></div>
       <div class="items">unitree_l2/ (the sensor, Unitree SDK), storage/ (files, LAZ via LASzip, recovery), console/ (texts)</div>
       <div class="ring app"><div class="label">application <small>· use cases and ports · <code>src/application/</code></small></div>
@@ -352,7 +352,7 @@ journalctl -fu dlidar                          # what it does, live</code></pre>
   <h2 id="extend">Adding features</h2>
   <ul>
     <li><b>Another LiDAR:</b> a new adapter folder implementing <code>LidarSensor</code> with its <code>RecordingProfile</code>, a case in <code>app/sensor_factory.cpp</code> and a section in the settings. No change to the core (the Mid-360S was added this way).</li>
-    <li><b>A push button (input):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code>. It will replace today's chunk limit.</li>
+    <li><b>Another input (e.g. the phone):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code> from its own thread, like the push button (<code>adapters/gpio/button_input.cpp</code>, <code>app/button_commands.h</code>).</li>
     <li><b>LEDs or a phone link (output):</b> an adapter implementing <code>DeviceEvents</code>, registered with <code>hub.AddAsync(...)</code>.</li>
   </ul>
   <p>New code and refactors follow the SOLID principles: one job per class, new features as new adapters instead of core edits, every port implementation interchangeable with the others, small ports with defaults for optional capabilities, and the core depending only on ports. See "SOLID" in <code>docs/architecture.md</code>.</p>
