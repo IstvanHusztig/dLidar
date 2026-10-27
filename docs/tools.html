@@ -81,7 +81,7 @@
   <pre><code>tools/golden_replay.sh [BASE_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]</code></pre>
   <div class="table-wrap"><table>
     <tr><th>Argument</th><th>Default</th><th>Meaning</th></tr>
-    <tr><td><code>BASE_REV</code></td><td><code>36ecead</code></td><td>The reference revision (golden base of the clean-architecture change)</td></tr>
+    <tr><td><code>BASE_REV</code></td><td><code>c6174f1</code></td><td>The reference revision: recording format 3 (before it <code>36ecead</code>, the golden base of the clean-architecture change)</td></tr>
     <tr><td><code>PACKETS_BIN</code></td><td><code>~/PointCloudDump/packets0001.bin</code></td><td>The packet timing log to replay</td></tr>
     <tr><td><code>SECONDS</code></td><td><code>60</code></td><td>Replay only the first N seconds; <code>1e9</code> replays the whole log</td></tr>
     <tr><td><code>OUT_DIR</code></td><td>a new temp directory</td><td>Gets <code>base/</code> and <code>new/</code>, each with <code>rec/</code> and <code>console.log</code></td></tr>

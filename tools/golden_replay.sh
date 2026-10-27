@@ -5,7 +5,8 @@
 #
 #   tools/golden_replay.sh [BASE_REV] [PACKETS_BIN] [SECONDS] [OUT_DIR]
 #
-# Defaults: BASE_REV 36ecead (golden base of the clean-architecture change),
+# Defaults: BASE_REV c6174f1 (recording format 3; before it 36ecead, the golden
+# base of the clean-architecture change),
 # PACKETS_BIN ~/PointCloudDump/packets0001.bin, SECONDS 60 (1e9 = whole log),
 # OUT_DIR a new temp directory, which gets base/ and new/.
 # GOLDEN_COMPARE_ONLY=1 skips building and replaying and only compares OUT_DIR.
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base_rev=${1:-36ecead}
+base_rev=${1:-c6174f1}
 packets=$(realpath "${2:-$HOME/PointCloudDump/packets0001.bin}")
 seconds=${3:-60}
 out=${4:-$(mktemp -d "${TMPDIR:-/tmp}/dlidar_golden_XXXXXX")}

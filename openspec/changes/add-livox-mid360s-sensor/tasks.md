@@ -60,7 +60,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - an unknown id is kept.
 
   Verify with ctest `datawriter`.
-- [ ] 4.3 Run `tools/golden_replay.sh` against the commit before group 4 and `tools/verify_recording_format.py` on its `base/rec` and `new/rec` (`compare_recording_formats.sh` only builds format 1 revisions; the verifier is generalized so the format version may increase and the extra-byte values are compared). The standard LAZ fields, the extra-byte values and the IMU CSV must be identical. The golden replay may differ only in the timing JSON (`recording_format_version`, `sensor_model`) and the LAZ header (`system_identifier`, `generating_software`). Record both outputs in the commit message, and update the golden base in `tools/golden_replay.sh`'s default to this commit.
+- [x] 4.3 Run `tools/golden_replay.sh` against the commit before group 4 and `tools/verify_recording_format.py` on its `base/rec` and `new/rec` (`compare_recording_formats.sh` only builds format 1 revisions; the verifier is generalized so the format version may increase and the extra-byte values are compared). The standard LAZ fields, the extra-byte values and the IMU CSV must be identical. The golden replay may differ only in the timing JSON (`recording_format_version`, `sensor_model`) and the LAZ header (`system_identifier`, `generating_software`). Record both outputs in the commit message, and update the golden base in `tools/golden_replay.sh`'s default to this commit.
 - [x] 4.4 Turn `docs/l2-recording-format.md` into the recording format reference:
   - the format 3 section;
   - the timing JSON keys;

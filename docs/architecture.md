@@ -104,7 +104,7 @@ Threads: the controller's worker runs the recordings (capture loop, `CaptureTimi
 
 ## Recordings are byte-identical
 
-The restructure changed no output. `tools/golden_replay.sh` replays a packet log through a base revision and the working tree and compares every file and the console log; the base is `36ecead`, the commit before the restructure. Rules that keep this true:
+The restructure changed no output. `tools/golden_replay.sh` replays a packet log through a base revision and the working tree and compares every file and the console log; the base was `36ecead`, the commit before the restructure. Since recording format 3 (`docs/recording-format.md`) the default base is `c6174f1`. Rules that keep this true:
 - Every target builds with `-ffp-contract=off`. Fused multiply-adds would make results depend on the optimization level.
 - `AxisMap` never multiplies. A multiply turns −0.0 into +0.0 and changes the IMU CSV text.
 - The L2 conversion keeps its sequential angle accumulation and float `std::sin`/`std::cos`.
