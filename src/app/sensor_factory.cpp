@@ -1,5 +1,7 @@
 #include "app/sensor_factory.h"
 
+#include "adapters/livox_mid360s/live_livox_source.h"
+#include "adapters/livox_mid360s/livox_mid360s_sensor.h"
 #include "adapters/livox_mid360s/livox_packet_state.h"
 #include "adapters/unitree_l2/l2_packet_state.h"
 #include "adapters/unitree_l2/live_l2_source.h"
@@ -39,6 +41,22 @@ std::unique_ptr<dlidar::LidarSensor> OpenSensor(const DeviceSettings &settings)
 		if (!source)
 			return nullptr;
 		return std::make_unique<dlidar::UnitreeL2Sensor>(std::move(source));
+	}
+	case SensorKind::LivoxMid360s:
+	{
+		const LivoxMid360sSettings &s = settings.livox_mid360s;
+		dlidar::livox::LiveLivoxConfig livox;
+		livox.lidar_ip = s.lidar_ip;
+		livox.host_ip = s.host_ip;
+		livox.cmd_data_port = s.cmd_data_port;
+		livox.push_msg_port = s.push_msg_port;
+		livox.point_data_port = s.point_data_port;
+		livox.imu_data_port = s.imu_data_port;
+		livox.log_data_port = s.log_data_port;
+		std::unique_ptr<dlidar::livox::LiveLivoxSource> source = dlidar::livox::LiveLivoxSource::Open(livox);
+		if (!source)
+			return nullptr;
+		return std::make_unique<dlidar::LivoxMid360sSensor>(std::move(source), s.drop_low_confidence);
 	}
 	default:
 		std::cerr << "The sensor " << SensorKindName(settings.sensor) << " is not supported by this build." << std::endl;

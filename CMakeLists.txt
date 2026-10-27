@@ -36,13 +36,19 @@ target_link_libraries(dlidar_l2 PUBLIC dlidar_core ${UNITREE_SDK_LIB})
 # Livox Mid-360S adapter (src/adapters/livox_mid360s): the only code that sees
 # Livox-SDK2 (git submodule external/Livox-SDK2).
 set(LIVOX_SDK_DIR ${PROJECT_SOURCE_DIR}/external/Livox-SDK2)
+# Only the SDK's static library (sdk_core), not its samples or shared library;
+# its own warnings are not ours.
+add_subdirectory(${LIVOX_SDK_DIR}/sdk_core ${PROJECT_BINARY_DIR}/livox_sdk EXCLUDE_FROM_ALL)
+set_target_properties(livox_lidar_sdk_static PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_compile_options(livox_lidar_sdk_static PRIVATE -w)
 add_library(dlidar_livox STATIC
     src/adapters/livox_mid360s/livox_conversion.cpp
     src/adapters/livox_mid360s/livox_mid360s_sensor.cpp
+    src/adapters/livox_mid360s/live_livox_source.cpp
     src/adapters/livox_mid360s/synthetic_livox_source.cpp)
 set_target_properties(dlidar_livox PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_include_directories(dlidar_livox PUBLIC ${LIVOX_SDK_DIR}/include)
-target_link_libraries(dlidar_livox PUBLIC dlidar_core)
+target_link_libraries(dlidar_livox PUBLIC dlidar_core PRIVATE livox_lidar_sdk_static)
 
 # Storage adapter (src/adapters/storage): recording files; the only code that sees LASzip.
 add_library(dlidar_storage STATIC
@@ -125,7 +131,7 @@ set_target_properties(test_settings PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJEC
 target_link_libraries(test_settings dlidar_app)
 add_test(NAME settings COMMAND test_settings)
 
-foreach(t livox_conversion livox_sensor livox_time_alignment)
+foreach(t livox_conversion livox_sensor livox_time_alignment livox_packet_pool)
 add_executable(test_${t} tests/adapters/livox_mid360s/test_${t}.cpp)
 set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_${t} dlidar_livox)

@@ -95,6 +95,7 @@
   <nav><ul>
     <li><a href="#what">What it does</a></li>
     <li><a href="#settings">Settings</a></li>
+    <li><a href="#sensors">Connecting a sensor</a></li>
     <li><a href="#recording">A recording, step by step</a></li>
     <li><a href="#time">Time, axes and units</a></li>
     <li><a href="#files">The files</a></li>
@@ -108,10 +109,10 @@
   </ul></nav>
 
   <h2 id="what">What it does</h2>
-  <p>dLidar is the application of a handheld scanning device. It reads a Unitree L2 LiDAR, which also contains an IMU, and writes everything into files. Our SLAM solution <a href="https://github.com/IstvanHusztig/dMapper">dMapper</a> then turns those files into a trajectory and a map. dLidar itself does no mapping: it records the raw data as accurately as possible, with points and IMU samples on one common clock.</p>
+  <p>dLidar is the application of a handheld scanning device. It reads a LiDAR with a built-in IMU, a Unitree L2 or a Livox Mid-360S (chosen in the <a href="#settings">settings</a>), and writes everything into files. Our SLAM solution <a href="https://github.com/IstvanHusztig/dMapper">dMapper</a> then turns those files into a trajectory and a map. dLidar itself does no mapping: it records the raw data as accurately as possible, with points and IMU samples on one common clock.</p>
 
   <div class="chain">
-    <div class="box"><b>Unitree L2</b>~64,000 points/s in packets of 300, plus IMU samples (acceleration, rotation rate), sent over Ethernet (UDP).</div>
+    <div class="box"><b>Unitree L2 or Livox Mid-360S</b>L2: ~64,000 points/s in packets of 300; Mid-360S: 200,000 points/s in packets of 96. Plus IMU samples (acceleration, rotation rate), sent over Ethernet (UDP).</div>
     <div class="arrow">→</div>
     <div class="box"><b>Raspberry Pi running dLidar</b>A Pi 5 with 1 or 2 GB RAM on the device; development and tests on a Pi 5 dev board. Converts, timestamps and writes.</div>
     <div class="arrow">→</div>
@@ -120,7 +121,7 @@
     <div class="box"><b>dMapper</b>Reads every <code>.laz</code> and <code>.csv</code> in the folder and runs SLAM.</div>
   </div>
 
-  <p>The L2 is mounted vertically: its own +Z axis points forward and its cable outlet points up. dLidar rotates every point and IMU sample into the device frame: <b>+X forward, +Y left, +Z up</b>.</p>
+  <p>The sensor is mounted vertically: its own +Z axis points forward (the L2's cable outlet points up). dLidar rotates every point and IMU sample into the device frame: <b>+X forward, +Y left, +Z up</b> (<code>mount</code> in the settings). The steps below are the L2's; the Mid-360S's start-up differs and is described in <a href="#sensors">Connecting a sensor</a>.</p>
   <p>Today a recording is started by launching <code>./bin/dLidar</code>. It ends after <code>target_chunks</code> chunks (default 1500, see <a href="#settings">Settings</a>) or on Ctrl-C. Push buttons, status LEDs and a Bluetooth link to a phone are planned, and the architecture is prepared for them.</p>
 
   <h2 id="settings">Settings</h2>
@@ -154,6 +155,19 @@ target_chunks = 600
 host_ip = "192.168.1.50"
 mount = "+Z +Y -X"
 </code></pre>
+
+  <h2 id="sensors">Connecting a sensor</h2>
+  <div class="table-wrap"><table>
+    <tr><th></th><th>Unitree L2</th><th>Livox Mid-360S</th></tr>
+    <tr><td>Settings</td><td><code>sensor = "unitree_l2"</code> (the default)</td><td><code>sensor = "livox_mid360s"</code></td></tr>
+    <tr><td>Network</td><td>L2 at 192.168.0.62:6101, Pi at 192.168.0.2:6201</td><td>Mid-360S at 192.168.1.1XX (from its serial number), Pi at 192.168.1.50, ports 56101–56501</td></tr>
+    <tr><td>Start-up</td><td>Restarts the rotation, prints dirtiness, time delay and versions, drains 2 s</td><td>Waits up to 10 s for the sensor, sets work mode, IMU and point type and queries the firmware (an unanswered command is only a warning), waits for points, drops 2 s of backlog</td></tr>
+    <tr><td>IMU</td><td>~890 Hz</td><td>200 Hz; its position (a few cm from the LiDAR origin) is written to <code>timingNNNN.json</code></td></tr>
+    <tr><td>Point filter</td><td>0.1–100 m, intensity ≥ 5</td><td>0.1–100 m; <code>drop_low_confidence</code> drops tagged rain/fog/dust points</td></tr>
+    <tr><td>Data rate</td><td>~3 MB/s to the SD card</td><td>~9.6 MB/s to the SD card</td></tr>
+    <tr><td>Details</td><td><a href="unitree_l2_slam_tuning.md">unitree_l2_slam_tuning.md</a></td><td><a href="livox_mid360s.md">livox_mid360s.md</a>, with the bring-up checklist</td></tr>
+  </table></div>
+  <p>The recording files are the same for both; <code>sensor_model</code> in <code>timingNNNN.json</code> and the LAZ system identifier say which sensor made them. A recording that was interrupted is finished as the sensor that recorded it, even after the settings were switched.</p>
 
   <h2 id="recording">A recording, step by step</h2>
   <p>The colour on the left of each step shows which layer does the work (see <a href="#architecture">Architecture</a>).</p>
@@ -256,7 +270,7 @@ mount = "+Z +Y -X"
   <h3>The three ports</h3>
   <div class="table-wrap"><table>
     <tr><th>Port (interface)</th><th>What the core asks of it</th><th>Implemented by</th></tr>
-    <tr><td><code>LidarSensor</code></td><td>Start up, hand out one packet at a time with its arrival time, give the IMU samples and the points in the sensor frame and SI units, stop.</td><td><code>UnitreeL2Sensor</code> (live L2 or a replayed packet log); <code>FakeSensor</code> in tests</td></tr>
+    <tr><td><code>LidarSensor</code></td><td>Start up, hand out one packet at a time with its arrival time, give the IMU samples and the points in the sensor frame and SI units, stop.</td><td><code>UnitreeL2Sensor</code> (live L2 or a replayed packet log), <code>LivoxMid360sSensor</code> (live Mid-360S or a replayed packet log); <code>FakeSensor</code> in tests</td></tr>
     <tr><td><code>RecordingStorage</code></td><td>Open a recording, append chunks, close, recover leftovers.</td><td><code>FileRecordingStorage</code>; <code>MemoryStorage</code> in tests</td></tr>
     <tr><td><code>DeviceEvents</code></td><td>Receive state changes, warnings, progress and the end-of-recording summary.</td><td><code>ConsoleEvents</code>; later LEDs and the phone link</td></tr>
   </table></div>
@@ -266,6 +280,9 @@ mount = "+Z +Y -X"
     <tr><th>Function</th><th>Layer</th><th>Files</th></tr>
     <tr><td>Talking to the L2, start-up sequence, versions</td><td>adapter</td><td><code>adapters/unitree_l2/live_l2_source.cpp</code></td></tr>
     <tr><td>Decoding L2 packets (point math, IMU units)</td><td>adapter</td><td><code>adapters/unitree_l2/l2_conversion.cpp</code></td></tr>
+    <tr><td>Talking to the Mid-360S (Livox-SDK2, start-up, packet pool)</td><td>adapter</td><td><code>adapters/livox_mid360s/live_livox_source.cpp</code>, <code>livox_packet_pool.h</code></td></tr>
+    <tr><td>Decoding Mid-360S packets</td><td>adapter</td><td><code>adapters/livox_mid360s/livox_conversion.cpp</code></td></tr>
+    <tr><td>Choosing the sensor, the settings file</td><td>app</td><td><code>app/sensor_factory.cpp</code>, <code>app/settings.cpp</code></td></tr>
     <tr><td>L2 diagnostics columns (<code>packetstate</code>)</td><td>adapter</td><td><code>adapters/unitree_l2/l2_packet_state.h</code></td></tr>
     <tr><td>Time zero, mount, g conversion, point filter</td><td>application</td><td><code>application/capture/capture_timing.h</code></td></tr>
     <tr><td>IMU time alignment</td><td>domain</td><td><code>domain/timing/</code></td></tr>
@@ -296,8 +313,8 @@ mount = "+Z +Y -X"
 
   <h2 id="extend">Adding features</h2>
   <ul>
-    <li><b>Another LiDAR:</b> a new adapter folder implementing <code>LidarSensor</code>, selected in <code>main.cpp</code>, with its mount in <code>device_config.h</code>. No change to the core.</li>
-    <li><b>A push button (input):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code>. It will replace today's fixed 200-chunk limit.</li>
+    <li><b>Another LiDAR:</b> a new adapter folder implementing <code>LidarSensor</code> with its <code>RecordingProfile</code>, a case in <code>app/sensor_factory.cpp</code> and a section in the settings. No change to the core (the Mid-360S was added this way).</li>
+    <li><b>A push button (input):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code>. It will replace today's chunk limit.</li>
     <li><b>LEDs or a phone link (output):</b> an adapter implementing <code>DeviceEvents</code>, registered with <code>hub.AddAsync(...)</code>.</li>
   </ul>
   <p>New code and refactors follow the SOLID principles: one job per class, new features as new adapters instead of core edits, every port implementation interchangeable with the others, small ports with defaults for optional capabilities, and the core depending only on ports. See "SOLID" in <code>docs/architecture.md</code>.</p>
@@ -424,7 +441,8 @@ mount = "+Z +Y -X"
   <h2 id="more">More documents</h2>
   <ul>
     <li><a href="architecture.md">architecture.md</a>: the architecture in full, with the deferred items.</li>
-    <li><a href="recording-format.md">recording-format.md</a>: every field of every file.</li>
+    <li><a href="recording-format.md">recording-format.md</a>: every field of every file, per sensor.</li>
+    <li><a href="livox_mid360s.md">livox_mid360s.md</a>: the Livox Mid-360S: how it is read, its frames and IMU position, network setup, bring-up checklist.</li>
     <li><a href="recording-format-2.html">recording-format-2.html</a>: what recording format 2 added, for dMapper's intensity correction, and how it was verified.</li>
     <li><a href="imu_lidar_time_alignment.md">imu_lidar_time_alignment.md</a>: how IMU and point times are aligned.</li>
     <li><a href="l2_point_conversion.md">l2_point_conversion.md</a>: the L2 point math.</li>

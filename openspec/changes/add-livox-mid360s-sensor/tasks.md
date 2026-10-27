@@ -102,16 +102,16 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 ## 6. Live Mid-360S through Livox-SDK2
 
-- [ ] 6.1 Build the SDK's static library from the submodule (design D10: `sdk_core` or root with `EXCLUDE_FROM_ALL`, `-w` on its targets, samples not built), and link it privately into `dlidar_livox`. Verify:
+- [x] 6.1 Build the SDK's static library from the submodule (design D10: `sdk_core` or root with `EXCLUDE_FROM_ALL`, `-w` on its targets, samples not built), and link it privately into `dlidar_livox`. Verify:
   - a clean `cmake --preset ninja && cmake --build build` succeeds on the Pi 5;
   - `ninja -C build -t targets all | grep -c sample` is 0;
   - `dlidar_core` still links nothing.
-- [ ] 6.2 Write the callback-to-pull bridge as its own class, `livox_packet_pool.h` (design D8), and add `tests/adapters/livox_mid360s/test_livox_packet_pool.cpp`. A producer thread pushes 2,300 packets/s for 20 s while the consumer stalls for 5 s twice. Check that every packet comes out in order with its arrival time, that the pool grows past 8,192 slots with exactly one warning, and that no packet is lost. Verify with ctest `livox_packet_pool`.
-- [ ] 6.3 Write `live_livox_source.{h,cpp}`: config JSON in `$XDG_RUNTIME_DIR`, init with a path, the info-change wait, best-effort commands with 2 s waits and one warning each, the data wait (10 s / 60 s), the 2 s drain, versions (SDK version, firmware or `unknown`), and `Stop` (Sleep, then Uninit). Only one instance may exist. It honours the `StopToken` at every wait. Verify:
+- [x] 6.2 Write the callback-to-pull bridge as its own class, `livox_packet_pool.h` (design D8), and add `tests/adapters/livox_mid360s/test_livox_packet_pool.cpp`. A producer thread pushes 2,300 packets/s for 20 s while the consumer stalls for 5 s twice. Check that every packet comes out in order with its arrival time, that the pool grows past 8,192 slots with exactly one warning, and that no packet is lost. Verify with ctest `livox_packet_pool`.
+- [x] 6.3 Write `live_livox_source.{h,cpp}`: config JSON in `$XDG_RUNTIME_DIR`, init with a path, the info-change wait, best-effort commands with 2 s waits and one warning each, the data wait (10 s / 60 s), the 2 s drain, versions (SDK version, firmware or `unknown`), and `Stop` (Sleep, then Uninit). Only one instance may exist. It honours the `StopToken` at every wait. Verify:
   - with no sensor connected, `bin/dLidar` with `sensor = "livox_mid360s"` ends in Error after about 10 s and writes no files;
   - Ctrl-C during the wait ends it within about 0.1 s.
-- [ ] 6.4 Add the live Mid-360S case to `OpenSensor`. Verify that `bin/dLidar --config` with each sensor reaches that sensor's start-up messages: the L2 as today, the Mid-360S as "searching for Mid-360S on <host_ip>".
-- [ ] 6.5 Write `docs/livox_mid360s.md`:
+- [x] 6.4 Add the live Mid-360S case to `OpenSensor`. Verify that `bin/dLidar --config` with each sensor reaches that sensor's start-up messages: the L2 as today, the Mid-360S as "searching for Mid-360S on <host_ip>".
+- [x] 6.5 Write `docs/livox_mid360s.md`:
   - specs;
   - network setup (Pi address in 192.168.1.0/24, the L2 stays on 192.168.0.x, the ports);
   - the SDK pin and known issues #125/#135;
@@ -126,7 +126,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 - [ ] 7.1 Clean build from a fresh clone (`git clone --recursive`, `cmake --preset ninja`, `cmake --build build`) and full ctest; verify everything passes.
 - [ ] 7.2 `bin/dLidar` with no settings file on the L2 rig: start-up, recording, Ctrl-C finalization; verify the files are complete, `timingNNNN.json` says format 3 / `unitree_l2`, and `tools/check_imu_timestamps.py` is clean.
-- [ ] 7.3 Measure resources with `replay_capture --sensor=livox_mid360s` over 300 s of synthetic data at Mid-360S rates on the Pi 5, inside `systemd-run --user --scope -p MemoryMax=900M`, writing to the SD card (`/usr/bin/time` is not installed: peak RSS from `getrusage` and `/proc`). The replay is unpaced (7.5× real time), so its chunk backlog and peak RSS are upper bounds and no console channel shows the backlog warning; the paced check is 8.4. Measured: capture 39.8 s, finalization 95.5 s, peak RSS 529 MB, SD card 51.7 MB/s sustained (5× the needed 9.6 MB/s); recorded in `docs/livox_mid360s.md`.
+- [x] 7.3 Measure resources with `replay_capture --sensor=livox_mid360s` over 300 s of synthetic data at Mid-360S rates on the Pi 5, inside `systemd-run --user --scope -p MemoryMax=900M`, writing to the SD card (`/usr/bin/time` is not installed: peak RSS from `getrusage` and `/proc`). The replay is unpaced (7.5× real time), so its chunk backlog and peak RSS are upper bounds and no console channel shows the backlog warning; the paced check is 8.4. Measured: capture 39.8 s, finalization 95.5 s, peak RSS 529 MB, SD card 51.7 MB/s sustained (5× the needed 9.6 MB/s); recorded in `docs/livox_mid360s.md`.
 
 ## 8. Bring-up with the Mid-360S (when connected)
 

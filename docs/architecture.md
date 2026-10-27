@@ -1,6 +1,6 @@
 # dLidar architecture
 
-dLidar is the application of a handheld scanning device. It records a LiDAR with an IMU (today a Unitree L2) into files that dMapper, our SLAM solution, processes. Over time the device gains buttons, status LEDs, a Bluetooth link to a phone, and possibly a different LiDAR. The code follows Clean Architecture (Robert C. Martin) so that those can be added without touching the recording logic.
+dLidar is the application of a handheld scanning device. It records a LiDAR with an IMU (a Unitree L2 or a Livox Mid-360S, chosen in the settings file) into files that dMapper, our SLAM solution, processes. Over time the device gains buttons, status LEDs, a Bluetooth link to a phone, and possibly a different LiDAR. The code follows Clean Architecture (Robert C. Martin) so that those can be added without touching the recording logic.
 
 The change that introduced this structure is `openspec/changes/clean-architecture-sensor-port/`.
 
@@ -20,13 +20,13 @@ Dependencies point inward only: `app` → `adapters` → `application` → `doma
 |---|---|---|
 | `domain/` | C/C++ standard headers, `domain/` | anything else |
 | `application/` | the above + `application/` | adapters, `app/`, vendor or OS device headers |
-| `adapters/<x>/` | the core + its own directory (incl. its `vendor/`) | `app/`, another adapter |
+| `adapters/<x>/` | the core + its own directory (incl. its `vendor/`) and its vendor library's headers | `app/`, another adapter |
 | `app/` | anything | |
 
 Enforcement:
 - **Build:** the CMake targets give each layer only what it needs.
   - `dlidar_core` (domain + application) has only `src/` on its include path and links nothing.
-  - `dlidar_l2` adds the vendor SDK, `dlidar_storage` adds LASzip and `3rd/`, `dlidar_console` adds nothing.
+  - `dlidar_l2` adds the Unitree SDK, `dlidar_livox` adds Livox-SDK2 (submodule `external/Livox-SDK2`, its static library linked privately), `dlidar_storage` adds LASzip and `3rd/`, `dlidar_console` adds nothing.
   - The core and its tests therefore build without the SDK or LASzip.
 - **Includes:** `tools/check_architecture.py --strict` (ctest `architecture`) checks every `#include` under `src/` against the table above.
 
@@ -65,6 +65,10 @@ Enforcement:
   - `SyntheticL2Source` replays a packet log.
   - `l2_conversion` and `l2_packet_state` handle the L2's packets.
   - `vendor/` holds Unitree's unmodified headers.
+- `livox_mid360s/`: `LivoxMid360sSensor` over a `LivoxPacketSource` (`docs/livox_mid360s.md`).
+  - `LiveLivoxSource` is the Livox-SDK2 reader: callbacks on the SDK's thread into a `LivoxPacketPool` that never drops, a best-effort start-up (commands may go unanswered) and the 2 s backlog drop.
+  - `SyntheticLivoxSource` replays a packet log as Mid-360S packets (`livox_packet_builder.h`).
+  - `livox_conversion` and `livox_packet_state` handle the Mid-360S packets (only the SDK's packed structs).
 - `storage/`: `FileRecordingStorage`, `ContinuousDataWriter`, the LAZ encoder (the only LASzip user), recovery, packet log reading, and the crash guard.
 - `console/`: `ConsoleEvents`, the texts `bin/dLidar` prints.
 
@@ -91,7 +95,7 @@ input channel ──StartRecording──> ScannerController ──(worker thread
 ```
 
 States: Idle → Preparing (sensor start-up) → Recording → Finalizing (sensor stopped, files finished) → Idle. The state is Error if the recording failed, with a warning first:
-- the sensor did not start (the L2 gives up after 10 s without a packet, or 60 s without its status); no files are written
+- the sensor did not start (the L2 gives up after 10 s without a packet, or 60 s without its status; the Mid-360S if it is not found within 10 s, or sends no packet for 10 s or no points within 60 s); no files are written
 - the sensor sent no points for 10 s during the recording (`SessionConfig::sensor_silence_timeout`, host time; IMU packets do not count, so an L2 that restarted is caught too); the capture stops, what was captured is written and the files closed
 - the storage could not open or failed while writing; the capture then stops
 - an exception (sensor, storage, out of memory); the chunks already captured are written and the files closed
@@ -146,7 +150,8 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 
 - The timing report JSON is built in the domain (`ImuTimeline::Report`, `AddRecordingInfo`). It belongs in a storage serializer, but moving it risks byte changes.
 - `ContinuousDataWriter` still emits the timestamp-order warnings itself.
-- `PointRecord` and the LAZ extra bytes follow L2 semantics, such as `raw_range` as uint16 mm. A second sensor may need recording format 3 with a sensor-defined extra-bytes schema.
+- `PointRecord` and the LAZ extra bytes keep the L2's layout (such as `raw_range` as uint16 mm); since format 3 each sensor defines what they mean (`RecordingProfile`, the Mid-360S puts distance and azimuth/elevation there). A sensor with other per-point data needs a new format.
+- The Mid-360S's lens/window status (HMS code 0x0104) is not read: the port's `LensDirtiness()` is a percentage, the Mid-360S gives a warning level.
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
 - A daemon mode (wait idle for buttons/phone), GPIO and Bluetooth adapters.
 - The signal stop flag stays set once raised, so it ends every later recording too. Right for the CLI; a daemon mode needs its own exit command.
