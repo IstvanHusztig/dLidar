@@ -109,6 +109,17 @@ The restructure changed no output. `tools/golden_replay.sh` replays a packet log
 - The time zero rule: the stamp of the first point packet that has points, set before that packet is converted, even if all its points are filtered out.
 - The order of work within a packet is fixed: log record, state row, points, IMU released by the point packet. `ChunkReady` is checked after every packet.
 
+## SOLID
+
+New code and refactors follow the SOLID principles on top of the dependency rule:
+- **Single responsibility:** a class has one reason to change. `CaptureTiming` owns the timing, `ChunkAssembler` the chunks, `laz_encoder.cpp` is the only LASzip user. When a class gains a second job, split it instead of growing it.
+- **Open/closed:** a new sensor, input or output channel is a new adapter wired in `main.cpp`, not an edit of the core (see "How to add …"). If a feature needs a core change, extend a port or add one rather than branching on the concrete adapter.
+- **Liskov substitution:** every implementation of a port keeps its contract, so `FakeSensor`, `SyntheticL2Source`/`LiveL2Source` and `MemoryStorage`/`FileRecordingStorage` are interchangeable. What the port documents (units, frame, clock, return value on failure, threads) holds for each of them; the core tests with fakes only prove something because of this.
+- **Interface segregation:** ports stay small and shaped by the use case that calls them. Optional capabilities get a default (`LensDirtiness()`, `Diagnostics()`) so a sensor without them implements nothing extra; a method only one adapter needs does not go on a shared port.
+- **Dependency inversion:** the core depends on ports, never on adapters, and receives them by reference or injection. Adapters are constructed only in `src/app/`.
+
+Byte-identical recordings come first: a SOLID cleanup that would change output goes to "Deferred" instead (like the timing report JSON).
+
 ## How to add …
 
 **A sensor.**

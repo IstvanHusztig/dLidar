@@ -267,6 +267,7 @@
     <li><b>A push button (input):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code>. It will replace today's fixed 200-chunk limit.</li>
     <li><b>LEDs or a phone link (output):</b> an adapter implementing <code>DeviceEvents</code>, registered with <code>hub.AddAsync(...)</code>.</li>
   </ul>
+  <p>New code and refactors follow the SOLID principles: one job per class, new features as new adapters instead of core edits, every port implementation interchangeable with the others, small ports with defaults for optional capabilities, and the core depending only on ports. See "SOLID" in <code>docs/architecture.md</code>.</p>
   <div class="card caveat">Refactors must not change any recording. <code>tools/golden_replay.sh</code> replays a real packet log through an older build and the current one and compares every file byte by byte. See <a href="tools.html">tools.html</a>.</div>
 
   <h2 id="concepts">Concepts in the code</h2>
