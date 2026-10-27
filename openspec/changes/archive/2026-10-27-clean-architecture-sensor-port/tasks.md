@@ -62,9 +62,9 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 ## 10. Integration checks
 
 - [x] 10.1 Full golden replay of `~/PointCloudDump/packets0001.bin` (whole log) against commit 0; verify every file is identical
-- [ ] 10.2 Live capture on the Pi 5 with the L2: start-up prints, recording, Ctrl-C finalization, a second-signal kill, and recovery on the next start; verify files are complete and `tools/check_imu_timestamps.py` is clean
-- [ ] 10.3 The same live capture on a Pi 5 with 1 GB RAM (or the dev Pi 5 under `systemd-run --scope -p MemoryMax=900M`; the Pi Zero 2 W was dropped as target); verify no dropped chunks or warnings beyond the baseline, and similar CPU/RAM use (`/usr/bin/time -v`)
-- [ ] 10.4 Import the live recording into dMapper with its configuration unchanged; verify the trajectory and map look like a pre-refactor recording of the same scene
+- [ ] 10.2 Live capture on the Pi 5 with the L2: start-up prints, recording, Ctrl-C finalization, a second-signal kill, and recovery on the next start; verify files are complete and `tools/check_imu_timestamps.py` is clean **Dropped 2026-10-27:** the L2's IMU is broken and will not be replaced soon; not done.
+- [ ] 10.3 The same live capture on a Pi 5 with 1 GB RAM (or the dev Pi 5 under `systemd-run --scope -p MemoryMax=900M`; the Pi Zero 2 W was dropped as target); verify no dropped chunks or warnings beyond the baseline, and similar CPU/RAM use (`/usr/bin/time -v`) **Dropped 2026-10-27:** the L2's IMU is broken and will not be replaced soon; not done.
+- [ ] 10.4 Import the live recording into dMapper with its configuration unchanged; verify the trajectory and map look like a pre-refactor recording of the same scene **Dropped 2026-10-27:** the L2's IMU is broken and will not be replaced soon; not done.
 
 ## 11. Concurrency review (high effort)
 
@@ -76,7 +76,7 @@ Each group is one or more commits. After every group: `cmake --build build`, `ct
 - [x] 11.6 Golden replay (60 s and whole log) identical; 100 stress runs of each test binary without failure
 - [x] 11.8 No files for a recording that never started: the storage opens once the sensor runs (sensor failure, stop during the start-up); checked with the real L2 adapter against an address without an L2 (Error after 17 s, stop ends within ~1 s, empty output folder)
 - [x] 11.9 L2 start-up waits while packets arrive (10 s without a packet, 60 s without the status; the L2 sends points only ~20 s after its restart, so the old 10 s limit always failed). Watchdog: no points for 10 s during the recording stops it and ends in Error with the captured data written (an L2 that restarted mid-recording sent only IMU on its reset clock for 82 s, and the capture waited forever when the link died); tests `TestSensorSilent`, `TestSensorRestarted`; golden replay identical
-- [ ] 11.7 On the L2: Ctrl-C during the start-up ends within ~0.1 s; an unplugged L2 ends in Error after ~10 s
+- [ ] 11.7 On the L2: Ctrl-C during the start-up ends within ~0.1 s; an unplugged L2 ends in Error after ~10 s **Dropped 2026-10-27:** the L2's IMU is broken and will not be replaced soon; not done.
 
 ## Workflow follow-up
 

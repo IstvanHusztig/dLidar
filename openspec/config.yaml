@@ -2,7 +2,8 @@ schema: spec-driven
 
 context: |
   The capture tool runs on a Raspberry Pi 5 with 1 or 2 GB RAM (aarch64, 4 cores) carried handheld
-  with a Unitree L2 LiDAR. Development and testing happen on a Raspberry Pi 5 dev board. Designs must
+  with a Livox Mid-360S LiDAR (the
+  Unitree L2 is still supported but out of service: its IMU is broken). Development and testing happen on a Raspberry Pi 5 dev board. Designs must
   fit 1 GB of RAM and the SD card's write speed.
   The recordings are processed by dMapper, our SLAM solution (https://github.com/IstvanHusztig/dMapper).
   Any change to output files, units, axes or timestamps must state its effect on dMapper.
