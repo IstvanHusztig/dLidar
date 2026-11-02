@@ -51,7 +51,7 @@ target_include_directories(dlidar_livox PUBLIC ${LIVOX_SDK_DIR}/include)
 target_link_libraries(dlidar_livox PUBLIC dlidar_core PRIVATE livox_lidar_sdk_static)
 
 # Bluetooth adapter (src/adapters/bluetooth): the pairing window over BlueZ
-# D-Bus; the only code that sees GIO.
+# D-Bus. GIO/GLib only here and in dlidar_phone.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
 add_library(dlidar_bluetooth STATIC src/adapters/bluetooth/pairing_window.cpp)

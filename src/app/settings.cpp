@@ -376,6 +376,7 @@ DeviceSettings DefaultSettings()
 	s.livox_mid360s.mount = kLivoxMount;
 	s.gpio.button_gpio = kButtonGpio;
 	s.gpio.led_gpio = kLedGpio;
+	s.phone.pairing_at_start = kPairingAtStart;
 	s.livox_mid360s.imu_rate_hz = kLivoxImuRateHz;
 	s.livox_mid360s.imu_accel_range_g = kLivoxImuAccelRangeG;
 	s.livox_mid360s.imu_gyro_range_dps = kLivoxImuGyroRangeDps;
