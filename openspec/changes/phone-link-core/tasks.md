@@ -68,7 +68,7 @@ From group 2 on, after every group, run on the Pi 5:
 
 ## 5. Wiring, tools and docs
 
-- [ ] 5.1 `src/app/main.cpp`: build `DeviceInfo` from `ProfileFor(settings)`, `kRecordingFormatVersion` and the version header, then wire everything inside the controller block (D6), with a warning on failure. Verify on the dev board:
+- [x] 5.1 `src/app/main.cpp`: build `DeviceInfo` from `ProfileFor(settings)`, `kRecordingFormatVersion` and the version header, then wire everything inside the controller block (D6), with a warning on failure. Verify on the dev board:
   - the console output of `bin/dLidar --once` without a sensor is byte-identical to the previous build's;
   - in service mode, `/run/dlidar/dlidar.sock` (or `$XDG_RUNTIME_DIR/dlidar.sock` when run by hand) exists with mode 0600 and is gone after a clean exit;
   - a second dLidar warns and leaves the first one's socket alone.
@@ -76,7 +76,9 @@ From group 2 on, after every group, run on the Pi 5:
   - `hello`, `info.get` and `status.get` print their responses;
   - `--follow` shows preparing → … → idle or error for a button-started recording;
   - with `--once`, `--wait 5 --follow` shows the warning and the error of a start without a sensor.
-- [ ] 5.3 Docs:
+
+  Verified 2026-11-03: hello, info.get, status.get, an unknown command (exit 1), and the `--once` warning + error. Still open: the button-started recording (needs the button and a sensor; the same event flow is covered by ctest `phone_socket`).
+- [x] 5.3 Docs:
   - `docs/architecture.md`: the phone link as an input and output channel example; `src/application/remote/`, the new ports and `src/adapters/phone/` in "What lives where"; the GLib loop in the data flow; Deferred updated (the BLE transport still to come);
   - `docs/manual.html`: the socket, `tools/phone_client.py`, `libglib2.0-dev`;
   - `CLAUDE.md`: an Architecture bullet for the phone adapter.

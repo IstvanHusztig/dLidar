@@ -48,6 +48,8 @@ Enforcement:
   - `LidarSensor`: the sensor contract.
   - `RecordingStorage`; `HasRoom` (after each `Append`, on the writer thread) stops a recording that would not fit on the disk, which is then saved normally.
   - `DeviceEvents`: an output channel.
+  - `DeviceControl`: the commands an input channel gives (`Status`, `StartRecording`, `StopRecording`); `ScannerController` implements it.
+  - `StorageSpace`: free space where the recordings go (`FileRecordingStorage` implements it).
   - `StopToken`.
 - `capture/`:
   - `CaptureTiming`: owns the time zero; applies the mount, m/s² → g and the filter; feeds `ImuTimeline`.
@@ -57,6 +59,7 @@ Enforcement:
 - `device/`:
   - `ScannerController`: the state machine and the command interface.
   - `EventHub`: fans events out to the output channels.
+- `remote/`: `DeviceApi`, the typed commands a remote client (the phone) may give, on `DeviceControl` and `StorageSpace`, independent of any transport or message format; `DeviceInfo`, `kProtocolVersion`.
 - `analysis/`: `ReplayPackets` (`bin/replay_packets`).
 
 **Adapters (`src/adapters/`)**
@@ -74,9 +77,16 @@ Enforcement:
 - `gpio/`: the push button and the status LED on the Pi's header (`docs/manual.html`, "Wiring and pinout"). `GpioLine` is the only code that sees `<linux/gpio.h>` (kernel GPIO uAPI v2, no library).
   - `ButtonInput` (input channel): its own thread, `PressDetector` (pure: debounce, short and long press), callbacks.
   - `StatusLed` (output channel, `hub.AddAsync`): its own 50 ms thread, `LedOn` (pure: on while a recording starts and runs, 2 Hz while saving, three flashes after a failure).
+- `phone/` (CMake `dlidar_phone`): the phone link, protocol v1 (`docs/phone-protocol.md`). The only code that sees nlohmann/json (`protocol_codec.cpp`); GLib only here and in `bluetooth/`.
+  - `PhoneEvents` (output channel, `hub.AddAsync`) writes into a `Mailbox` (bounded, progress coalesced, the latest state never dropped) and wakes the loop.
+  - `PhoneLoop`: the link's own thread with a private `GMainContext`; every transport and the server run on it.
+  - `PhoneServer`: framing (`LineFramer`), the command table over `DeviceApi`, per-connection `seq` and `dropped`, progress at most 1 Hz; `status.get` answers from the events the loop has seen, so it is never older than an event already sent.
+  - `SocketTransport` (a `Connection` per client): the local Unix socket `dlidar.sock` (`$RUNTIME_DIRECTORY`, else `$XDG_RUNTIME_DIR`), mode 0600, at most 4 clients, 64 KiB unsent bytes per client before it is closed. The BLE transport comes next (`phone-link-ble`).
+  - `PhoneLink`: what `main.cpp` starts and shuts down.
+- `bluetooth/`: `PairingWindow` (BlueZ over D-Bus): pairable for a while with a Just Works agent; opened at start by `[phone] pairing_at_start` until the pairing button is mounted.
 
 **App (`src/app/`)**
-- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters. Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
+- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters (also the phone link and the pairing window). Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
 - `button_commands.h`: what a short and a long press do (start/stop by state; save, then `PowerOff()` from `power.cpp`).
 - `settings.h/.cpp`: the settings file `dlidar.toml` in the project root (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the button and LED pins, the Mid-360S IMU setting, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
 - `device_config.h`: the settings' built-in defaults (the sensors' endpoints, work mode and mount, the button and LED pins, the Mid-360S IMU setting).
@@ -91,6 +101,7 @@ input channel ──StartRecording──> ScannerController ──(worker thread
                                         v                                │ Poll() per packet
                                     EventHub ──> console (sync)          v
                                              └─> LEDs, phone (async)  LidarSensor (UnitreeL2Sensor)
+                                                   │ phone: Mailbox ──> PhoneLoop thread (GLib) ──> PhoneServer ──> socket clients
                                                                          │ ImuReading / points (sensor frame, SI)
                                                                          v
                                         CaptureTiming: zero, mount, g, filter, ImuTimeline
@@ -107,6 +118,8 @@ States: Idle → Preparing (sensor start-up) → Recording → Finalizing (senso
 A new start is accepted from Idle or Error. A start command in any other state is rejected, and the current state is returned. The state that `Status()` and `StartRecording` report is the one that decides: an accepted start reads Preparing at once, and the final Idle/Error is stored before the channels hear of it, so a channel may start the next recording from its `OnState(Idle)`.
 
 The storage opens only once the sensor has started, so a recording that never started (sensor failure, stop during Preparing: Preparing → Idle) leaves no files for dMapper to read.
+
+The phone link only reads: `PhoneEvents` runs on the hub's thread for it and hands events to its own loop thread through the mailbox; requests are answered on the loop from `DeviceApi` (a mutex copy of the status, a statvfs). A client that does not read gets no events until it does (its latest state and progress are kept, the rest counted in `dropped`) and is closed past 64 KiB of unsent bytes, so no client can delay a recording.
 
 Threads: the controller's worker runs the recordings (capture loop, `CaptureTiming`, the events of the recording) and each recording has a writer thread (storage, storage warnings). The sensor is only used by the worker and the storage only by the writer. The chunk queue between them is not bounded, since dropping chunks would break the recording; past 50 waiting chunks a warning is sent.
 
@@ -143,7 +156,7 @@ Byte-identical recordings come first: a SOLID cleanup that would change output g
 
 No core change is needed; `tests/application/fake_sensor.h` is a minimal example.
 
-**An input channel** (button, phone command). Call `ScannerController::StartRecording` / `StopRecording` / `Status` from the adapter's own thread. They are thread-safe and never block on a recording, and `StartRecording` returns false with the current state when busy. `WaitIdle` blocks until every accepted recording has ended; called from an event callback it returns at once.
+**An input channel** (button, phone command). Depend on `DeviceControl` (`application/ports/device_control.h`) or, for a remote client, `DeviceApi`, and call `ScannerController::StartRecording` / `StopRecording` / `Status` from the adapter's own thread. They are thread-safe and never block on a recording, and `StartRecording` returns false with the current state when busy. `WaitIdle` blocks until every accepted recording has ended; called from an event callback it returns at once.
 
 **An output channel** (LEDs, phone status).
 1. Implement `DeviceEvents` (`OnState`, `OnWarning`, `OnProgress`, `OnSummary`).
@@ -157,5 +170,5 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 - `PointRecord` and the LAZ extra bytes keep the L2's layout (such as `raw_range` as uint16 mm); since format 3 each sensor defines what they mean (`RecordingProfile`, the Mid-360S puts distance and azimuth/elevation there). A sensor with other per-point data needs a new format.
 - The Mid-360S's lens/window status (HMS code 0x0104) is not read: the port's `LensDirtiness()` is a percentage, the Mid-360S gives a warning level.
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
-- A Bluetooth/phone adapter.
+- The phone link's BLE transport (`phone-link-ble`), its commands that change the device (start/stop, phase 3) and Wi-Fi setup (phase 4). Today it serves protocol v1 (read-only) over the local socket.
 - The signal stop flag stays set once raised, so it ends every later recording too. Right for both modes: a signal ends the service.
