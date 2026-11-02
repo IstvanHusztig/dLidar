@@ -76,7 +76,7 @@ struct Rig
 {
     FakeControl control;
     FakeSpace space;
-    DeviceApi api{control, &space, DeviceInfo{"v1", "unitree_l2", "Unitree L2", 3}};
+    DeviceApi api{control, &space, DeviceInfo{"v1", "unitree_l2", "unitree_l2", 3}};
     FakeClock clock;
     int wakes = 0;
     std::shared_ptr<Mailbox> mailbox = std::make_shared<Mailbox>([this] { wakes++; });

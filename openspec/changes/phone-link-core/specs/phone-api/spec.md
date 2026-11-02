@@ -113,7 +113,7 @@ The state in a `status.get` result SHALL be at least as new as every `state` eve
 
 #### Scenario: Which sensor
 - **WHEN** a client sends `info.get` on a device configured for the Mid-360S
-- **THEN** the result has `"sensor":"livox_mid360s"`, `"sensor_model":"Livox Mid-360S"` and `"recording_format":3`
+- **THEN** the result has `"sensor":"livox_mid360s"`, `"sensor_model":"livox_mid360s"` and `"recording_format":3`
 
 ### Requirement: Events pushed to every client
 Every connected client SHALL receive events `{"event":NAME,"seq":N,"data":{…}}` without asking, where `seq` counts the events sent on that connection from 1; `data` SHALL always be an object:

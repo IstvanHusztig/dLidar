@@ -41,7 +41,7 @@ struct FixedSpace : StorageSpace
 
 DeviceInfo Info()
 {
-    return {"0e1e413-dirty", "livox_mid360s", "Livox Mid-360S", 3};
+    return {"0e1e413-dirty", "livox_mid360s", "livox_mid360s", 3};
 }
 
 void TestIdle()
@@ -112,7 +112,7 @@ void TestInfo()
     ScannerController c(sensor, storage, events, Config());
     DeviceApi api(c, nullptr, Info());
     const DeviceInfo &i = api.Info();
-    CHECK(i.version == "0e1e413-dirty" && i.sensor == "livox_mid360s" && i.sensor_model == "Livox Mid-360S" &&
+    CHECK(i.version == "0e1e413-dirty" && i.sensor == "livox_mid360s" && i.sensor_model == "livox_mid360s" &&
               i.recording_format == 3,
           "info");
     CHECK(kProtocolVersion == 1, "protocol 1");

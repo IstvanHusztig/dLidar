@@ -14,6 +14,8 @@
 #include "adapters/gpio/button_input.h"
 #include "adapters/gpio/gpio_line.h"
 #include "adapters/gpio/status_led.h"
+#include "adapters/phone/phone_link.h"
+#include "adapters/phone/socket_transport.h"
 #include "adapters/storage/file_recording_storage.h"
 #include "app/button_commands.h"
 #include "app/power.h"
@@ -22,6 +24,9 @@
 #include "app/signals.h"
 #include "application/device/event_hub.h"
 #include "application/device/scanner_controller.h"
+#include "application/remote/device_api.h"
+#include "domain/recording/recording_info.h"
+#include "dlidar_version.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -145,7 +150,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 
 	// Output channels: the console, the status LED (own thread, never delays
-	// a recording). Later: the phone link via hub.AddAsync(...).
+	// a recording), and below the phone link (hub.AddAsync).
 	dlidar::ConsoleEvents console;
 	dlidar::EventHub hub;
 	hub.AddSync(console);
@@ -164,6 +169,19 @@ int main(int argc, char *argv[])
 		// Input channels: SIGINT/SIGTERM/SIGHUP (the stop flag, which also
 		// ends a running recording), the push button. Later: the phone.
 		dlidar::ScannerController controller(*sensor, storage, hub, config, &StopRequested());
+
+		// The phone link (read-only so far): its own thread and the local
+		// socket, an output channel on the hub. A problem only warns.
+		dlidar::DeviceApi api(controller, &storage,
+							  {DLIDAR_VERSION, SensorKindName(settings.sensor), ProfileFor(settings).sensor_model,
+							   dlidar::kRecordingFormatVersion});
+		std::string why;
+		std::unique_ptr<dlidar::phone::PhoneLink> phone =
+			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), why);
+		if (phone)
+			hub.AddAsync(phone->Events());
+		else
+			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (once)
 		{
 			controller.StartRecording();
@@ -181,6 +199,10 @@ int main(int argc, char *argv[])
 			controller.StopRecording();
 			controller.WaitIdle();
 		}
+		// The final state reaches the clients (up to 200 ms), then the socket
+		// goes; before the controller the API points to.
+		if (phone)
+			phone->Shutdown();
 	}
 
 	sensor->Stop();

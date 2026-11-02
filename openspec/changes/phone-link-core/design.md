@@ -17,7 +17,7 @@ See proposal.md (Why) and specs/phone-api/spec.md for the requirements. Facts fr
 - `FileRecordingStorage` computes free space with a statvfs lambda (`UINT64_MAX` = unknown). The `RecordingStorage` port has no free-space query.
 - Sensor identity: `ProfileFor(settings)` (`src/app/sensor_factory.h`) gives the profile:
   - the id: `unitree_l2`, `livox_mid360s`;
-  - `sensor_model`: `Unitree L2`, `Livox Mid-360S`.
+  - `sensor_model` (as in `timingNNNN.json`): `unitree_l2`, `livox_mid360s`.
 - `kRecordingFormatVersion` is in `src/domain/recording/recording_info.h:17`. The build has no version string.
 
 **Pi and BlueZ**

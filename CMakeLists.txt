@@ -103,7 +103,7 @@ set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_B
 target_link_libraries(dlidar_app PUBLIC dlidar_core)
 
 add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
-target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_bluetooth dlidar_storage dlidar_console)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_bluetooth dlidar_phone dlidar_storage dlidar_console)
 add_dependencies(dLidar dlidar_version)
 target_include_directories(dLidar PRIVATE ${PROJECT_BINARY_DIR}/generated)
 

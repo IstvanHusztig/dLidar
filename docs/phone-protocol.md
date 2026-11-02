@@ -46,7 +46,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 → {"v":1,"id":5,"cmd":"info.get"}
 → this is not JSON
 → {"v":1,"id":6,"cmd":"hello"}
-← {"id":5,"ok":true,"result":{"version":"0e1e413","sensor":"unitree_l2","sensor_model":"Unitree L2","recording_format":3,"protocol":1}}
+← {"id":5,"ok":true,"result":{"version":"0e1e413","sensor":"unitree_l2","sensor_model":"unitree_l2","recording_format":3,"protocol":1}}
 ← {"id":null,"ok":false,"error":{"code":"bad_request","message":"not valid JSON"}}
 ← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
@@ -114,13 +114,13 @@ The state is never older than a `state` event the client already received.
 |---|---|
 | `version` | the dLidar build (`git describe`) |
 | `sensor` | the configured sensor: `unitree_l2` or `livox_mid360s` |
-| `sensor_model` | its name, as in `timingNNNN.json`: `Unitree L2`, `Livox Mid-360S` |
+| `sensor_model` | the sensor model, as in `timingNNNN.json`: `unitree_l2`, `livox_mid360s` (today the same as `sensor`; a model name may differ from the sensor id later) |
 | `recording_format` | the recording format version (3) |
 | `protocol` | 1 |
 
 ```
 → {"v":1,"id":3,"cmd":"info.get"}
-← {"id":3,"ok":true,"result":{"version":"0e1e413-dirty","sensor":"livox_mid360s","sensor_model":"Livox Mid-360S","recording_format":3,"protocol":1}}
+← {"id":3,"ok":true,"result":{"version":"0e1e413-dirty","sensor":"livox_mid360s","sensor_model":"livox_mid360s","recording_format":3,"protocol":1}}
 ```
 
 ## Events

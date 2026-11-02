@@ -158,9 +158,9 @@ void TestResponses()
               r["summary"]["decision"] == s.decision,
           "summary");
 
-    j = Check(EncodeInfo(4, {"0e1e413", "livox_mid360s", "Livox Mid-360S", 3}), "info");
+    j = Check(EncodeInfo(4, {"0e1e413", "livox_mid360s", "livox_mid360s", 3}), "info");
     r = j["result"];
-    CHECK(r["version"] == "0e1e413" && r["sensor"] == "livox_mid360s" && r["sensor_model"] == "Livox Mid-360S" &&
+    CHECK(r["version"] == "0e1e413" && r["sensor"] == "livox_mid360s" && r["sensor_model"] == "livox_mid360s" &&
               r["recording_format"] == 3 && r["protocol"] == 1,
           "info fields");
 }
@@ -237,7 +237,7 @@ void TestTextAndLimits()
     CHECK(Json::parse(EncodeWarningEvent(1, 0, ws[0]))["data"]["text"].get<std::string>().size() <= 512,
           "warning text clipped");
     Check(EncodeError(kMaxId, kBadRequest, long_text), "long error");
-    Check(EncodeInfo(1, {long_text, "unitree_l2", "Unitree L2", 3}), "long version");
+    Check(EncodeInfo(1, {long_text, "unitree_l2", "unitree_l2", 3}), "long version");
 }
 // docs/phone-protocol.md: every example request decodes (or its error is
 // shown in the document, byte for byte), every example message from dLidar

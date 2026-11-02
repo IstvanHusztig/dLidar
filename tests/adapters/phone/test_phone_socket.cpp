@@ -195,7 +195,7 @@ struct Device
     explicit Device(const std::string &dir)
     {
         controller = std::make_unique<ScannerController>(sensor, storage, hub, Config());
-        api = std::make_unique<DeviceApi>(*controller, nullptr, DeviceInfo{"test", "unitree_l2", "Unitree L2", 3});
+        api = std::make_unique<DeviceApi>(*controller, nullptr, DeviceInfo{"test", "unitree_l2", "unitree_l2", 3});
         std::string why;
         link = PhoneLink::Start(*api, dir, why);
         CHECK(link != nullptr, "link: %s", why.c_str());
