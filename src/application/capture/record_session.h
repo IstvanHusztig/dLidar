@@ -93,6 +93,10 @@ namespace dlidar
                 {
                     Publish(DeviceState::Finalizing);
                     SensorChunk final_chunk = assembler_->Finish();
+                    // The last, partial chunk counts too: the final Idle or
+                    // Error state carries the recording's totals.
+                    status_.chunks = final_chunk.chunk_index;
+                    status_.points += final_chunk.points.size();
                     events_.OnSummary(Summary(assembler_->Timeline()));
                     Push(std::move(final_chunk));
                 }

@@ -112,7 +112,7 @@ Give the Pi an address in 192.168.1.0/24 on the Mid-360S's Ethernet link (defaul
    - `timingNNNN.json` shows `imu_time_source` `sensor`, the auto checks passed, and `imu_period_ns_l2` ≈ 2,000,000 (500 Hz), or ≈ 5,000,000 with a "did not confirm the IMU setting" warning (older firmware: note it here).
    - In `packetstateNNNN.tsv`, the stamp of packet k+1 minus that of packet k ≈ `time_interval_100ns · 100 · 96 / 95` ns (within ~1 µs): this confirms the per-point time formula.
    - `bin/replay_packets packetsNNNN.bin` shows no unexpected gaps.
-4. **Resources:** over a 5 min recording on a 1 GB Pi 5 (or the dev Pi 5 under `systemd-run --scope -p MemoryMax=900M`), record peak RSS (`/usr/bin/time -v`), CPU, and any backlog or "packet buffer grew" warnings here.
+4. **Resources:** over a 5 min recording on a 2 GB Pi 5 (or the dev Pi 5 under `systemd-run --scope -p MemoryMax=1900M`), record peak RSS (`/usr/bin/time -v`), CPU, and any backlog or "packet buffer grew" warnings here.
 
 | Measured | Value |
 |---|---|

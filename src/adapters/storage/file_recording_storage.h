@@ -3,6 +3,7 @@
 #include "adapters/storage/recording_writer.h"
 #include "adapters/storage/recovery.h"
 #include "application/ports/recording_storage.h"
+#include "application/ports/storage_space.h"
 
 #include <functional>
 #include <memory>
@@ -17,7 +18,7 @@ namespace dlidar
     // (its packetstate header: none means no packetstate files); `profiles`
     // lists every known sensor, so leftovers of any of them are finished as
     // the sensor that recorded them (it must contain `profile`).
-    class FileRecordingStorage : public RecordingStorage
+    class FileRecordingStorage : public RecordingStorage, public StorageSpace
     {
     public:
         FileRecordingStorage(std::string dir, const RecordingProfile &profile, std::vector<RecordingProfile> profiles)
@@ -35,6 +36,14 @@ namespace dlidar
                 return UINT64_MAX; // unknown: do not stop a recording for it
             return (uint64_t)st.f_bavail * st.f_frsize;
         };
+
+        std::optional<uint64_t> FreeBytes() const override
+        {
+            uint64_t free = free_bytes(dir_);
+            if (free == UINT64_MAX)
+                return std::nullopt;
+            return free;
+        }
 
         bool Open() override
         {

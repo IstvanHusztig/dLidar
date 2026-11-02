@@ -7,10 +7,10 @@ Defines the settings file that configures the scanning device: which LiDAR is us
 ## ADDED Requirements
 
 ### Requirement: Settings file location
-dLidar SHALL read its settings from `~/.config/dlidar/dlidar.toml`, or from the file given with `--config PATH`. The settings file SHALL never be placed in or read from the recording directory.
+dLidar SHALL read its settings from `dlidar.toml` in the project root, or from the file given with `--config PATH`. The settings file SHALL never be placed in or read from the recording directory.
 
 #### Scenario: Default location
-- **WHEN** dLidar starts without `--config` and `~/.config/dlidar/dlidar.toml` exists
+- **WHEN** dLidar starts without `--config` and `dlidar.toml` in the project root exists
 - **THEN** that file's settings are used
 
 #### Scenario: Explicit file

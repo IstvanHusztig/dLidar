@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <sstream>
+#include <unistd.h>
 #include <vector>
 
 namespace
@@ -224,6 +225,14 @@ const std::vector<Key> &Schema()
 		 [](const Value &v, S &s) {
 			 return OneOf(v, {2000, 1000, 500, 250, 125, 62.5, 31.25, 15.625}, true, s.livox_mid360s.imu_gyro_range_dps);
 		 }},
+		{"phone", "pairing_at_start",
+		 [](const Value &v, S &s) {
+			 std::string e = Expect(v, Value::Boolean);
+			 if (!e.empty())
+				 return e;
+			 s.phone.pairing_at_start = v.boolean;
+			 return std::string();
+		 }},
 		{"livox_mid360s", "drop_low_confidence",
 		 [](const Value &v, S &s) {
 			 std::string e = Expect(v, Value::Boolean);
@@ -376,8 +385,13 @@ DeviceSettings DefaultSettings()
 
 std::string DefaultSettingsPath()
 {
-	const char *home = getenv("HOME");
-	return std::string(home ? home : "") + "/.config/dlidar/dlidar.toml";
+	// The binary is <project>/bin/dLidar.
+	char exe[4096];
+	ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+	std::string dir = n > 0 ? std::string(exe, (size_t)n) : std::string();
+	for (int up = 0; up < 2; up++)
+		dir = dir.substr(0, dir.find_last_of('/') == std::string::npos ? 0 : dir.find_last_of('/'));
+	return dir + "/dlidar.toml";
 }
 
 bool ParseSettings(const std::string &text, const std::string &name, DeviceSettings &settings, std::string &error)
@@ -409,7 +423,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			for (const Key &k : Schema())
 				known = known || sec == k.section;
 			if (!known)
-				return fail("unknown section [" + sec + "]; known: [device], [unitree_l2], [livox_mid360s], [button], [led]");
+				return fail("unknown section [" + sec + "]; known: [device], [unitree_l2], [livox_mid360s], [button], [led], [phone]");
 			for (const std::string &done : seen_sections)
 				if (done == sec)
 					return fail("section [" + sec + "] appears twice");
@@ -427,7 +441,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			if (!IsBareKeyChar(c))
 				return fail(c == '.' ? "dotted keys are not supported" : "\"" + key + "\" is not a plain key");
 		if (section.empty())
-			return fail("key \"" + key + "\" is outside a section; put it under [device], [unitree_l2], [livox_mid360s], [button] or [led]");
+			return fail("key \"" + key + "\" is outside a section; put it under [device], [unitree_l2], [livox_mid360s], [button], [led] or [phone]");
 		const Key *known = nullptr;
 		for (const Key &k : Schema())
 			if (section == k.section && key == k.name)

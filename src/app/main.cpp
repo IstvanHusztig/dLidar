@@ -9,6 +9,7 @@
 // finish a leftover recording.
 //
 //   dLidar [--config PATH] [--once | --finalize] [--imu-time=auto|sensor|host]
+#include "adapters/bluetooth/pairing_window.h"
 #include "adapters/console/console_events.h"
 #include "adapters/gpio/button_input.h"
 #include "adapters/gpio/gpio_line.h"
@@ -90,6 +91,13 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	std::cerr << "settings: " << settings.source << " (sensor " << SensorKindName(settings.sensor) << ")" << std::endl;
+
+	// For testing until the pairing button is mounted ([phone]
+	// pairing_at_start): a phone can pair during the first 2 minutes. Opened
+	// first, so a later start-up problem does not hide it.
+	dlidar::bluetooth::PairingWindow pairing;
+	if (settings.phone.pairing_at_start && !finalize)
+		pairing.Open(120);
 
 	// Recordings go to numbered files in OutputDirectory(), described by the
 	// chosen sensor's profile (its diagnostics rows go to packetstateNNNN.tsv).

@@ -50,6 +50,32 @@ set_target_properties(dlidar_livox PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT
 target_include_directories(dlidar_livox PUBLIC ${LIVOX_SDK_DIR}/include)
 target_link_libraries(dlidar_livox PUBLIC dlidar_core PRIVATE livox_lidar_sdk_static)
 
+# Bluetooth adapter (src/adapters/bluetooth): the pairing window over BlueZ
+# D-Bus; the only code that sees GIO.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
+add_library(dlidar_bluetooth STATIC src/adapters/bluetooth/pairing_window.cpp)
+set_target_properties(dlidar_bluetooth PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_bluetooth PUBLIC dlidar_core PRIVATE PkgConfig::GIO)
+
+# nlohmann/json (submodule external/json, v3.11.3), headers only.
+add_library(nlohmann_json INTERFACE)
+target_include_directories(nlohmann_json SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/external/json/single_include)
+
+# Phone link adapter (src/adapters/phone, openspec phone-link-core): the
+# protocol, its GLib loop and transports. Only it sees nlohmann/json.
+add_library(dlidar_phone STATIC src/adapters/phone/protocol_codec.cpp src/adapters/phone/phone_server.cpp
+    src/adapters/phone/phone_loop.cpp src/adapters/phone/socket_transport.cpp src/adapters/phone/phone_link.cpp)
+set_target_properties(dlidar_phone PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_phone PUBLIC dlidar_core PRIVATE nlohmann_json PkgConfig::GIO)
+
+# build/generated/dlidar_version.h (git describe), refreshed on every build;
+# only src/app/main.cpp includes it.
+add_custom_target(dlidar_version
+    COMMAND ${CMAKE_COMMAND} -DSRC=${PROJECT_SOURCE_DIR} -DOUT=${PROJECT_BINARY_DIR}/generated/dlidar_version.h
+            -P ${PROJECT_SOURCE_DIR}/cmake/dlidar_version.cmake
+    BYPRODUCTS ${PROJECT_BINARY_DIR}/generated/dlidar_version.h)
+
 # GPIO adapter (src/adapters/gpio): push button and status LED on the Pi's
 # header; the only code that sees <linux/gpio.h>.
 add_library(dlidar_gpio STATIC src/adapters/gpio/gpio_line.cpp src/adapters/gpio/button_input.cpp
@@ -77,7 +103,9 @@ set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_B
 target_link_libraries(dlidar_app PUBLIC dlidar_core)
 
 add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
-target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_storage dlidar_console)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_bluetooth dlidar_storage dlidar_console)
+add_dependencies(dLidar dlidar_version)
+target_include_directories(dLidar PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
 # Tests (no sensor needed): ctest --test-dir build
 enable_testing()
@@ -121,7 +149,7 @@ set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${
 target_link_libraries(test_capture_timing dlidar_core)
 add_test(NAME capture_timing COMMAND test_capture_timing)
 
-foreach(t record_session device_control)
+foreach(t record_session device_control device_api)
 add_executable(test_${t} tests/application/test_${t}.cpp)
 set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_${t} dlidar_core)
@@ -158,6 +186,14 @@ target_link_libraries(test_${t} dlidar_gpio)
 add_test(NAME ${t} COMMAND test_${t})
 endforeach()
 
+foreach(t line_framer protocol_codec phone_server phone_socket)
+add_executable(test_${t} tests/adapters/phone/test_${t}.cpp)
+set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_${t} dlidar_phone nlohmann_json)
+add_test(NAME ${t} COMMAND test_${t})
+endforeach()
+target_compile_definitions(test_protocol_codec PRIVATE DLIDAR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
 # Domain unit tests (src/domain only, dlidar_core).
 foreach(t axis_map point_filter)
 add_executable(test_${t} tests/domain/test_${t}.cpp)
@@ -165,6 +201,15 @@ set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BI
 target_link_libraries(test_${t} dlidar_core)
 add_test(NAME ${t} COMMAND test_${t})
 endforeach()
+
+# Throwaway BLE spike (openspec/changes/phone-link-core, task 1); not part of
+# dLidar: cmake -DDLIDAR_BLE_SPIKE=ON.
+option(DLIDAR_BLE_SPIKE "Build the throwaway BLE spike tools/ble_spike" OFF)
+if(DLIDAR_BLE_SPIKE)
+pkg_check_modules(SPIKE_GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
+add_executable(ble_spike tools/ble_spike/ble_spike.cpp)
+target_link_libraries(ble_spike PkgConfig::SPIKE_GIO)
+endif()
 
 # Layer dependency rule (docs/architecture.md); --self-test checks the checker.
 find_package(Python3 COMPONENTS Interpreter)

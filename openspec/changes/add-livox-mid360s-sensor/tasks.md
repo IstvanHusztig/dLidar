@@ -141,7 +141,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - `timingNNNN.json` shows method `sensor` with the auto checks passed and `imu_period_ns` ≈ 5,000,000;
   - in `packetstateNNNN.tsv`, packet k+1's stamp minus packet k's equals `time_interval·100·dot_num/(dot_num−1)/dot_num`, to within 1 µs (this confirms the per-point time formula);
   - `bin/replay_packets packetsNNNN.bin` shows no unexpected gaps.
-- [ ] 8.4 Resources over a 5 min recording on a 1 GB Pi 5 (or the dev Pi 5 under `MemoryMax=900M`): no backlog warning; peak RSS and CPU recorded in `docs/livox_mid360s.md`.
+- [ ] 8.4 Resources over a 5 min recording on a 2 GB Pi 5 (or the dev Pi 5 under `MemoryMax=1900M`): no backlog warning; peak RSS and CPU recorded in `docs/livox_mid360s.md`.
 
 ## Workflow follow-up
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/capture/record_session.h"
+#include "application/ports/device_control.h"
 #include "application/ports/device_events.h"
 #include "application/ports/lidar_sensor.h"
 #include "application/ports/recording_storage.h"
@@ -30,7 +31,7 @@ namespace dlidar
     // whether a start is accepted: an accepted start is Preparing at once, and
     // the final Idle/Error is stored before it is sent to the channels, so a
     // channel may start the next recording from its OnState(Idle).
-    class ScannerController : private DeviceEvents
+    class ScannerController : public DeviceControl, private DeviceEvents
     {
     public:
         // `process_stop` (may be null) also stops a recording: the signal flag.
@@ -60,7 +61,7 @@ namespace dlidar
 
         // Starts a recording. False (and nothing changes) unless Idle or Error;
         // `state_out` gets the state the command saw.
-        bool StartRecording(DeviceState *state_out = nullptr)
+        bool StartRecording(DeviceState *state_out = nullptr) override
         {
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -80,9 +81,9 @@ namespace dlidar
         }
 
         // Ends the running recording normally (its files are finished). No-op when idle.
-        void StopRecording() { stop_ = true; }
+        void StopRecording() override { stop_ = true; }
 
-        DeviceStatus Status() const
+        DeviceStatus Status() const override
         {
             std::lock_guard<std::mutex> lock(mutex_);
             return status_;

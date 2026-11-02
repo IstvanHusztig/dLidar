@@ -1,0 +1,50 @@
+# dLidar settings. Every key is listed with its default value; the keys are
+# explained in docs/manual.html ("Settings"). A key left out keeps its default.
+
+[device]
+# The LiDAR in use: "unitree_l2" or "livox_mid360s".
+sensor = "unitree_l2"
+# How IMU samples are timed: "auto", "sensor" or "host".
+imu_time = "auto"
+
+[unitree_l2]
+lidar_ip = "192.168.0.62"
+lidar_port = 6101
+# The Pi's address on the L2's link.
+local_ip = "192.168.0.2"
+local_port = 6201
+work_mode = 0
+# The sensor axes that become the device's +X (front), +Y (left), +Z (up).
+mount = "+Z +Y -X"
+
+[livox_mid360s]
+# Empty: the first Mid-360S found on the network.
+lidar_ip = ""
+# The Pi's address on the Mid-360S's link.
+host_ip = "192.168.1.50"
+cmd_data_port = 56101
+push_msg_port = 56201
+point_data_port = 56301
+imu_data_port = 56401
+log_data_port = 56501
+mount = "+Z +Y -X"
+drop_low_confidence = false
+# 50, 100, 200 or 500 Hz.
+imu_rate_hz = 500
+# 4, 8, 16 or 32 g.
+imu_accel_range_g = 8
+# 2000, 1000, 500, 250, 125, 62.5, 31.25 or 15.625 deg/s.
+imu_gyro_range_dps = 2000
+
+[button]
+# The push button, to GND (header pin 11).
+gpio = 17
+
+[led]
+# The status LED, through 330 ohm to GND (header pin 13).
+gpio = 27
+
+[phone]
+# Testing until the pairing button is mounted: open the Bluetooth pairing
+# window for 2 minutes when dLidar starts.
+pairing_at_start = true

@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string>
 
-// The device settings file (~/.config/dlidar/dlidar.toml): which LiDAR is used,
+// The device settings file (dlidar.toml in the project, next to bin/): which LiDAR is used,
 // how it is reached and mounted, and the recording limits. A strict TOML
 // subset: [section], key = value (string, integer, decimal, true/false), #
 // comments. Unknown sections or keys and wrong values are errors with the
@@ -55,6 +55,12 @@ struct GpioSettings
 	int led_gpio = 0;    // through a resistor to GND, active high
 };
 
+// The phone link over Bluetooth LE (docs/manual.html, "Phone link").
+struct PhoneSettings
+{
+	bool pairing_at_start = false; // open the pairing window once at start (until the pairing button is mounted)
+};
+
 struct DeviceSettings
 {
 	SensorKind sensor = SensorKind::UnitreeL2;
@@ -62,6 +68,7 @@ struct DeviceSettings
 	UnitreeL2Settings unitree_l2;
 	LivoxMid360sSettings livox_mid360s;
 	GpioSettings gpio;
+	PhoneSettings phone;
 	std::string source; // the file read, or "built-in defaults"
 
 	// The chosen sensor's mount.
@@ -70,7 +77,7 @@ struct DeviceSettings
 
 DeviceSettings DefaultSettings();
 
-// ~/.config/dlidar/dlidar.toml
+// <project>/dlidar.toml, found from the binary's path (<project>/bin/dLidar).
 std::string DefaultSettingsPath();
 
 // Reads settings text over the defaults. False with "<name>:<line>: <problem>"

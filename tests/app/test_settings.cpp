@@ -107,6 +107,11 @@ void TestFullFile()
 			  g.gpio.led_gpio == 23,
 		  "other pins");
 
+	DeviceSettings p;
+	CHECK(!DefaultSettings().phone.pairing_at_start, "no pairing window by default");
+	CHECK(ParseError("[phone]\npairing_at_start = true\n", &p).empty() && p.phone.pairing_at_start, "[phone] pairing_at_start");
+	CHECK(ParseError("[phone]\npairing_at_start = 1\n", &p).find(":2:") != std::string::npos, "pairing_at_start needs true/false");
+
 	// Keys may be left out; they keep their defaults. Strings take escapes.
 	CHECK(ParseError("[livox_mid360s]\nlidar_ip = \"\"\n", &s).empty() && s.livox_mid360s.lidar_ip.empty(),
 		  "empty Livox IP means: the first one found");
@@ -215,7 +220,7 @@ void TestFiles()
 		  "file read: %s", error.c_str());
 	unlink(path);
 
-	CHECK(Has(DefaultSettingsPath(), "/.config/dlidar/dlidar.toml"), "%s", DefaultSettingsPath().c_str());
+	CHECK(Has(DefaultSettingsPath(), "/dlidar.toml"), "%s", DefaultSettingsPath().c_str());
 }
 } // namespace
 
