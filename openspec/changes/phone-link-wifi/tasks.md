@@ -48,7 +48,7 @@
   - passes the setup to `PhoneLink::Start`;
   - stops the adapter before the phone link at shutdown (no result after the link is gone).
 
-  `systemd/50-dlidar-network.rules` (`USER` placeholder, the two actions). The manual's install block gets the copy line, and "Running as a service" explains the rule. Verify:
+  `systemd/40-dlidar-network.rules` (`USER` placeholder, the two actions). The manual's install block gets the copy line, and "Running as a service" explains the rule. Verify:
   - full ctest;
   - `tools/golden_replay.sh` identical;
   - dLidar starts and stops cleanly with NetworkManager running;
@@ -58,10 +58,12 @@
 
 Driven from the app by the user, the journal captured to a file. Before each step, take the profile inventory (`nmcli -t -f NAME,TYPE,UUID con show` and the file names in `/etc/NetworkManager/system-connections/`); after each step, compare it and search the journal (dLidar and NetworkManager) for the marker password.
 
-- [ ] 5.1 Restart the service with the new build.
+- [x] 5.1 Restart the service with the new build.
   - Check that `tools/phone_client.py wifi.status` reports `connected`, `TP-Link_B8CB` and the board's IP, and that `hello` lists both commands.
   - Without the rule: `wifi.connect` from the app ends in `failed`, with the rule named, and the inventory is unchanged.
-- [ ] 5.2 Install the rule (sudo, with the user's go-ahead). First, as the service user and without changing any network:
+
+  **Done 2026-11-03:** service restarted 22:15 with 340cf5b; `hello` lists both commands, `wifi.status` gave connected, TP-Link_B8CB, 192.168.1.106. The no-rule join was run over the local socket instead of the app (the app could not scan yet): `failed` with the rule named, inventory unchanged, marker in no output.
+- [x] 5.2 Install the rule (sudo, with the user's go-ahead). First, as the service user and without changing any network:
   - add a `save no`, `autoconnect no` profile for a made-up SSID and never activate it;
   - run `nmcli connection modify uuid <U> connection.autoconnect yes`, and check that its file appears in `/etc/NetworkManager/system-connections/` (D3's open point);
   - delete it, and check that the inventory is unchanged.
@@ -73,21 +75,27 @@ Driven from the app by the user, the journal captured to a file. Before each ste
   - the marker is in no log.
 
   Record which outcome came, and after how long (design Open Questions).
-- [ ] 5.3 Send `TP-Link_B8CB` with a wrong marker password:
+
+  **Done 2026-11-03:** the first install as `50-` did not grant `settings.modify.system`: Debian's `49-polkit-pkla-compat.rules` (NetworkManager's `.pkla`, `sudo` group, not a local session) answered no first. Renamed to `40-dlidar-network.rules`; then both rights are yes. The probe confirmed D3: `save no` writes no file, the `modify` writes it, the delete leaves the inventory unchanged. The app cannot type an unseen SSID, so the made-up SSID went over the local socket: `not_found` after 28.5 s (not a timeout), back on TP-Link_B8CB, inventory unchanged, no marker in the journal.
+- [x] 5.3 Send `TP-Link_B8CB` with a wrong marker password:
   - the outcome is `wrong_password`;
   - the board is back on it, and the profile is unchanged (same UUID);
   - the marker is in no log.
 
   Record the device state reason (D5).
-- [ ] 5.4 Join the phone's hotspot (WPA3 if offered, else WPA2):
+
+  **Done 2026-11-03:** from the app: `wrong_password` after 17 s; the board back on TP-Link_B8CB with the same UUID; no marker in dLidar's journal (the NetworkManager journal is not readable for this user); the BLE link stayed up.
+- [x] 5.4 Join the phone's hotspot (WPA3 if offered, else WPA2):
   - the outcome is `connected`, with its IP;
   - a new profile is saved next to the old ones, and `lidar` and `LidarStation` are unchanged.
 
   Then send `TP-Link_B8CB` with its real password from the app: the board returns, one `TP-Link_B8CB` profile remains, and the hotspot profile is still saved. Record whether the BLE link survived each join (the app's log, the journal's Bluetooth lines).
 
+
+  **Done 2026-11-03:** no hotspot was available (one phone), so the success path was a join of TP-Link_B8CB with its real password from the app: `connected`, 192.168.1.106 after 8.6 s; exactly one TP-Link_B8CB profile left (new UUID, on disk, autoconnect yes; its old autoconnect priority 5 became the default 0, the documented loss of custom settings); LidarStation, preconfigured, lidar unchanged; BLE stayed up. WPA3 and a move to another network are untested.
 ## 6. Docs and integration
 
-- [ ] 6.1 Docs:
+- [x] 6.1 Docs:
   - `docs/manual.html`: Wi-Fi setup from the app, the outcomes, what is saved and restored, the rule, and that a same-SSID profile is replaced;
   - `docs/architecture.md`: the `WifiManager` port, `WifiSetup`, the networkmanager adapter, the target in the layer table; drop Wi-Fi from Deferred;
   - `README.md` and `CLAUDE.md`.

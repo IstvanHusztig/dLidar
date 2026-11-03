@@ -8,7 +8,7 @@ namespace dlidar::network
     {
         bool Contains(const std::string &s, const char *part) { return s.find(part) != std::string::npos; }
 
-        const char *const kPolkitHint = "dLidar may not change the network: install systemd/50-dlidar-network.rules";
+        const char *const kPolkitHint = "dLidar may not change the network: install systemd/40-dlidar-network.rules";
     }
 
     std::vector<std::string> AddArgs(const WifiNetwork &network, const std::string &uuid, const std::string &ifname)

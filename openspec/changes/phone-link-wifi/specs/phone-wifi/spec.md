@@ -129,7 +129,7 @@ Each `wifi.connect` SHALL print one console line naming the client kind, the net
 - **THEN** `journalctl -u dlidar` shows the request line and the `connected` line with the address
 
 ### Requirement: Missing permission is reported
-When the system refuses dLidar the right to add or activate a network connection, `wifi.connect` SHALL end in `failed`. The message SHALL name the missing polkit rule (`systemd/50-dlidar-network.rules`). Nothing SHALL change.
+When the system refuses dLidar the right to add or activate a network connection, `wifi.connect` SHALL end in `failed`. The message SHALL name the missing polkit rule (`systemd/40-dlidar-network.rules`). Nothing SHALL change.
 
 #### Scenario: Rule not installed
 - **WHEN** the service runs without the polkit rule and a client sends `wifi.connect`

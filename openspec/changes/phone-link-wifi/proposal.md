@@ -33,7 +33,7 @@ The roadmap fixed the shape of this phase (user decisions, 2026-11-02 and 2026-1
   - dLidar never changes any other network profile: not the sensor's Ethernet (`lidar`), not other Wi-Fi networks, not a hotspot profile.
 - **dLidar drives NetworkManager through `nmcli`**, as the roadmap planned. It does not use `nmcli device wifi connect`, which rescans: it adds the profile and activates it, so the Pi never scans.
 - **Passwords are never logged or echoed.** They appear in no console line, no journal line, no error message and no event. They do reach `nmcli`'s command line, which is acceptable because the scanner has one user (user, 2026-11-03).
-- **Permission:** a new polkit rule `systemd/50-dlidar-network.rules` lets the service user add and activate NetworkManager connections, the same pattern as the power-off rule. Without it, `wifi.connect` ends in `failed`, with a message that names the rule.
+- **Permission:** a new polkit rule `systemd/40-dlidar-network.rules` lets the service user add and activate NetworkManager connections, the same pattern as the power-off rule. Without it, `wifi.connect` ends in `failed`, with a message that names the rule.
 - **Logs:** each request and result is a console line, e.g. `phone: wifi.connect Home (wpa2-psk)` and `Wi-Fi: connected to Home, 192.168.1.50`. These lines carry the network name only, never the password.
 - **Docs:**
   - `docs/phone-protocol.md`: both commands, the result codes and the timeout;

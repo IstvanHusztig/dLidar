@@ -108,7 +108,7 @@ It never selects Ethernet profiles such as `lidar`, access point profiles, or ot
 | exit 3 (the `--wait` ran out) | `Timeout` |
 | exit 4, message names the reason "Secrets were required, but not provided" (`NO_SECRETS`, 7) or a supplicant disconnect (8) | `WrongPassword`: dLidar registers no secret agent, so a rejected key ends in one of these |
 | exit 4, "The Wi-Fi network could not be found" (`SSID_NOT_FOUND`, 53) | `NotFound` |
-| any step: "Not authorized" or "Insufficient privileges" | `Failed`, with "dLidar may not change the network: install systemd/50-dlidar-network.rules" |
+| any step: "Not authorized" or "Insufficient privileges" | `Failed`, with "dLidar may not change the network: install systemd/40-dlidar-network.rules" |
 | `nmcli` missing, "NetworkManager is not running", no `wlan0` | `Failed`, with that reason |
 | anything else | `Failed`, with `nmcli`'s first error line, which never contains the password |
 
@@ -143,10 +143,11 @@ The exact texts are pinned by the tests from the board's NetworkManager 1.42 (ta
 - `wifi.status` handler: `WifiSetup::Status()` encoded as `{"state","ssid","ip","last"}`.
 
 **D8. Permission: a polkit rule.**
-- `systemd/50-dlidar-network.rules` returns YES for the user `USER` on two actions:
+- `systemd/40-dlidar-network.rules` returns YES for the user `USER` on two actions:
   - `org.freedesktop.NetworkManager.settings.modify.system`: add, modify and delete profiles;
   - `org.freedesktop.NetworkManager.network-control`: activate and deactivate.
 
+  It is named `40-` so it runs before Debian's `49-polkit-pkla-compat.rules`: NetworkManager's `.pkla` answers `no` for `settings.modify.system` to the `sudo` group outside a local session, which ended the check before a `50-` rule (found on the board, 2026-11-03).
   It has the same install pattern as the power-off rule (replace `USER`, copy it to `/etc/polkit-1/rules.d/`), and the manual's install block gains the line.
 - Alternative: the `netdev` group. Rejected: Debian's NetworkManager defaults grant it to *active sessions*, which a service never has.
 
@@ -204,9 +205,12 @@ The exact texts are pinned by the tests from the board's NetworkManager 1.42 (ta
 
 1. Rebuild, install the polkit rule (manual, "Running as a service"), and restart the service. Without the rule, everything else works and `wifi.connect` reports `failed` with the hint.
 2. Send the app agent the draft protocol sections before they are frozen. The app shows the commands only when `hello` lists them.
-3. Rollback: the previous binary. The rule then grants permissions nobody uses; remove it with `sudo rm /etc/polkit-1/rules.d/50-dlidar-network.rules`. Saved profiles stay, as ordinary NetworkManager profiles.
+3. Rollback: the previous binary. The rule then grants permissions nobody uses; remove it with `sudo rm /etc/polkit-1/rules.d/40-dlidar-network.rules`. Saved profiles stay, as ordinary NetworkManager profiles.
 
-## Open Questions
+## Board results (2026-11-03)
 
-- Which reason and text the Pi's chip gives for a wrong WPA2 and a wrong WPA3 password (D5 table; measured in D10).
-- How long NetworkManager takes to give up on an SSID that is not in range on this board (`not_found` or `timeout`; measured in D10). It affects only how often each code appears.
+- Wrong WPA2 password: `wrong_password` after 17 s (the D5 text mapping held). Wrong WPA3: untested (no WPA3 network).
+- An SSID not in range: `not_found` after 28.5 s, well inside the limit.
+- Success (rejoining the same network with its password): 8.6 s; the replaced profile's autoconnect priority 5 became 0.
+- The BLE link survived every join; the app saw no drop.
+- The polkit rule had to be `40-` (see D8).

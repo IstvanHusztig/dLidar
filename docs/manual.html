@@ -223,7 +223,7 @@ mount = "+Z +Y -X"
 <pre><code>sudo usermod -aG gpio USER                    # the button and LED lines
 sudo cp systemd/dlidar.service /etc/systemd/system/
 sudo cp systemd/50-dlidar-poweroff.rules /etc/polkit-1/rules.d/   # long press may power down
-sudo cp systemd/50-dlidar-network.rules /etc/polkit-1/rules.d/    # the phone may set up Wi-Fi
+sudo cp systemd/40-dlidar-network.rules /etc/polkit-1/rules.d/    # the phone may set up Wi-Fi
 # Bluetooth LE only: the phone link needs no classic Bluetooth (one pairing
 # prompt fewer, no second name):
 sudo cp /etc/bluetooth/main.conf /etc/bluetooth/main.conf.before-dlidar
@@ -245,11 +245,11 @@ journalctl -fu dlidar                          # what it does, live</code></pre>
   </ul>
   <p><b>Wi-Fi setup from the phone.</b> The app scans for networks (the Pi never scans), you pick one and type its password, and the app sends the network name, the security type (<code>wpa2-psk</code>, also for WPA2/WPA3 networks; <code>wpa3-sae</code>; <code>open</code>) and the password (<code>wifi.connect</code>). dLidar has NetworkManager join it and reports the outcome within 60 s: joined, with the scanner's address on that network; wrong password; network not found; no answer in time; or failed with the reason. What happens to the networks:</p>
   <ul>
-    <li>A network is saved only once the scanner joined it, next to the networks it already knows; after a reboot it joins whichever saved network is in range. Sending a saved network again with a new password replaces its old entry, including one made by hand (its custom settings, such as a fixed address, are then lost).</li>
+    <li>A network is saved only once the scanner joined it, next to the networks it already knows; after a reboot it joins whichever saved network is in range. Sending a saved network again with a new password replaces its old entry, including one made by hand (its custom settings, such as a fixed address or an autoconnect priority, are then lost).</li>
     <li>After any failure nothing is saved, the saved networks are unchanged, and the scanner rejoins the network it was on. A wrong password never cuts off a scanner you reach over Wi-Fi; while it tries, it is off its network for up to a minute.</li>
     <li>The sensor's Ethernet connection (<code>lidar</code>), other Wi-Fi networks and a hotspot profile are never touched, so a join during a recording is allowed.</li>
     <li>The password appears in no log line and no message (it does reach <code>nmcli</code>'s command line, which is fine on a device with one user). The journal shows <code>phone: wifi.connect Home (wpa2-psk)</code> and <code>Wi-Fi: connected to Home, 192.168.1.50</code> or <code>Wi-Fi: Home: wrong password</code>.</li>
-    <li>It needs the network polkit rule from the installation; without it the join fails with a message naming <code>systemd/50-dlidar-network.rules</code>. <code>wifi.status</code> tells the app the current network and the outcome of the last join, also after the Bluetooth link dropped while the Pi changed networks (both share one radio).</li>
+    <li>It needs the network polkit rule from the installation; without it the join fails with a message naming <code>systemd/40-dlidar-network.rules</code>. <code>wifi.status</code> tells the app the current network and the outcome of the last join, also after the Bluetooth link dropped while the Pi changed networks (both share one radio).</li>
   </ul>
   <p>To try it on the Pi, <code>tools/phone_client.py</code> talks to the socket:</p>
 <pre><code>tools/phone_client.py status.get           # one request, one JSON line

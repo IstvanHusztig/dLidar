@@ -210,9 +210,9 @@ void TestHelpers()
               f.message == "Connection activation failed: IP configuration could not be reserved (no available address, timeout, etc.).",
           "other: %s", f.message.c_str());
     f = FailureFor(Fail(4, "Error: Failed to add 'Home' connection: Insufficient privileges\n"), "wlan0");
-    CHECK(f.message.find("systemd/50-dlidar-network.rules") != std::string::npos, "polkit hint: %s", f.message.c_str());
+    CHECK(f.message.find("systemd/40-dlidar-network.rules") != std::string::npos, "polkit hint: %s", f.message.c_str());
     f = FailureFor(Fail(4, "Error: Connection activation failed: Not authorized to control networking.\n"), "wlan0");
-    CHECK(f.message.find("50-dlidar-network.rules") != std::string::npos, "not authorized: %s", f.message.c_str());
+    CHECK(f.message.find("40-dlidar-network.rules") != std::string::npos, "not authorized: %s", f.message.c_str());
     CHECK(FailureFor(Fail(8, "Error: NetworkManager is not running.\n"), "wlan0").message == "NetworkManager is not running",
           "exit 8");
     CHECK(FailureFor(Fail(1, "Error: Could not create NMClient object: Could not connect: No such file or directory.\n"),
@@ -324,7 +324,7 @@ void TestNothingStarted()
     Rig p;
     p.runner->add = Fail(4, "Error: Failed to add 'Home' connection: Insufficient privileges\n");
     WifiResult res = p.Join(WifiNetwork{"Home", WifiSecurity::Wpa2Psk, kMarker});
-    CHECK(res.outcome == WifiOutcome::Failed && res.message.find("50-dlidar-network.rules") != std::string::npos,
+    CHECK(res.outcome == WifiOutcome::Failed && res.message.find("40-dlidar-network.rules") != std::string::npos,
           "permission: %s", res.message.c_str());
     auto calls = p.runner->Calls();
     CHECK(Find(calls, {"nmcli", "--wait"}).empty() && Find(calls, {"nmcli", "connection", "delete"}).empty(),
