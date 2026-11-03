@@ -65,7 +65,8 @@ target_include_directories(nlohmann_json SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/
 # Phone link adapter (src/adapters/phone, openspec phone-link-core): the
 # protocol, its GLib loop and transports. Only it sees nlohmann/json.
 add_library(dlidar_phone STATIC src/adapters/phone/protocol_codec.cpp src/adapters/phone/phone_server.cpp
-    src/adapters/phone/phone_loop.cpp src/adapters/phone/socket_transport.cpp src/adapters/phone/phone_link.cpp)
+    src/adapters/phone/phone_loop.cpp src/adapters/phone/socket_transport.cpp src/adapters/phone/phone_link.cpp
+    src/adapters/phone/ble_link.cpp)
 set_target_properties(dlidar_phone PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_phone PUBLIC dlidar_core PRIVATE nlohmann_json PkgConfig::GIO)
 
@@ -186,7 +187,7 @@ target_link_libraries(test_${t} dlidar_gpio)
 add_test(NAME ${t} COMMAND test_${t})
 endforeach()
 
-foreach(t line_framer protocol_codec phone_server phone_socket)
+foreach(t line_framer protocol_codec phone_server phone_socket ble_link)
 add_executable(test_${t} tests/adapters/phone/test_${t}.cpp)
 set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_${t} dlidar_phone nlohmann_json)

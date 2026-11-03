@@ -29,6 +29,9 @@ const int kLedGpio = 27;
 
 // [phone] pairing_at_start: no pairing window at start unless the settings ask.
 const bool kPairingAtStart = false;
+// [phone] ble, name: the phone link over Bluetooth LE, advertised as this name.
+const bool kBleEnabled = true;
+const char *const kBleName = "dLidar";
 
 // The Livox Mid-360S: mounted in the same orientation as the L2 (to be
 // confirmed at bring-up, docs/livox_mid360s.md). The host's address and

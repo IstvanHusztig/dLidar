@@ -7,7 +7,7 @@
 //
 //   --acquire  TX notifications through AcquireNotify (a socket per
 //              subscription) instead of PropertiesChanged on Value
-//   --secure   RX needs an encrypted link (encrypt-write); registers a
+//   --secure   RX and TX need an encrypted link (encrypt-write, encrypt-notify); registers a
 //              NoInputNoOutput agent that accepts every pairing (Just Works)
 //
 // Write a line ending in "\n" to RX; it comes back as "echo <line>\n" on TX.
@@ -161,7 +161,7 @@ namespace
         {
             g_variant_builder_add(&b, "{sv}", "UUID", g_variant_new_string(kTxUuid));
             g_variant_builder_add(&b, "{sv}", "Service", g_variant_new_object_path(kServicePath));
-            g_variant_builder_add(&b, "{sv}", "Flags", Strv({"notify"}));
+            g_variant_builder_add(&b, "{sv}", "Flags", g.secure ? Strv({"notify", "encrypt-notify"}) : Strv({"notify"}));
             g_variant_builder_add(&b, "{sv}", "Value", Bytes(g.tx_value));
             g_variant_builder_add(&b, "{sv}", "Notifying", g_variant_new_boolean(g.notifying));
             // BlueZ uses AcquireNotify when this property exists.

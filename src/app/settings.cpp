@@ -225,6 +225,27 @@ const std::vector<Key> &Schema()
 		 [](const Value &v, S &s) {
 			 return OneOf(v, {2000, 1000, 500, 250, 125, 62.5, 31.25, 15.625}, true, s.livox_mid360s.imu_gyro_range_dps);
 		 }},
+		{"phone", "ble",
+		 [](const Value &v, S &s) {
+			 std::string e = Expect(v, Value::Boolean);
+			 if (!e.empty())
+				 return e;
+			 s.phone.ble = v.boolean;
+			 return std::string();
+		 }},
+		{"phone", "name",
+		 [](const Value &v, S &s) {
+			 std::string e = Expect(v, Value::String);
+			 if (!e.empty())
+				 return e;
+			 if (v.text.empty() || v.text.size() > 20)
+				 return std::string("must be 1 to 20 characters");
+			 for (unsigned char c : v.text)
+				 if (c < 0x20 || c > 0x7e)
+					 return std::string("must be printable ASCII characters only");
+			 s.phone.name = v.text;
+			 return std::string();
+		 }},
 		{"phone", "pairing_at_start",
 		 [](const Value &v, S &s) {
 			 std::string e = Expect(v, Value::Boolean);
@@ -377,6 +398,8 @@ DeviceSettings DefaultSettings()
 	s.gpio.button_gpio = kButtonGpio;
 	s.gpio.led_gpio = kLedGpio;
 	s.phone.pairing_at_start = kPairingAtStart;
+	s.phone.ble = kBleEnabled;
+	s.phone.name = kBleName;
 	s.livox_mid360s.imu_rate_hz = kLivoxImuRateHz;
 	s.livox_mid360s.imu_accel_range_g = kLivoxImuAccelRangeG;
 	s.livox_mid360s.imu_gyro_range_dps = kLivoxImuGyroRangeDps;

@@ -150,6 +150,8 @@
     <tr><td><code>imu_accel_range_g</code></td><td><code>8</code></td><td>Accelerometer full scale: 4, 8, 16 or 32 g.</td></tr>
     <tr><td><code>imu_gyro_range_dps</code></td><td><code>2000</code></td><td>Gyroscope full scale: 2000, 1000, 500, 250, 125, 62.5, 31.25 or 15.625 °/s.</td></tr>
     <tr><td colspan="3"><b><code>[phone]</code></b></td></tr>
+    <tr><td><code>ble</code></td><td><code>true</code></td><td>Serve the phone link over Bluetooth LE: dLidar advertises while it runs and no phone is connected, and a bonded phone can connect (see <a href="#phone">Phone link</a>). <code>false</code>: the local socket only.</td></tr>
+    <tr><td><code>name</code></td><td><code>"dLidar"</code></td><td>The name a phone shows for the scanner, 1 to 20 printable ASCII characters. The app finds the scanner by its service UUID, not by this name.</td></tr>
     <tr><td><code>pairing_at_start</code></td><td><code>false</code></td><td>For testing until the pairing button is mounted: <code>true</code> opens the Bluetooth pairing window for 2 minutes when dLidar starts. A phone that pairs in that time (Just Works, no PIN) is bonded; afterwards the Pi accepts no new pairings.</td></tr>
   </table></div>
   <p>An example that switches to the Mid-360S:</p>
