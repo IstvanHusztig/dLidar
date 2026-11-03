@@ -41,7 +41,7 @@ Answers to `protocol-open-questions.md`. **Binding** means it is in the spec (`s
 
 ## Connection
 
-26. **One central at a time.** dLidar stops advertising while a phone is connected, so a second phone normally does not find it. If one connects anyway (by a cached address), it gets `too_many_clients` with `"id":null` on its first write and is disconnected. Not retrying on its own is right. *Provisional until spike measurement 3.*
+26. **Over the socket:** a fifth client gets `too_many_clients` (`"id":null`) and is closed. **Over BLE (corrected in `phone-link-ble`, 2026-11-03):** one phone at a time; advertising stops while it is connected, and a second phone that connects anyway is **disconnected without a message**. In BlueZ's notification mode a `too_many_clients` notification would also reach the first phone. *Binding.*
 27. **No idle timeout, and no keep-alive needed.** Link loss is detected by BLE's supervision timeout. *Binding.*
 28. **Match on the service UUID, not the name.** The advertisement carries the service UUID and the name `dLidar`. Phase 2 adds a short device id to tell several scanners apart (exact form to come). The name may then move to the scan response, so filter by UUID. *Provisional.*
 29. **Public and stable.** The dev scanner's controller address is public (`2C:CF:67:8A:FC:1B`) and does not change across reboots. Phase 3 may turn on BLE privacy for bonded phones; Android resolves that through the bond, so reconnect through the bonded device. *Provisional.*

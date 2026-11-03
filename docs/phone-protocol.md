@@ -174,16 +174,17 @@ tools/phone_client.py status.get
 tools/phone_client.py --follow            # print events
 ```
 
-**Bluetooth LE (next, `phone-link-ble`).** Advertised with the 128-bit service UUID in the advertisement packet itself (the name `dLidar` may move to the scan response); match the scanner by UUID.
+**Bluetooth LE.** dLidar advertises while it runs and no phone is connected (`[phone] ble`, on by default). The 128-bit service UUID is in the advertisement data; the name (`[phone] name`, default `dLidar`) is in the scan response. **Match the scanner by the UUID.** Once bonded, the phone shows the same name: dLidar gives the Pi's Bluetooth adapter that name too.
 
 | | UUID | |
 |---|---|---|
 | Service | `b06b0001-1294-4457-85c4-ef6a46d0c127` | |
-| RX | `b06b0002-1294-4457-85c4-ef6a46d0c127` | the client writes here (write; write-without-response is handled the same) |
-| TX | `b06b0003-1294-4457-85c4-ef6a46d0c127` | dLidar notifies here |
+| RX | `b06b0002-1294-4457-85c4-ef6a46d0c127` | the client writes here (write; write-without-response is handled the same); encrypted link only |
+| TX | `b06b0003-1294-4457-85c4-ef6a46d0c127` | dLidar notifies here; encrypted link only |
 
-- One phone at a time: advertising stops while one is connected, and a second gets `too_many_clients`.
-- Turn on TX notifications before the first write.
-- dLidar splits each message into notifications of at most MTU−3 bytes of this connection, and a message always starts in a fresh notification. The client splits its writes the same way. dLidar sets no MTU limit of its own (Android 14+ asks for 517).
-- **Every request needs the bond:** RX requires an encrypted link, so an unbonded phone gets an ATT "insufficient encryption" error on its first write and Android starts pairing (Just Works). Pairing only succeeds while the scanner's pairing window is open (the pairing button; until it is mounted, `[phone] pairing_at_start` in `dlidar.toml` opens it for 2 minutes when dLidar starts).
-- There is no idle timeout and no keep-alive; BLE's supervision timeout detects a lost link. Reconnect through the bond.
+- **Every request and every event needs the bond.** RX and TX both require an encrypted link. An unbonded phone gets an ATT security error, and Android shows its pairing prompt by itself (already when subscribing to TX). Pairing (Just Works, no PIN) only succeeds while the scanner's pairing window is open: the pairing button, and until it is mounted `[phone] pairing_at_start = true` in `dlidar.toml`, which opens it for 2 minutes when dLidar starts. A phone that was unpaired on the phone can pair again inside the window.
+- **One phone at a time.** Advertising stops while a phone is connected and resumes within 0.5 s after it leaves. A second phone that connects anyway (by a cached address) is disconnected. Over BLE it does **not** get `too_many_clients`: a notification would also reach the first phone.
+- **Subscribe first.** Turn on TX notifications before the first write. A connection opens when notifications go on, and `seq` counts from 1 on every new connection. A write while notifications are off is rejected (ATT error). A connected phone that has not turned on notifications within 30 s is disconnected, so a leftover link never hides the scanner.
+- **Pieces.** dLidar splits each message into notifications of at most MTU−3 bytes of this connection, and a message always starts in a fresh notification. Until the phone's first write reports the MTU, dLidar assumes 23. It sets no MTU limit of its own (Android 14+ asks for 517). The client splits its writes the same way; long writes (an offset) are rejected.
+- **Pace.** dLidar sends at most 24 KiB/s (measured: 54 KiB/s over the air at MTU 517, no loss). A phone that does not take its notifications gets no events until it does (its latest state and progress kept, the rest counted in `dropped`), and is disconnected past 64 KiB of unsent bytes.
+- There is no idle timeout once subscribed and no keep-alive; BLE's supervision timeout detects a lost link. Reconnect through the bond. When bluetoothd restarts, dLidar registers again at once.

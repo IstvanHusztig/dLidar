@@ -26,7 +26,7 @@ Dependencies point inward only: `app` → `adapters` → `application` → `doma
 Enforcement:
 - **Build:** the CMake targets give each layer only what it needs.
   - `dlidar_core` (domain + application) has only `src/` on its include path and links nothing.
-  - `dlidar_l2` adds the Unitree SDK, `dlidar_livox` adds Livox-SDK2 (submodule `external/Livox-SDK2`, its static library linked privately), `dlidar_storage` adds LASzip and `3rd/`, `dlidar_console` adds nothing.
+  - `dlidar_l2` adds the Unitree SDK, `dlidar_livox` adds Livox-SDK2 (submodule `external/Livox-SDK2`, its static library linked privately), `dlidar_storage` adds LASzip and `3rd/`, `dlidar_phone` adds nlohmann/json (`external/json`) and GLib/GIO, privately, `dlidar_gpio` and `dlidar_console` add nothing.
   - The core and its tests therefore build without the SDK or LASzip.
 - **Includes:** `tools/check_architecture.py --strict` (ctest `architecture`) checks every `#include` under `src/` against the table above.
 
@@ -77,16 +77,17 @@ Enforcement:
 - `gpio/`: the push button and the status LED on the Pi's header (`docs/manual.html`, "Wiring and pinout"). `GpioLine` is the only code that sees `<linux/gpio.h>` (kernel GPIO uAPI v2, no library).
   - `ButtonInput` (input channel): its own thread, `PressDetector` (pure: debounce, short and long press), callbacks.
   - `StatusLed` (output channel, `hub.AddAsync`): its own 50 ms thread, `LedOn` (pure: on while a recording starts and runs, 2 Hz while saving, three flashes after a failure).
-- `phone/` (CMake `dlidar_phone`): the phone link, protocol v1 (`docs/phone-protocol.md`). The only code that sees nlohmann/json (`protocol_codec.cpp`); GLib only here and in `bluetooth/`.
+- `phone/` (CMake `dlidar_phone`): the phone link, protocol v1 (`docs/phone-protocol.md`), over the local socket and Bluetooth LE. The only code that sees nlohmann/json (`protocol_codec.cpp`) and GLib/GIO.
   - `PhoneEvents` (output channel, `hub.AddAsync`) writes into a `Mailbox` (bounded, progress coalesced, the latest state never dropped) and wakes the loop.
   - `PhoneLoop`: the link's own thread with a private `GMainContext`; every transport and the server run on it.
   - `PhoneServer`: framing (`LineFramer`), the command table over `DeviceApi`, per-connection `seq` and `dropped`, progress at most 1 Hz; `status.get` answers from the events the loop has seen, so it is never older than an event already sent.
-  - `SocketTransport` (a `Connection` per client): the local Unix socket `dlidar.sock` (`$RUNTIME_DIRECTORY`, else `$XDG_RUNTIME_DIR`), mode 0600, at most 4 clients, 64 KiB unsent bytes per client before it is closed. The BLE transport comes next (`phone-link-ble`).
-  - `PhoneLink`: what `main.cpp` starts and shuts down.
-- `bluetooth/`: `PairingWindow` (BlueZ over D-Bus): pairable for a while with a Just Works agent; opened at start by `[phone] pairing_at_start` until the pairing button is mounted.
+  - `SocketTransport` (a `Connection` per client): the local Unix socket `dlidar.sock` (`$RUNTIME_DIRECTORY`, else `$XDG_RUNTIME_DIR`), mode 0600, at most 4 clients, 64 KiB unsent bytes per client before it is closed.
+  - `BleLink` (pure, unit-tested with fakes): the BLE transport's logic. One phone at a time, its `Connection` (open while TX notifications are on), MTU−3 pieces with the MTU from the phone's writes, a token bucket at 24 KiB/s, the 64 KiB cap, advertising off while a phone is connected, an idle phone disconnected after 30 s.
+  - `BluezPeripheral` (BlueZ over D-Bus, asynchronous calls only): the GATT application (RX `encrypt-write`, TX `notify` + `encrypt-notify`), the advertisement, the adapter's name, the pairing window (Just Works agent, 120 s), and the `Pairable` guard (never pairable outside the window). It follows bluetoothd and the adapter and recovers on its own; problems only warn.
+  - `PhoneLink`: what `main.cpp` starts and shuts down. BLE starts next to the socket, never when another dLidar answers on the socket.
 
 **App (`src/app/`)**
-- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters (also the phone link and the pairing window). Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
+- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters (also the phone link with its `[phone]` settings). Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
 - `button_commands.h`: what a short and a long press do (start/stop by state; save, then `PowerOff()` from `power.cpp`).
 - `settings.h/.cpp`: the settings file `dlidar.toml` in the project root (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the button and LED pins, the Mid-360S IMU setting, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
 - `device_config.h`: the settings' built-in defaults (the sensors' endpoints, work mode and mount, the button and LED pins, the Mid-360S IMU setting).
@@ -170,5 +171,5 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 - `PointRecord` and the LAZ extra bytes keep the L2's layout (such as `raw_range` as uint16 mm); since format 3 each sensor defines what they mean (`RecordingProfile`, the Mid-360S puts distance and azimuth/elevation there). A sensor with other per-point data needs a new format.
 - The Mid-360S's lens/window status (HMS code 0x0104) is not read: the port's `LensDirtiness()` is a percentage, the Mid-360S gives a warning level.
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
-- The phone link's BLE transport (`phone-link-ble`), its commands that change the device (start/stop, phase 3) and Wi-Fi setup (phase 4). Today it serves protocol v1 (read-only) over the local socket.
+- The phone link's commands that change the device (start/stop, the pairing button, a bond allow-list and "forget phone", phase 3) and Wi-Fi setup (phase 4). Today it serves protocol v1 (read-only) over the local socket and Bluetooth LE.
 - The signal stop flag stays set once raised, so it ends every later recording too. Right for both modes: a signal ends the service.

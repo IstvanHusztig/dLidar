@@ -166,6 +166,7 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 - `systemd/dlidar.service` gets `Wants=bluetooth.service`, `After=bluetooth.service network-online.target` and `SupplementaryGroups=gpio bluetooth`. The group covers images whose BlueZ policy is upstream's.
 - `RuntimeDirectory=dlidar` gives `/run/dlidar/dlidar.sock`.
 - Installed on the dev board as `vs2022` from `/home/vs2022/dLidar`, then enabled. `ble-spike` is stopped and `tools/ble_spike` deleted only after the user confirms.
+- **`JustWorksRepairing = confirm`** in `/etc/bluetooth/main.conf` (`[General]`), part of the installation (user decision 2026-11-03). Found in task 5.1: after the user unpaired on the phone, the Pi kept its bond, and BlueZ's default `never` refused every new pairing from that phone, so the app cycled through connect, prompt, disconnect. With `confirm` a known phone may pair again, but BlueZ asks the agent: dLidar's agent exists and says yes only inside the pairing window, and outside it the adapter is not pairable anyway (D8). The "forget phone" action of phase 3 is still needed for a lost phone.
 
 **D15. Tests.**
 - `tests/adapters/phone/test_ble_link.cpp` (pure, fake peripheral and clock, the real `PhoneServer` where useful):
@@ -216,6 +217,17 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 - Start-up to "Ready" with bluetoothd stopped: 1015/1023 ms with BLE versus 1013/1008 ms without. Note: D-Bus activation restarts a stopped bluetoothd within 40 ms on this image.
 - SIGTERM: the advertisement is unregistered (`ActiveInstances` 0) and the socket file removed.
 - No classic link can stand in for the phone: the adapter is not `connectable` over BR/EDR (`btmgmt info`), so a bonded phone reaches the Pi over LE only.
+
+**Group 5 with the Galaxy S25 Ultra and the app (2026-11-03):**
+- The app finds `dLidar` by UUID and connects. `hello`, `status.get` and `info.get` are answered (version 3fc69f1, sensor, free space).
+- Pairing inside the window: Android's prompt, Just Works, bonded both sides, `Bluetooth: paired with Galaxy S25 Ultra`. A pairing with the Pi's bond left over from an earlier pairing was refused (BlueZ `JustWorksRepairing = never`); hence D14.
+- Advertising stopped while the phone was connected and was back 0.5 s after it left (recorder, 0.5 s samples).
+- `systemctl restart bluetooth` while the app was connected: dLidar advertised again at once; the app reconnected by itself after 22 s (its retry interval) and showed the same status.
+- `bin/dLidar --once` without a sensor: the app showed preparing, the warning "ERROR: the sensor did not start." and the state error.
+- The console output of `--once` with `ble = true` equals that with `ble = false` (apart from the settings line naming the file).
+- Found and fixed: the leftover link (idle rule, D5), the 10 s idle limit cutting off the pairing prompt (now 30 s), `Busy` on the pairing window's `Pairable` (retried), the bonded phone showing the hostname `lsh` (adapter `Alias`, D9).
+- App issues reported to its agent: "Disconnect" does not close the GATT link and rescans at once.
+- Not exercised separately: walking out of range (the bluetoothd restart covers the same link loss and recovery).
 
 ## Risks / Trade-offs
 

@@ -50,7 +50,7 @@
 
 ## 5. On the dev board with the phone (spec scenarios)
 
-- [ ] 5.1 Run `bin/dLidar` by hand (button not pressed; L2 absent) with `ble = true`. Check with the Galaxy S25 Ultra and the app, and `btmon` where noted:
+- [x] 5.1 Run `bin/dLidar` by hand (button not pressed; L2 absent) with `ble = true`. Check with the Galaxy S25 Ultra and the app, and `btmon` where noted:
   - discovered by the UUID filter, the advertisement contents (btmon);
   - the bonded phone connects, `hello`/`status.get`/`info.get` are answered, and the phone's MTU appears in the debug log;
   - advertising stops while connected and resumes within 2 s after the disconnect;
@@ -61,11 +61,11 @@
   - `busctl set-property … Pairable b true` from outside, with the window closed, is switched back to false with the warning.
 
   Write a short protocol of the results into design.md ("Measurements").
-- [ ] 5.2 `bin/dLidar --once` without a sensor (the only recording flow on the dev board until the Mid-360S arrives), with the phone following events: the `preparing` state, the `sensor_failed` warning and the `error` state arrive on the phone. Move the phone out of range and back during `--once`, and check that `status.get` after the reconnect is correct. Verify that the console output equals a run with `ble = false`.
+- [x] 5.2 `bin/dLidar --once` without a sensor (the only recording flow on the dev board until the Mid-360S arrives), with the phone following events: the `preparing` state, the `sensor_failed` warning and the `error` state arrive on the phone. Move the phone out of range and back during `--once`, and check that `status.get` after the reconnect is correct. Verify that the console output equals a run with `ble = false`.
 
 ## 6. Docs, service, cleanup, integration
 
-- [ ] 6.1 Docs:
+- [x] 6.1 Docs:
   - `docs/phone-protocol.md`, the BLE section: second phone disconnected (no `too_many_clients` over BLE), TX encrypted too, MTU 23 until the first write, the pacing rate;
   - `openspec/changes/phone-link-core/app-questions.md`, Q26 corrected;
   - `docs/manual.html` ("Phone link": BLE on by default, the name, how to find and pair, what a crash inside the pairing window leaves; the settings table);
@@ -73,6 +73,6 @@
   - `CLAUDE.md` (the phone bullet).
 
   Send the app agent the BLE changes (Q26, encrypted TX, MTU before the first write). Verify that the manual and architecture.md agree.
-- [ ] 6.2 Install `systemd/dlidar.service` on the dev board (USER `vs2022`, REPO `/home/vs2022/dLidar`) and the polkit rule, then `systemctl enable --now dlidar`. Reboot, and check that the phone finds `dLidar` without anyone logging in, and that `/run/dlidar/dlidar.sock` answers `tools/phone_client.py status.get`. Verify with `systemctl is-enabled dlidar` and the phone.
+- [ ] 6.2 Install `systemd/dlidar.service` on the dev board (USER `vs2022`, REPO `/home/vs2022/dLidar`) and the polkit rule, set `JustWorksRepairing = confirm` in `/etc/bluetooth/main.conf` (D14) and restart `bluetooth`, then `systemctl enable --now dlidar`. Check that a phone unpaired on its side pairs again inside the window without removing the bond on the Pi, and is refused outside it. Reboot, and check that the phone finds `dLidar` without anyone logging in, and that `/run/dlidar/dlidar.sock` answers `tools/phone_client.py status.get`. Verify with `systemctl is-enabled dlidar` and the phone.
 - [ ] 6.3 Only after the user confirms: stop and disable the `ble-spike` unit if it exists, delete `tools/ble_spike/` and the `DLIDAR_BLE_SPIKE` option. Update `phone-link-core` design D1 ("deleted"). Verify that a clean configure and build pass.
 - [ ] 6.4 Run the full ctest suite, `tools/golden_replay.sh` (identical), and the `--once` console comparison with the previous build. Run the architecture-reviewer agent on the branch. Verify that everything passes and that the reviewer approves the tip before the push.
