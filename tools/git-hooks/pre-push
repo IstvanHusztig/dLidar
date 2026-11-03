@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Refuses to push a commit the architecture-reviewer agent has not approved (review_gate.sh).
+set -euo pipefail
+zero=0000000000000000000000000000000000000000
+revs=()
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    [ "$local_sha" = "$zero" ] || revs+=("$local_sha")
+done
+[ ${#revs[@]} -eq 0 ] || exec "$(dirname "$0")/review_gate.sh" check "${revs[@]}"
