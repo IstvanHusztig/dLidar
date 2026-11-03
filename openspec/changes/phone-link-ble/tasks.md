@@ -36,7 +36,7 @@
 
 ## 4. BlueZ glue, pairing window, wiring (D1, D8–D12)
 
-- [ ] 4.1 `src/adapters/phone/bluez_peripheral.{h,cpp}`, asynchronous D-Bus only, on the phone loop:
+- [x] 4.1 `src/adapters/phone/bluez_peripheral.{h,cpp}`, asynchronous D-Bus only, on the phone loop:
   - the system bus via `g_bus_get` from the loop thread;
   - the `org.bluez` name watch, finding the adapter, `InterfacesAdded`;
   - the GATT application objects and `RegisterApplication`, with the flags of D8;
@@ -45,8 +45,8 @@
   - Device1 `Connected` and `Paired` signals into `BleLink`; `WriteValue`, `StartNotify` and `StopNotify` into `BleLink` with the D-Bus error names of D5/D7;
   - TX `Value` `PropertiesChanged` for `Notify`; `Device1.Disconnect`;
   - one warning per cause, and one line on recovery.
-- [ ] 4.2 Move the pairing window into `bluez_peripheral` (D10): asynchronous, the agent registered only while it is open, the order unregister → `Pairable` false, the remaining time when BlueZ appears late, the same console messages. Delete `src/adapters/bluetooth/` and the `dlidar_bluetooth` target. Verify that `main.cpp` no longer waits on any Bluetooth call (start-up time with `bluetooth.service` stopped equals the time with BLE off, within 0.2 s).
-- [ ] 4.3 `PhoneLink::Start(api, socket_dir, ble)` with the BLE options and the start-up rules of D12, the shutdown order, and `OpenPairingWindow`. `src/app/main.cpp` passes `settings.phone` (ble, name, pairing_at_start). With `ble = false` and `pairing_at_start = true`, a warning and no window. Verify that ctest `phone_socket` (BLE off) still passes with no thread left behind, and that `tools/check_architecture.py --strict src` passes.
+- [x] 4.2 Move the pairing window into `bluez_peripheral` (D10): asynchronous, the agent registered only while it is open, the order unregister → `Pairable` false, the remaining time when BlueZ appears late, the same console messages. Delete `src/adapters/bluetooth/` and the `dlidar_bluetooth` target. Verify that `main.cpp` no longer waits on any Bluetooth call (start-up time with `bluetooth.service` stopped equals the time with BLE off, within 0.2 s).
+- [x] 4.3 `PhoneLink::Start(api, socket_dir, ble)` with the BLE options and the start-up rules of D12, the shutdown order, and `OpenPairingWindow`. `src/app/main.cpp` passes `settings.phone` (ble, name, pairing_at_start). With `ble = false` and `pairing_at_start = true`, a warning and no window. Verify that ctest `phone_socket` (BLE off) still passes with no thread left behind, and that `tools/check_architecture.py --strict src` passes.
 
 ## 5. On the dev board with the phone (spec scenarios)
 

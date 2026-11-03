@@ -50,23 +50,20 @@ set_target_properties(dlidar_livox PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT
 target_include_directories(dlidar_livox PUBLIC ${LIVOX_SDK_DIR}/include)
 target_link_libraries(dlidar_livox PUBLIC dlidar_core PRIVATE livox_lidar_sdk_static)
 
-# Bluetooth adapter (src/adapters/bluetooth): the pairing window over BlueZ
-# D-Bus. GIO/GLib only here and in dlidar_phone.
+# GIO/GLib for the phone adapter (D-Bus to BlueZ, its loop).
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
-add_library(dlidar_bluetooth STATIC src/adapters/bluetooth/pairing_window.cpp)
-set_target_properties(dlidar_bluetooth PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
-target_link_libraries(dlidar_bluetooth PUBLIC dlidar_core PRIVATE PkgConfig::GIO)
 
 # nlohmann/json (submodule external/json, v3.11.3), headers only.
 add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/external/json/single_include)
 
 # Phone link adapter (src/adapters/phone, openspec phone-link-core): the
-# protocol, its GLib loop and transports. Only it sees nlohmann/json.
+# protocol, its GLib loop, the socket and BLE (BlueZ over D-Bus) transports.
+# Only it sees nlohmann/json and GIO.
 add_library(dlidar_phone STATIC src/adapters/phone/protocol_codec.cpp src/adapters/phone/phone_server.cpp
     src/adapters/phone/phone_loop.cpp src/adapters/phone/socket_transport.cpp src/adapters/phone/phone_link.cpp
-    src/adapters/phone/ble_link.cpp)
+    src/adapters/phone/ble_link.cpp src/adapters/phone/bluez_peripheral.cpp)
 set_target_properties(dlidar_phone PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_phone PUBLIC dlidar_core PRIVATE nlohmann_json PkgConfig::GIO)
 
@@ -104,7 +101,7 @@ set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_B
 target_link_libraries(dlidar_app PUBLIC dlidar_core)
 
 add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
-target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_bluetooth dlidar_phone dlidar_storage dlidar_console)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_phone dlidar_storage dlidar_console)
 add_dependencies(dLidar dlidar_version)
 target_include_directories(dLidar PRIVATE ${PROJECT_BINARY_DIR}/generated)
 

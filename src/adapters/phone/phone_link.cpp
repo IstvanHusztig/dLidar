@@ -1,10 +1,13 @@
 #include "adapters/phone/phone_link.h"
 
+#include "adapters/phone/ble_link.h"
+#include "adapters/phone/bluez_peripheral.h"
 #include "adapters/phone/mailbox.h"
 #include "adapters/phone/phone_loop.h"
 #include "adapters/phone/phone_server.h"
 #include "adapters/phone/socket_transport.h"
 
+#include <iostream>
 #include <thread>
 
 namespace dlidar::phone
@@ -15,6 +18,9 @@ namespace dlidar::phone
         std::shared_ptr<Mailbox> mailbox;
         std::unique_ptr<PhoneServer> server;
         std::unique_ptr<SocketTransport> socket;
+        bool socket_ok = false;
+        std::unique_ptr<BluezPeripheral> peripheral; // BLE (null when off)
+        std::unique_ptr<BleLink> ble;
         std::shared_ptr<PhoneEvents> events;
         bool stopped = false;
     };
@@ -23,7 +29,8 @@ namespace dlidar::phone
 
     PhoneLink::~PhoneLink() { Shutdown(); }
 
-    std::unique_ptr<PhoneLink> PhoneLink::Start(const DeviceApi &api, const std::string &socket_dir, std::string &why)
+    std::unique_ptr<PhoneLink> PhoneLink::Start(const DeviceApi &api, const std::string &socket_dir,
+                                                const BleOptions &ble, std::string &socket_why)
     {
         auto impl = std::make_unique<Impl>();
         Impl *p = impl.get();
@@ -31,16 +38,32 @@ namespace dlidar::phone
         // never runs after Mailbox::Close().
         p->mailbox = std::make_shared<Mailbox>([p] { p->loop.Invoke([p] { p->server->OnMailbox(); }); });
         p->server = std::make_unique<PhoneServer>(api, p->mailbox, p->loop);
-        p->loop.on_wake = [p] { p->server->OnWake(); };
+        p->loop.on_wake = [p] {
+            p->server->OnWake();
+            if (p->ble)
+                p->ble->OnWake();
+        };
         p->socket = std::make_unique<SocketTransport>(p->loop.Context(), *p->server);
         p->loop.Start();
-        bool ok = false;
-        p->loop.Call([&] { ok = p->socket->Listen(socket_dir, why); });
-        if (!ok)
+        p->loop.Call([&] { p->socket_ok = p->socket->Listen(socket_dir, socket_why); });
+        if (ble.pairing_at_start && !ble.enabled)
+            std::cerr << "WARNING: [phone] pairing_at_start needs [phone] ble = true; no pairing window" << std::endl;
+        if ((!p->socket_ok && (p->socket->AnotherRunning() || !ble.enabled)))
         {
             p->loop.Stop();
             return nullptr;
         }
+        if (ble.enabled)
+            p->loop.Call([&] {
+                BluezPeripheral::Options o;
+                o.name = ble.name;
+                p->peripheral = std::make_unique<BluezPeripheral>(p->loop.Context(), o);
+                p->ble = std::make_unique<BleLink>(*p->server, *p->peripheral, p->loop);
+                p->peripheral->Attach(*p->ble);
+                p->peripheral->Start(); // asynchronous: never waits for bluetoothd
+                if (ble.pairing_at_start)
+                    p->peripheral->OpenPairingWindow(std::chrono::seconds(120));
+            });
         p->events = std::make_shared<PhoneEvents>(p->mailbox);
         return std::unique_ptr<PhoneLink>(new PhoneLink(std::move(impl)));
     }
@@ -53,7 +76,7 @@ namespace dlidar::phone
     {
         size_t n = 0;
         if (!impl_->stopped)
-            impl_->loop.Call([&] { n = impl_->socket->Connections(); });
+            impl_->loop.Call([&] { n = impl_->socket->Connections() + (impl_->ble && impl_->ble->Open() ? 1 : 0); });
         return n;
     }
 
@@ -76,7 +99,23 @@ namespace dlidar::phone
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
         p->mailbox->Close();
-        p->loop.Call([p] { p->socket->CloseAll(); });
+        if (p->peripheral)
+        {
+            // Best effort: BlueZ drops our objects at exit anyway.
+            p->loop.Call([p] { p->peripheral->Stop(); });
+            auto stop_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+            for (bool done = false; !done && std::chrono::steady_clock::now() < stop_deadline;)
+            {
+                p->loop.Call([&] { done = p->peripheral->StopDone(); });
+                if (!done)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+        p->loop.Call([p] {
+            p->ble.reset(); // OnClosed to the server
+            p->peripheral.reset();
+            p->socket->CloseAll();
+        });
         p->loop.Stop();
     }
 }

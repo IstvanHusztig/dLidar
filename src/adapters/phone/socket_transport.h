@@ -41,6 +41,8 @@ namespace dlidar::phone
         void CloseAll();
 
         size_t Connections() const { return connections_.size(); }
+        // Listen failed because another dLidar answers on the socket.
+        bool AnotherRunning() const { return another_running_; }
 
     private:
         class Client;
@@ -50,6 +52,7 @@ namespace dlidar::phone
         size_t max_clients_, cap_bytes_;
         std::string path_;
         int listen_fd_ = -1;
+        bool another_running_ = false;
         dev_t dev_ = 0;
         ino_t ino_ = 0;
         GSource *accept_source_ = nullptr;

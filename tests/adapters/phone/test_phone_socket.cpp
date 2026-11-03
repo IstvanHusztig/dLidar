@@ -197,7 +197,7 @@ struct Device
         controller = std::make_unique<ScannerController>(sensor, storage, hub, Config());
         api = std::make_unique<DeviceApi>(*controller, nullptr, DeviceInfo{"test", "unitree_l2", "unitree_l2", 3});
         std::string why;
-        link = PhoneLink::Start(*api, dir, why);
+        link = PhoneLink::Start(*api, dir, {}, why);
         CHECK(link != nullptr, "link: %s", why.c_str());
         if (link)
             hub.AddAsync(link->Events());
@@ -229,8 +229,8 @@ void TestSocketDirectory()
     ScannerController c(sensor, storage, hub, Config());
     DeviceApi api(c, nullptr, DeviceInfo{});
     std::string why;
-    CHECK(!PhoneLink::Start(api, "", why) && why.find("RUNTIME_DIRECTORY") != std::string::npos, "%s", why.c_str());
-    CHECK(!PhoneLink::Start(api, "/nonexistent/dir", why) && why.find("not a directory") != std::string::npos, "%s",
+    CHECK(!PhoneLink::Start(api, "", {}, why) && why.find("RUNTIME_DIRECTORY") != std::string::npos, "%s", why.c_str());
+    CHECK(!PhoneLink::Start(api, "/nonexistent/dir", {}, why) && why.find("not a directory") != std::string::npos, "%s",
           why.c_str());
 }
 
@@ -392,7 +392,7 @@ void TestSocketFiles()
         ScannerController other(sensor, storage, hub, Config());
         DeviceApi api(other, nullptr, DeviceInfo{});
         std::string why;
-        CHECK(!PhoneLink::Start(api, dir.path, why) && why.find("another dLidar") != std::string::npos, "%s",
+        CHECK(!PhoneLink::Start(api, dir.path, {}, why) && why.find("another dLidar") != std::string::npos, "%s",
               why.c_str());
     }
     Client c2(path);

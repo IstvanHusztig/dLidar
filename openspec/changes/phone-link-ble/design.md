@@ -108,8 +108,8 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 - RX: `encrypt-write`, `write-without-response` (the spike's secure mode, which the phone used).
 - TX: `notify`, `encrypt-notify`, so an unbonded phone cannot even subscribe.
 - When BLE starts, dLidar sets the adapter `Pairable` false, overriding BlueZ's default yes. Only the pairing window (D10) makes it pairable.
-- **dLidar guards `Pairable`.** Another BlueZ client can switch pairing on again: measured on the dev board, the desktop taskbar's Bluetooth plugin did (`wf-panel-pi`, task 1.2). So dLidar watches Adapter1 `Pairable` and sets it false again whenever it turns true outside the pairing window. The first time per start it prints one warning: `another program made Bluetooth pairable; switched off (pairing only in the pairing window)`.
-- The target image has no desktop, so there the guard should never fire. On the dev board, the desktop plugin and dLidar may toggle it back and forth, which is harmless.
+- **dLidar guards `Pairable`.** Any BlueZ client that registers an agent can switch pairing on (task 1.2 saw it happen, from a second, older dLidar's pairing window). So dLidar watches Adapter1 `Pairable` and sets it false again whenever it turns true outside its pairing window. The first time per start it prints one warning: `another program made Bluetooth pairable; switched off (pairing only in the pairing window)`.
+- On the target image nothing else registers an agent, so the guard should never fire.
 - Task 2 checks with the phone that an unbonded phone gets an ATT security error on both characteristics.
 
 **D9. Advertisement.**
@@ -198,10 +198,22 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 
 **1.2 Unbonded phone (2026-11-03, binary `btmon -w` capture, bond removed on both sides, `Pairable` false):**
 - Subscribing to TX (`encrypt-notify`) made the Pi send an SMP Security Request. Android showed its pairing prompt by itself, and Just Works pairing completed. So `encrypt-notify` protects the events and Android pairs on its own.
-- **Pairing was possible although dLidar's side had set `Pairable` false.** At 10:34:55, a minute after it was switched off, bluetoothd sent the controller `Set Bondable: Enabled` and `Set IO Capability: NoInputNoOutput`. That is an agent registering. No command of ours ran then. The only other BlueZ client on the dev board is the desktop taskbar (`wf-panel-pi`, user `istvan`'s desktop session, with a Bluetooth plugin). Hence the `Pairable` guard in D8.
+- **Pairing was possible although `Pairable` had been set false.** At 10:34:55, a minute after it was switched off, bluetoothd sent the controller `Set Bondable: Enabled` and `Set IO Capability: NoInputNoOutput`, which is an agent registering. Exactly 120 s later (10:36:56) the same pair of commands switched it off again. Cause, found afterwards: a `bin/dLidar` (an older build with the threaded `PairingWindow`) was started by hand from a VS Code terminal at 10:34:55, evidently with `pairing_at_start = true`; its 120 s window explains both commands. So it was dLidar's own pairing window, not a foreign program. (A first suspicion, the desktop taskbar's Bluetooth plugin `wf-panel-pi`, was wrong.)
+- Lesson: every program that registers a BlueZ agent can make the adapter pairable. The `Pairable` guard (D8) stays as defence in depth against other agents (a desktop Bluetooth applet, `bluetoothctl`'s default agent, a leftover spike).
 - The earlier "write failed: not connected" in nRF Connect came from a connection that had already dropped. It is not a security error.
 
 **1.2 Advertisement (`btmon` while bluetoothd re-registered the spike):** the advertisement data holds only the 128-bit service UUID list (18 bytes); the name `dLidar` (8 bytes) is in the scan response. The spike sets no `Discoverable`, so no flags field (D9).
+
+**Group 4 on the dev board, without the phone (2026-11-03, a test instance with spare pins and its own socket directory):**
+- At start the adapter is set not pairable. The objects are exported with TX `notify` + `encrypt-notify` and the name `dLidar`.
+- Advertising is off while a phone is connected (the bonded Galaxy over LE), and starts at once when it disconnects.
+- `systemctl restart bluetooth`: advertising again after 0.28 s, one warning ("bluetoothd is gone") and one line when it is back.
+- A `Pairable` set from outside is switched off again with the guard's warning. bluetoothd's own pairable-at-start is switched off quietly.
+- Pairing window: pairable for 120 s with "started" and "ended" printed, then not pairable. `pairing_at_start` with `ble = false` warns and opens nothing.
+- `rfkill block`, at start or while running: one "switched off" warning, the socket works; after `unblock`, "on again" and advertising resumes.
+- Start-up to "Ready" with bluetoothd stopped: 1015/1023 ms with BLE versus 1013/1008 ms without. Note: D-Bus activation restarts a stopped bluetoothd within 40 ms on this image.
+- SIGTERM: the advertisement is unregistered (`ActiveInstances` 0) and the socket file removed.
+- No classic link can stand in for the phone: the adapter is not `connectable` over BR/EDR (`btmgmt info`), so a bonded phone reaches the Pi over LE only.
 
 ## Risks / Trade-offs
 
@@ -212,7 +224,7 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 - **[The name only in the scan response]** → a passive scan sees the UUID but no name. The app scans actively and filters by UUID, so it does not depend on the name.
 - **[Shutdown with a hung bluetoothd]** → unregistering is bounded (D12). The process exit releases everything in BlueZ.
 - **[GDBus worker thread]** → one per process, expected; documented in the tests.
-- **[Another program switches pairing on]** (measured: the desktop taskbar's Bluetooth plugin) → the `Pairable` guard (D8) switches it off again within one D-Bus round trip and warns once. Before it reacts, a pairing attempt could slip in. On the dev board, with a desktop, that is accepted; the target runs without a desktop.
+- **[Another program switches pairing on]** (seen once: a second dLidar's pairing window) → the `Pairable` guard (D8) switches it off again within one D-Bus round trip and warns once. Before it reacts, a pairing attempt could slip in. Two dLidars never serve BLE at once (D12), and nothing else registers an agent on the target.
 - **[The pairable state left on after a crash]** → dLidar sets `Pairable` false at every start (D8). A crash inside the window leaves the adapter pairable until the next start, or until bluetoothd restarts, which reverts it to `main.conf`. Accepted, and noted in the manual.
 
 ## Migration Plan

@@ -228,6 +228,7 @@ namespace dlidar::phone
             if (answers)
             {
                 why = "another dLidar is running (it answers on " + path + ")";
+                another_running_ = true;
                 return false;
             }
             unlink(path.c_str());

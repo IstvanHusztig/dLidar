@@ -9,7 +9,6 @@
 // finish a leftover recording.
 //
 //   dLidar [--config PATH] [--once | --finalize] [--imu-time=auto|sensor|host]
-#include "adapters/bluetooth/pairing_window.h"
 #include "adapters/console/console_events.h"
 #include "adapters/gpio/button_input.h"
 #include "adapters/gpio/gpio_line.h"
@@ -97,13 +96,6 @@ int main(int argc, char *argv[])
 	}
 	std::cerr << "settings: " << settings.source << " (sensor " << SensorKindName(settings.sensor) << ")" << std::endl;
 
-	// For testing until the pairing button is mounted ([phone]
-	// pairing_at_start): a phone can pair during the first 2 minutes. Opened
-	// first, so a later start-up problem does not hide it.
-	dlidar::bluetooth::PairingWindow pairing;
-	if (settings.phone.pairing_at_start && !finalize)
-		pairing.Open(120);
-
 	// Recordings go to numbered files in OutputDirectory(), described by the
 	// chosen sensor's profile (its diagnostics rows go to packetstateNNNN.tsv).
 	dlidar::FileRecordingStorage storage(OutputDirectory(), ProfileFor(settings), AllProfiles());
@@ -170,18 +162,24 @@ int main(int argc, char *argv[])
 		// ends a running recording), the push button. Later: the phone.
 		dlidar::ScannerController controller(*sensor, storage, hub, config, &StopRequested());
 
-		// The phone link (read-only so far): its own thread and the local
-		// socket, an output channel on the hub. A problem only warns.
+		// The phone link (read-only so far): its own thread, the local socket
+		// and Bluetooth LE ([phone] ble, name; pairing_at_start opens the
+		// pairing window for 2 minutes until the pairing button is mounted).
+		// An output channel on the hub. A problem only warns.
 		dlidar::DeviceApi api(controller, &storage,
 							  {DLIDAR_VERSION, SensorKindName(settings.sensor), ProfileFor(settings).sensor_model,
 							   dlidar::kRecordingFormatVersion});
+		dlidar::phone::BleOptions ble;
+		ble.enabled = settings.phone.ble;
+		ble.name = settings.phone.name;
+		ble.pairing_at_start = settings.phone.pairing_at_start;
 		std::string why;
 		std::unique_ptr<dlidar::phone::PhoneLink> phone =
-			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), why);
+			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why);
+		if (!why.empty())
+			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (phone)
 			hub.AddAsync(phone->Events());
-		else
-			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (once)
 		{
 			controller.StartRecording();
