@@ -2,11 +2,13 @@
 
 #include "app/device_config.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <sstream>
 #include <unistd.h>
 #include <vector>
@@ -157,6 +159,16 @@ const std::vector<Key> &Schema()
 			 if (v.integer < 0 || v.integer > 27)
 				 return std::string("must be a GPIO of the 40-pin header, 0 to 27");
 			 s.gpio.led_gpio = (int)v.integer;
+			 return std::string();
+		 }},
+		{"pairing_button", "gpio",
+		 [](const Value &v, S &s) {
+			 std::string e = Expect(v, Value::Integer);
+			 if (!e.empty())
+				 return e;
+			 if (v.integer < 0 || v.integer > 27)
+				 return std::string("must be a GPIO of the 40-pin header, 0 to 27");
+			 s.gpio.pairing_button_gpio = (int)v.integer;
 			 return std::string();
 		 }},
 		// Removed: recordings have no length limit any more.
@@ -395,6 +407,7 @@ DeviceSettings DefaultSettings()
 	s.livox_mid360s.mount = kLivoxMount;
 	s.gpio.button_gpio = kButtonGpio;
 	s.gpio.led_gpio = kLedGpio;
+	s.gpio.pairing_button_gpio = kPairingButtonGpio;
 	s.phone.ble = kBleEnabled;
 	s.phone.name = kBleName;
 	s.livox_mid360s.imu_rate_hz = kLivoxImuRateHz;
@@ -421,7 +434,8 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 	std::istringstream in(text);
 	std::string line, section;
 	std::vector<std::string> seen_sections, seen_keys;
-	int number = 0, gpio_line = 0;
+	int number = 0;
+	std::map<std::string, int> gpio_lines; // section -> the line of its gpio key
 	auto fail = [&](const std::string &problem) {
 		error = name + ":" + std::to_string(number) + ": " + problem;
 		return false;
@@ -444,7 +458,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			for (const Key &k : Schema())
 				known = known || sec == k.section;
 			if (!known)
-				return fail("unknown section [" + sec + "]; known: [device], [unitree_l2], [livox_mid360s], [button], [led], [phone]");
+				return fail("unknown section [" + sec + "]; known: [device], [unitree_l2], [livox_mid360s], [button], [led], [pairing_button], [phone]");
 			for (const std::string &done : seen_sections)
 				if (done == sec)
 					return fail("section [" + sec + "] appears twice");
@@ -462,7 +476,7 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			if (!IsBareKeyChar(c))
 				return fail(c == '.' ? "dotted keys are not supported" : "\"" + key + "\" is not a plain key");
 		if (section.empty())
-			return fail("key \"" + key + "\" is outside a section; put it under [device], [unitree_l2], [livox_mid360s], [button], [led] or [phone]");
+			return fail("key \"" + key + "\" is outside a section; put it under [device], [unitree_l2], [livox_mid360s], [button], [led], [pairing_button] or [phone]");
 		const Key *known = nullptr;
 		for (const Key &k : Schema())
 			if (section == k.section && key == k.name)
@@ -480,15 +494,29 @@ bool ParseSettings(const std::string &text, const std::string &name, DeviceSetti
 			problem = known->set(v, s);
 		if (!problem.empty())
 			return fail(key + ": " + problem);
-		if (section == "button" || section == "led")
-			gpio_line = number;
+		if (key == "gpio")
+			gpio_lines[section] = number;
 	}
-	if (s.gpio.button_gpio == s.gpio.led_gpio)
+	// Each line once; the error names the later of the two keys.
+	struct Gpio
 	{
-		number = gpio_line;
-		return fail("[button] gpio and [led] gpio are both " + std::to_string(s.gpio.led_gpio) +
-					"; the LED and the button need different lines");
-	}
+		const char *section;
+		int line;
+	};
+	const Gpio gpios[] = {{"button", s.gpio.button_gpio},
+						  {"led", s.gpio.led_gpio},
+						  {"pairing_button", s.gpio.pairing_button_gpio}};
+	static const char *const kWhy[3][3] = {{nullptr, "the LED and the button", "the two buttons"},
+										   {nullptr, nullptr, "the LED and the pairing button"}};
+	for (int i = 0; i < 3; i++)
+		for (int j = i + 1; j < 3; j++)
+			if (gpios[i].line == gpios[j].line)
+			{
+				number = std::max(gpio_lines[gpios[i].section], gpio_lines[gpios[j].section]);
+				return fail(std::string("[") + gpios[i].section + "] gpio and [" + gpios[j].section +
+							"] gpio are both " + std::to_string(gpios[j].line) + "; " + kWhy[i][j] +
+							" need different lines");
+			}
 	s.source = name;
 	settings = s;
 	return true;

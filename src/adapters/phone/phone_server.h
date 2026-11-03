@@ -78,7 +78,7 @@ namespace dlidar::phone
         struct Command
         {
             std::vector<std::string> args;
-            std::function<std::string(const Request &)> run;
+            std::function<std::string(Connection &, const Request &)> run;
         };
 
         const DeviceApi &api_;
@@ -95,7 +95,8 @@ namespace dlidar::phone
         std::optional<RecordingSummary> summary_;
 
         void AddCommand(const std::string &name, std::vector<std::string> args,
-                        std::function<std::string(const Request &)> run);
+                        std::function<std::string(Connection &, const Request &)> run);
+        std::string RecordingCommand(Connection &c, const Request &r, bool start);
         void HandleLine(Connection &c, std::string_view line);
         void Deliver(Connection &c, Client &cl, const Mailbox::Event &e);
         void SendEvent(Connection &c, Client &cl, const std::function<std::string(uint64_t, uint64_t)> &encode);

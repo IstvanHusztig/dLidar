@@ -149,6 +149,10 @@
     <tr><td><code>imu_rate_hz</code></td><td><code>500</code></td><td>IMU output rate, set at every start-up: 50, 100, 200 or 500 Hz (the sensor's own default is 200 Hz). Needs Mid-360S firmware V35.1.0112 or newer; otherwise a warning, and the sensor keeps its rate.</td></tr>
     <tr><td><code>imu_accel_range_g</code></td><td><code>8</code></td><td>Accelerometer full scale: 4, 8, 16 or 32 g.</td></tr>
     <tr><td><code>imu_gyro_range_dps</code></td><td><code>2000</code></td><td>Gyroscope full scale: 2000, 1000, 500, 250, 125, 62.5, 31.25 or 15.625 °/s.</td></tr>
+    <tr><td colspan="3"><b><code>[button]</code>, <code>[led]</code>, <code>[pairing_button]</code></b></td></tr>
+    <tr><td><code>[button] gpio</code></td><td><code>17</code></td><td>The record button's line, to GND (see <a href="#wiring">Wiring and pinout</a>).</td></tr>
+    <tr><td><code>[led] gpio</code></td><td><code>27</code></td><td>The status LED's line, through a resistor to GND.</td></tr>
+    <tr><td><code>[pairing_button] gpio</code></td><td><code>22</code></td><td>The pairing button's line, to GND: a short press opens the Bluetooth pairing window, a 5 s hold forgets every phone first. Optional: if the line cannot be used, dLidar only warns. The three lines must differ.</td></tr>
     <tr><td colspan="3"><b><code>[phone]</code></b></td></tr>
     <tr><td><code>ble</code></td><td><code>true</code></td><td>Serve the phone link over Bluetooth LE: dLidar advertises while it runs and no phone is connected, and a bonded phone can connect (see <a href="#phone">Phone link</a>). <code>false</code>: the local socket only.</td></tr>
     <tr><td><code>name</code></td><td><code>"dLidar"</code></td><td>The name a phone shows for the scanner, 1 to 20 printable ASCII characters. The app finds the scanner by its service UUID, not by this name.</td></tr>
@@ -177,18 +181,30 @@ mount = "+Z +Y -X"
   <p>The recording files are the same for both; <code>sensor_model</code> in <code>timingNNNN.json</code> and the LAZ system identifier say which sensor made them. A recording that was interrupted is finished as the sensor that recorded it, even after the settings were switched.</p>
 
   <h2 id="wiring">Wiring and pinout</h2>
-  <div class="card caveat">The button and the LED are implemented (change <code>push-button-recording</code>) but not yet tested with the real parts; see <a href="#service">Running as a service</a>.</div>
-  <p>The push button and the status LED connect to the Raspberry Pi 5's 40-pin header. Both pins can be changed in the settings (<code>[button] gpio</code>, <code>[led] gpio</code>). The Pi's GPIO lines work at <b>3.3 V and are not 5 V tolerant</b>: never connect them to 5 V.</p>
+  <div class="card caveat">The button and the LED are implemented (change <code>push-button-recording</code>) but not yet tested with the real parts, nor the pairing button (change <code>phone-link-commands</code>); see <a href="#service">Running as a service</a>.</div>
+  <p>The push button, the status LED and the pairing button connect to the Raspberry Pi 5's 40-pin header. Their pins can be changed in the settings (<code>[button] gpio</code>, <code>[led] gpio</code>, <code>[pairing_button] gpio</code>). The Pi's GPIO lines work at <b>3.3 V and are not 5 V tolerant</b>: never connect them to 5 V.</p>
   <div class="table-wrap"><table>
     <tr><th>Part</th><th>Signal</th><th>GPIO (BCM)</th><th>Header pin</th><th>Connect to</th></tr>
     <tr><td rowspan="2">Push button</td><td>input, internal pull-up, low = pressed</td><td>GPIO 17</td><td>11</td><td>one contact of the button</td></tr>
     <tr><td>ground</td><td>—</td><td>9 (GND)</td><td>the other contact</td></tr>
     <tr><td rowspan="2">Status LED</td><td>output, high = lit</td><td>GPIO 27</td><td>13</td><td>330 Ω resistor → LED anode (long leg)</td></tr>
     <tr><td>ground</td><td>—</td><td>14 (GND)</td><td>LED cathode (short leg, flat side)</td></tr>
+    <tr><td rowspan="2">Pairing button (optional)</td><td>input, internal pull-up, low = pressed</td><td>GPIO 22</td><td>15</td><td>one contact of the button</td></tr>
+    <tr><td>ground</td><td>—</td><td>20 (GND)</td><td>the other contact</td></tr>
     <tr><td>LiDAR</td><td>data</td><td>—</td><td>Ethernet port</td><td>the sensor's Ethernet cable; the sensor has its own power supply (Mid-360S: 9–27 V DC), not from the Pi's header</td></tr>
   </table></div>
-  <p>The button needs no resistor: dLidar switches on the Pi's internal pull-up, and the contact pulls the line to GND. The 330 Ω resistor limits the LED current to about 4 mA (a red or green LED at about 2 V); for a blue or white LED (about 3 V) use 100 Ω. Pins 9, 11 and 13 are neighbours on the odd-numbered row of the header, and pin 14 is next to pin 13 on the even row, so all four wires fit in the 2×3 block of pins 9–14. The service user must be in group <code>gpio</code> to use the lines.</p>
-  <p>What the button does: a short press starts a recording, the next short press stops and saves it, and holding it for 5 s saves any recording and powers the Pi down. What the LED shows: <b>on</b> = a recording was started (also while the sensor starts up), <b>blinking</b> (2 Hz) = the recording is being saved, <b>off</b> = idle, <b>three fast flashes, then off</b> = the recording failed.</p>
+  <p>The button needs no resistor: dLidar switches on the Pi's internal pull-up, and the contact pulls the line to GND. The 330 Ω resistor limits the LED current to about 4 mA (a red or green LED at about 2 V); for a blue or white LED (about 3 V) use 100 Ω. Pins 9, 11 and 13 are neighbours on the odd-numbered row of the header, and pin 14 is next to pin 13 on the even row, so all four wires fit in the 2×3 block of pins 9–14. The pairing button's pin 15 is next to pin 13; its ground is pin 20, three pins further down the even row (pin 14 already takes the LED). The service user must be in group <code>gpio</code> to use the lines.</p>
+  <p>What the button does: a short press starts a recording, the next short press stops and saves it, and holding it for 5 s saves any recording and powers the Pi down.</p>
+  <p>What the pairing button does: a short press opens the Bluetooth pairing window for 2 minutes (as <code>tools/pair.sh</code>); holding it for 5 s first forgets every bonded phone, then opens the window (as <code>tools/pair.sh --forget</code>; for a phone that was unpaired on its side, or a lost one). Neither changes a running recording. It is optional: if its line cannot be used, dLidar only warns.</p>
+  <p>What the LED shows (the first matching row wins):</p>
+  <div class="table-wrap"><table>
+    <tr><th>LED</th><th>Meaning</th></tr>
+    <tr><td><b>on</b></td><td>a recording was started (also while the sensor starts up)</td></tr>
+    <tr><td><b>blinking</b> (2 Hz)</td><td>the recording is being saved</td></tr>
+    <tr><td><b>three fast flashes</b>, then off</td><td>the recording failed</td></tr>
+    <tr><td><b>two short flashes every second</b></td><td>the Bluetooth pairing window is open (shown while idle, and after a failure's flashes)</td></tr>
+    <tr><td><b>off</b></td><td>idle</td></tr>
+  </table></div>
 
   <h2 id="service">Running as a service</h2>
   <p>On the device, dLidar runs as a systemd service: it starts at boot, recovers any unfinished recording, opens the sensor, the button and the LED, and waits. There is no length limit; a recording runs until it is stopped.</p>
@@ -217,20 +233,22 @@ sudo systemctl enable --now dlidar
 journalctl -fu dlidar                          # what it does, live</code></pre>
   <p>Check it: <code>systemctl is-enabled dlidar</code> says <code>enabled</code>, <code>tools/phone_client.py status.get</code> answers through <code>/run/dlidar/dlidar.sock</code>, and the phone app finds <code>dLidar</code>. After a reboot it is there again without anyone logging in. The unit starts after <code>bluetooth.service</code> and gives the service user the groups <code>gpio</code> and <code>bluetooth</code>.</p>
   <p><b>Only one dLidar at a time.</b> While the service runs, a second <code>./bin/dLidar</code> cannot take the button line and stops. For a test over SSH without the service: <code>sudo systemctl stop dlidar</code>, then <code>./bin/dLidar --once</code> starts one recording at once and saves it on Ctrl-C; afterwards <code>sudo systemctl start dlidar</code>. Without access to the GPIO lines, the service mode stops with a message naming the <code>gpio</code> group; without the LED (wrong pin, not wired) it runs anyway with a warning.</p>
-  <p><b>Pairing a phone</b> (until the pairing button is mounted): run <code>tools/pair.sh</code> on the Pi. It sends dLidar the signal <code>SIGUSR1</code> (no sudo: the service runs as your user), which opens the pairing window for 2 minutes. Within that time, connect with the app and tap <b>Pair</b>. A phone that was unpaired on its side needs <code>tools/pair.sh --forget</code> instead. <code>journalctl -u dlidar</code> shows <code>Bluetooth pairing started</code>, <code>Bluetooth: paired with …</code> and <code>Bluetooth pairing ended</code>.</p>
+  <p><b>Pairing a phone:</b> press the pairing button, or run <code>tools/pair.sh</code> on the Pi. The script sends dLidar the signal <code>SIGUSR1</code> (no sudo: the service runs as your user), which opens the pairing window for 2 minutes. Within that time, connect with the app and tap <b>Pair</b>. A phone that was unpaired on its side needs a 5 s hold of the pairing button or <code>tools/pair.sh --forget</code> (signal <code>SIGUSR2</code>) instead: dLidar forgets every bonded phone, then opens the window. <code>journalctl -u dlidar</code> shows <code>Bluetooth: forgot N phones</code>, <code>Bluetooth pairing started</code>, <code>Bluetooth: paired with …</code> and <code>Bluetooth pairing ended</code>.</p>
 
   <h2 id="phone">Phone link</h2>
-  <p>A phone app (or any client) can watch the scanner: its state, the progress of a recording, warnings, the end-of-recording summary, the free space and which sensor it has. The protocol is <b>read-only</b> so far: recordings are still started and stopped with the button. The messages are documented in <a href="phone-protocol.md"><code>docs/phone-protocol.md</code></a>.</p>
+  <p>A phone app (or any client) can watch the scanner: its state, the progress of a recording, warnings, the end-of-recording summary, the free space and which sensor it has. It can also start and stop a recording (<code>recording.start</code>, <code>recording.stop</code>), exactly as a short press of the button does: any bonded phone and any local client may. dLidar logs who did it (<code>phone: start</code>, <code>local client: stop</code>, or <code>phone: start ignored, recording</code> when there was nothing to do); a start while the last recording is still being saved is refused with <code>busy</code>. Wi-Fi setup and logs come later. The messages are documented in <a href="phone-protocol.md"><code>docs/phone-protocol.md</code></a>.</p>
   <ul>
     <li><b>Today: a local socket.</b> dLidar listens on <code>dlidar.sock</code> in <code>/run/dlidar/</code> (as a service) or in <code>$XDG_RUNTIME_DIR</code> (run by hand, e.g. <code>/run/user/1001/</code>), readable only by its user (mode 0600), for at most 4 clients. The file is removed on a clean exit; a leftover from a killed run is replaced. If another dLidar already answers there, or there is no such directory, dLidar prints <code>WARNING: no phone socket (...)</code> and records as usual.</li>
-    <li><b>Bluetooth LE.</b> While dLidar runs (<code>[phone] ble = true</code>, the default) the phone finds it as <code>dLidar</code> (<code>[phone] name</code>) and gets the same messages, one phone at a time. Only a <b>bonded</b> phone gets anything. To bond a phone: run <code>tools/pair.sh</code> (until the pairing button is mounted), and within 2 minutes connect with the app and tap <b>Pair</b> in Android's prompt (Just Works, no PIN). dLidar prints when the window opens, when the phone paired and when the window closes. A phone that was unpaired on the phone pairs again with <code>tools/pair.sh --forget</code>: it first removes every bonded phone on the Pi (BlueZ cannot pair a phone again over its own old bond; the attempt fails with "DHKey check failed"), then opens the window. The Pi's Bluetooth name becomes the <code>[phone] name</code> too. Outside the window the Pi refuses every pairing, also if another program tries to allow it. Bluetooth problems (no adapter, Bluetooth off, bluetoothd restarted) only print a warning; dLidar records as usual and comes back on its own.</li>
+    <li><b>Bluetooth LE.</b> While dLidar runs (<code>[phone] ble = true</code>, the default) the phone finds it as <code>dLidar</code> (<code>[phone] name</code>) and gets the same messages, one phone at a time. Only a <b>bonded</b> phone gets anything. To bond a phone: press the pairing button (or run <code>tools/pair.sh</code>), and within 2 minutes connect with the app and tap <b>Pair</b> in Android's prompt (Just Works, no PIN). dLidar prints when the window opens, when the phone paired and when the window closes. A phone that was unpaired on the phone pairs again after a 5 s hold of the pairing button (or <code>tools/pair.sh --forget</code>): dLidar first removes every bonded phone on the Pi, and prints how many (BlueZ cannot pair a phone again over its own old bond; the attempt fails with "DHKey check failed"), then opens the window. The Pi's Bluetooth name becomes the <code>[phone] name</code> too. Outside the window the Pi refuses every pairing, also if another program tries to allow it. Bluetooth problems (no adapter, Bluetooth off, bluetoothd restarted) only print a warning; dLidar records as usual and comes back on its own.</li>
   </ul>
   <p>To try it on the Pi, <code>tools/phone_client.py</code> talks to the socket:</p>
 <pre><code>tools/phone_client.py status.get           # one request, one JSON line
 tools/phone_client.py info.get
+tools/phone_client.py recording.start     # {"accepted":true,"state":"idle"}, then the state events
+tools/phone_client.py recording.stop
 tools/phone_client.py --follow             # every event until Ctrl-C
 tools/phone_client.py --wait 5 --follow    # waits for a dLidar that is just starting</code></pre>
-  <p>No phone client can slow down or stop a recording: the link runs on its own thread, a client that stops reading gets no events until it reads again (and is disconnected if it falls far behind), and a client's requests are answered from a copy of the state. Building it needs <code>libglib2.0-dev</code> (GLib's GIO, also used for Bluetooth) and the <code>external/json</code> submodule (<code>git submodule update --init --recursive</code>).</p>
+  <p>No phone client can slow down a recording, and it can end one only with <code>recording.stop</code>, which saves it like the button: the link runs on its own thread, a client that stops reading gets no events until it reads again (and is disconnected if it falls far behind), and a client's requests are answered from a copy of the state. Building it needs <code>libglib2.0-dev</code> (GLib's GIO, also used for Bluetooth) and the <code>external/json</code> submodule (<code>git submodule update --init --recursive</code>).</p>
 
   <h2 id="recording">A recording, step by step</h2>
   <p>The colour on the left of each step shows which layer does the work (see <a href="#architecture">Architecture</a>).</p>
@@ -315,7 +333,7 @@ tools/phone_client.py --wait 5 --follow    # waits for a dLidar that is just sta
   <p>The code follows <b>Clean Architecture</b> (Robert C. Martin): the rules of recording sit in the middle and know nothing about the L2, files or the console; those sit outside and plug in through interfaces (<i>ports</i>). That way the LiDAR can be replaced and buttons, LEDs or a phone link can be added without touching the recording logic.</p>
 
   <div class="ring root"><div class="label">app <small>· composition root · <code>src/app/</code></small></div>
-    <div class="items">main.cpp (command line, wiring), device_config.h (default IPs, mount, pins, IMU setting), settings.cpp, sensor_factory.cpp, button_commands.h, signals.h</div>
+    <div class="items">main.cpp (command line, wiring), device_config.h (default IPs, mount, pins, IMU setting), settings.cpp, sensor_factory.cpp, button_commands.h, pairing_button_commands.h, signals.h</div>
     <div class="ring adapt"><div class="label">adapters <small>· the outside world · <code>src/adapters/</code></small></div>
       <div class="items">unitree_l2/ (the sensor, Unitree SDK), storage/ (files, LAZ via LASzip, recovery), console/ (texts)</div>
       <div class="ring app"><div class="label">application <small>· use cases and ports · <code>src/application/</code></small></div>
@@ -359,9 +377,10 @@ tools/phone_client.py --wait 5 --follow    # waits for a dLidar that is just sta
     <tr><td>CSV and temp file writing, crash safety</td><td>adapter</td><td><code>adapters/storage/recording_writer.h</code>, <code>crash_guard.h</code></td></tr>
     <tr><td>LAZ encoding, recovery</td><td>adapter</td><td><code>adapters/storage/laz_encoder.cpp</code>, <code>recovery.cpp</code></td></tr>
     <tr><td>Console texts</td><td>adapter</td><td><code>adapters/console/console_events.cpp</code></td></tr>
-    <tr><td>What a phone may ask (status, info), independent of the transport</td><td>application</td><td><code>application/remote/device_api.h</code></td></tr>
+    <tr><td>What a phone may ask and command (status, info, start, stop; whether a start is <code>busy</code>), independent of the transport</td><td>application</td><td><code>application/remote/device_api.h</code></td></tr>
     <tr><td>Phone protocol, its loop thread and the local socket</td><td>adapter</td><td><code>adapters/phone/</code> (<code>protocol_codec.cpp</code>, <code>phone_server.cpp</code>, <code>socket_transport.cpp</code>)</td></tr>
-    <tr><td>Bluetooth LE: one phone at a time, pacing, the pairing window</td><td>adapter</td><td><code>adapters/phone/ble_link.cpp</code>, <code>bluez_peripheral.cpp</code></td></tr>
+    <tr><td>Bluetooth LE: one phone at a time, pacing, the pairing window, forgetting the phones</td><td>adapter</td><td><code>adapters/phone/ble_link.cpp</code>, <code>bluez_peripheral.cpp</code></td></tr>
+    <tr><td>What the pairing button does (short: the window; 5 s: forget, then the window)</td><td>app</td><td><code>app/pairing_button_commands.h</code></td></tr>
     <tr><td>Configuration, command line, signals</td><td>app</td><td><code>app/device_config.h</code>, <code>main.cpp</code>, <code>signals.h</code></td></tr>
   </table></div>
 
@@ -370,7 +389,7 @@ tools/phone_client.py --wait 5 --follow    # waits for a dLidar that is just sta
     <span class="s">Idle</span><span class="a">→</span><span class="s">Preparing</span><span class="a">→</span><span class="s">Recording</span><span class="a">→</span><span class="s">Finalizing</span><span class="a">→</span><span class="s">Idle</span>
     <span class="a">&nbsp;or&nbsp;</span><span class="s err">Error</span>
   </div>
-  <p>The <code>ScannerController</code> holds the state. It accepts a start only in Idle or Error and runs one recording at a time. Each input channel (today the Ctrl-C signal; later buttons and the phone) calls <code>StartRecording</code> / <code>StopRecording</code> from its own thread.</p>
+  <p>The <code>ScannerController</code> holds the state. It accepts a start only in Idle or Error and runs one recording at a time. Each input channel (the stop signals, the push button, the phone's <code>recording.start</code> / <code>recording.stop</code>) calls <code>StartRecording</code> / <code>StopRecording</code> from its own thread.</p>
   <div class="table-wrap"><table>
     <tr><th>Thread</th><th>Does</th></tr>
     <tr><td>main</td><td>Wiring, then waits for the recording to end.</td></tr>
@@ -383,7 +402,7 @@ tools/phone_client.py --wait 5 --follow    # waits for a dLidar that is just sta
   <h2 id="extend">Adding features</h2>
   <ul>
     <li><b>Another LiDAR:</b> a new adapter folder implementing <code>LidarSensor</code> with its <code>RecordingProfile</code>, a case in <code>app/sensor_factory.cpp</code> and a section in the settings. No change to the core (the Mid-360S was added this way).</li>
-    <li><b>Another input (e.g. the phone):</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code> from its own thread, like the push button (<code>adapters/gpio/button_input.cpp</code>, <code>app/button_commands.h</code>).</li>
+    <li><b>Another input:</b> an adapter that calls <code>StartRecording</code> / <code>StopRecording</code> from its own thread, like the push button (<code>adapters/gpio/button_input.cpp</code>, <code>app/button_commands.h</code>), or, for a remote client, <code>DeviceApi::Start</code> / <code>Stop</code> like the phone link's commands.</li>
     <li><b>LEDs or a phone link (output):</b> an adapter implementing <code>DeviceEvents</code>, registered with <code>hub.AddAsync(...)</code>.</li>
   </ul>
   <p>New code and refactors follow the SOLID principles: one job per class, new features as new adapters instead of core edits, every port implementation interchangeable with the others, small ports with defaults for optional capabilities, and the core depending only on ports. See "SOLID" in <code>docs/architecture.md</code>.</p>
@@ -454,7 +473,7 @@ tools/phone_client.py --wait 5 --follow    # waits for a dLidar that is just sta
     <li><b>The crash data is pre-computed into atomics.</b> The fatal handler can't ask the writer object anything. It only reads two lock-free values that the writer kept current, then makes one system call.</li>
     <li><b>The statics are initialized up front.</b> <code>InstallSignalHandlers()</code> calls <code>StopRequested()</code>, <code>CrashTruncateFd()</code> and <code>CrashTruncateSize()</code> once beforehand. The first call to a function-local static runs a guarded initialization that may take a lock, and that must not happen for the first time inside a handler.</li>
   </ul>
-  <p><b>How it fits the architecture.</b> Signals belong to the operating system, so they're handled in <code>src/app</code>, not in the core. The application layer never sees a signal: it only gets an abstract <code>StopToken</code>. Signals are just the first <b>input channel</b> of the <code>ScannerController</code>. Later, push buttons and the phone will call <code>StartRecording</code> / <code>StopRecording</code> on the same interface, and the recording code won't need to change.</p>
+  <p><b>How it fits the architecture.</b> Signals belong to the operating system, so they're handled in <code>src/app</code>, not in the core. The application layer never sees a signal: it only gets an abstract <code>StopToken</code>. Signals are just the first <b>input channel</b> of the <code>ScannerController</code>. The push button and the phone call <code>StartRecording</code> / <code>StopRecording</code> on the same interface, and the recording code didn't need to change for them.</p>
   <div class="table-wrap"><table>
     <tr><th>Event</th><th>What happens</th><th>Result on disk</th></tr>
     <tr><td>Ctrl-C / <code>kill</code> / SSH drop (first)</td><td>flag set → loop ends → normal finalize</td><td>complete <code>lidar</code> / <code>imu</code> / <code>timing</code> set</td></tr>

@@ -26,6 +26,7 @@ namespace dlidar::phone
     extern const char *const kUnsupportedVersion;
     extern const char *const kTooLarge;
     extern const char *const kTooManyClients;
+    extern const char *const kBusy; // not now: the last recording is being saved
 
     struct Request
     {
@@ -58,6 +59,9 @@ namespace dlidar::phone
     std::string EncodeStatus(int64_t id, const StatusView &status, const std::vector<DeviceWarning> &warnings,
                              const std::optional<RecordingSummary> &summary);
     std::string EncodeInfo(int64_t id, const DeviceInfo &info);
+    // recording.start / recording.stop: {"accepted":…,"state":…} (busy is an
+    // error, EncodeError with kBusy).
+    std::string EncodeCommandResult(int64_t id, bool accepted, DeviceState state_seen);
 
     // Events: `dropped` > 0 adds "dropped".
     std::string EncodeStateEvent(uint64_t seq, uint64_t dropped, const DeviceStatus &status);

@@ -114,6 +114,8 @@ namespace dlidar::phone
         // The pairing window.
         std::chrono::steady_clock::time_point window_until{};
         bool window_wanted = false, window_open = false, agent_registered = false;
+        bool pairing_shown = false; // the last on_pairing value
+        bool forgetting = false;    // ForgetPhones' RemoveDevice calls are pending
         GSource *window_timer = nullptr;
 
         // One warning per cause.
@@ -288,6 +290,7 @@ namespace dlidar::phone
             adv_registered = adv_pending = false;
             agent_registered = false;
             window_open = false; // reopened for the remaining time when BlueZ is back
+            ShowPairing(false);
             if (Link())
                 Link()->BluezDown();
         }
@@ -453,6 +456,7 @@ namespace dlidar::phone
                 {
                     std::cout << "Bluetooth pairing started: a phone can pair for the next " << left.count()
                               << " s (Just Works, no PIN)" << std::endl;
+                    ShowPairing(true);
                     return;
                 }
                 bool busy = g_dbus_error_is_remote_error(e) &&
@@ -512,6 +516,70 @@ namespace dlidar::phone
                 pairable_off(nullptr, nullptr);
             if (was_open)
                 std::cout << "Bluetooth pairing ended: no new phones can pair" << std::endl;
+            ShowPairing(false);
+        }
+
+        void ShowPairing(bool open)
+        {
+            if (open == pairing_shown)
+                return;
+            pairing_shown = open;
+            if (options.on_pairing)
+                options.on_pairing(open);
+        }
+
+        // Every bonded device of the adapter, removed one RemoveDevice call
+        // each; `then` runs when all have answered (or at once if none).
+        void ForgetAll(std::function<void()> then)
+        {
+            forgetting = true;
+            Call("/", kObjectManager, "GetManagedObjects", nullptr, [this, then](GVariant *r, GError *err) {
+                if (!r || adapter.empty())
+                {
+                    std::cerr << "WARNING: Bluetooth: cannot forget the phones ("
+                              << (r ? "the adapter is gone" : err->message) << ")" << std::endl;
+                    forgetting = false;
+                    then();
+                    return;
+                }
+                std::vector<std::string> bonded;
+                GVariantIter *it;
+                const gchar *path;
+                GVariant *ifaces;
+                g_variant_get(r, "(a{oa{sa{sv}}})", &it);
+                while (g_variant_iter_loop(it, "{&o@a{sa{sv}}}", &path, &ifaces))
+                    if (Under(path, adapter))
+                        if (GVariant *d = g_variant_lookup_value(ifaces, "org.bluez.Device1", nullptr))
+                        {
+                            gboolean paired = FALSE, bonded_prop = FALSE;
+                            g_variant_lookup(d, "Paired", "b", &paired);
+                            g_variant_lookup(d, "Bonded", "b", &bonded_prop);
+                            if (paired || bonded_prop)
+                                bonded.push_back(path);
+                            g_variant_unref(d);
+                        }
+                g_variant_iter_free(it);
+                auto left = std::make_shared<size_t>(bonded.size());
+                auto forgot = std::make_shared<size_t>(0);
+                auto finish = [this, then, forgot] {
+                    std::cout << "Bluetooth: forgot " << *forgot << (*forgot == 1 ? " phone" : " phones") << std::endl;
+                    forgetting = false;
+                    then();
+                };
+                if (bonded.empty())
+                    finish();
+                for (const std::string &device : bonded)
+                    Call(adapter, "org.bluez.Adapter1", "RemoveDevice", g_variant_new("(o)", device.c_str()),
+                         [left, forgot, finish](GVariant *res, GError *e) {
+                             if (res)
+                                 ++*forgot;
+                             else
+                                 std::cerr << "WARNING: Bluetooth: cannot forget a phone (" << e->message << ")"
+                                           << std::endl;
+                             if (--*left == 0)
+                                 finish();
+                         });
+            });
         }
 
         // --- signals --------------------------------------------------------
@@ -838,6 +906,22 @@ namespace dlidar::phone
         d.StartWindow(); // or when the adapter is found
     }
 
+    void BluezPeripheral::ForgetPhones(std::chrono::seconds seconds)
+    {
+        Impl &d = *impl_;
+        if (d.forgetting)
+            return; // the pending forget opens the window
+        if (d.adapter.empty())
+        {
+            std::cerr << "WARNING: Bluetooth: cannot forget the phones now (no Bluetooth adapter); opening the "
+                         "pairing window only"
+                      << std::endl;
+            OpenPairingWindow(seconds);
+            return;
+        }
+        d.ForgetAll([this, seconds] { OpenPairingWindow(seconds); });
+    }
+
     void BluezPeripheral::Stop()
     {
         Impl &d = *impl_;
@@ -856,6 +940,7 @@ namespace dlidar::phone
                           g_variant_new("(ssv)", "org.bluez.Adapter1", "Pairable", g_variant_new_boolean(FALSE)));
         d.adv_registered = d.app_registered = d.agent_registered = false;
         d.window_open = d.window_wanted = false;
+        d.ShowPairing(false);
     }
 
     bool BluezPeripheral::StopDone() const { return *impl_->stop_pending == 0; }

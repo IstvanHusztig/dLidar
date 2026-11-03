@@ -59,7 +59,7 @@ Enforcement:
 - `device/`:
   - `ScannerController`: the state machine and the command interface.
   - `EventHub`: fans events out to the output channels.
-- `remote/`: `DeviceApi`, the typed commands a remote client (the phone) may give, on `DeviceControl` and `StorageSpace`, independent of any transport or message format; `DeviceInfo`, `kProtocolVersion`.
+- `remote/`: `DeviceApi`, the typed commands a remote client (the phone) may give, on `DeviceControl` and `StorageSpace`, independent of any transport or message format; `DeviceInfo`, `kProtocolVersion`. `Start()` / `Stop()` decide by the state they see and return a `CommandResult` (`accepted`, `state_seen`, `busy` for a start while saving); the check and the start are one `StartRecording` call, so they never race the button.
 - `analysis/`: `ReplayPackets` (`bin/replay_packets`).
 
 **Adapters (`src/adapters/`)**
@@ -76,23 +76,24 @@ Enforcement:
 - `console/`: `ConsoleEvents`, the texts `bin/dLidar` prints.
 - `gpio/`: the push button and the status LED on the Pi's header (`docs/manual.html`, "Wiring and pinout"). `GpioLine` is the only code that sees `<linux/gpio.h>` (kernel GPIO uAPI v2, no library).
   - `ButtonInput` (input channel): its own thread, `PressDetector` (pure: debounce, short and long press), callbacks.
-  - `StatusLed` (output channel, `hub.AddAsync`): its own 50 ms thread, `LedOn` (pure: on while a recording starts and runs, 2 Hz while saving, three flashes after a failure).
+  - `StatusLed` (output channel, `hub.AddAsync`): its own 50 ms thread, `LedOn` (pure: on while a recording starts and runs, 2 Hz while saving, three flashes after a failure, two short flashes a second while the pairing window is open and nothing else shows). `SetPairing(bool)` is told by the phone link (`BleOptions::on_pairing`, bound in `main.cpp`); pairing is not device state, so it is not a `DeviceEvents` call.
 - `phone/` (CMake `dlidar_phone`): the phone link, protocol v1 (`docs/phone-protocol.md`), over the local socket and Bluetooth LE. The only code that sees nlohmann/json (`protocol_codec.cpp`) and GLib/GIO.
   - `PhoneEvents` (output channel, `hub.AddAsync`) writes into a `Mailbox` (bounded, progress coalesced, the latest state never dropped) and wakes the loop.
   - `PhoneLoop`: the link's own thread with a private `GMainContext`; every transport and the server run on it.
-  - `PhoneServer`: framing (`LineFramer`), the command table over `DeviceApi`, per-connection `seq` and `dropped`, progress at most 1 Hz; `status.get` answers from the events the loop has seen, so it is never older than an event already sent.
+  - `PhoneServer`: framing (`LineFramer`), the command table over `DeviceApi` (`recording.start` / `recording.stop` too, each logged with the client's `Connection::Kind()`: `phone: start`, `local client: stop ignored, idle`), per-connection `seq` and `dropped`, progress at most 1 Hz; `status.get` answers from the events the loop has seen, so it is never older than an event already sent.
   - `SocketTransport` (a `Connection` per client): the local Unix socket `dlidar.sock` (`$RUNTIME_DIRECTORY`, else `$XDG_RUNTIME_DIR`), mode 0600, at most 4 clients, 64 KiB unsent bytes per client before it is closed.
   - `BleLink` (pure, unit-tested with fakes): the BLE transport's logic. One phone at a time, its `Connection` (open while TX notifications are on), MTU−3 pieces with the MTU from the phone's writes, a token bucket at 24 KiB/s, the 64 KiB cap, advertising off while a phone is connected, an idle phone disconnected after 30 s.
-  - `BluezPeripheral` (BlueZ over D-Bus, asynchronous calls only): the GATT application (RX `encrypt-write`, TX `notify` + `encrypt-notify`), the advertisement, the adapter's name, the pairing window (Just Works agent, 120 s), and the `Pairable` guard (never pairable outside the window). It follows bluetoothd and the adapter and recovers on its own; problems only warn.
-  - `PhoneLink`: what `main.cpp` starts and shuts down. BLE starts next to the socket, never when another dLidar answers on the socket.
+  - `BluezPeripheral` (BlueZ over D-Bus, asynchronous calls only): the GATT application (RX `encrypt-write`, TX `notify` + `encrypt-notify`), the advertisement, the adapter's name, the pairing window (Just Works agent, 120 s; `on_pairing` when it really opens and closes), `ForgetPhones` (`RemoveDevice` for every bonded device, then the window), and the `Pairable` guard (never pairable outside the window). It follows bluetoothd and the adapter and recovers on its own; problems only warn.
+  - `PhoneLink`: what `main.cpp` starts and shuts down. BLE starts next to the socket, never when another dLidar answers on the socket. `OpenPairingWindow(forget)` is the one entry for the pairing button, `SIGUSR1` and `SIGUSR2`.
 
 **App (`src/app/`)**
-- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters (also the phone link with its `[phone]` settings). Service mode (default, `systemd/dlidar.service`): waits for the button until a signal; `--once`: one recording at once.
+- `main.cpp`: CLI flags, the settings, recovery of leftovers, building the adapters (also the phone link with its `[phone]` settings). Service mode (default, `systemd/dlidar.service`): waits for the button until a signal, with the optional pairing button (a second `ButtonInput`; a busy line only warns); `--once`: one recording at once.
 - `button_commands.h`: what a short and a long press do (start/stop by state; save, then `PowerOff()` from `power.cpp`).
-- `settings.h/.cpp`: the settings file `dlidar.toml` in the project root (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the button and LED pins, the Mid-360S IMU setting, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
-- `device_config.h`: the settings' built-in defaults (the sensors' endpoints, work mode and mount, the button and LED pins, the Mid-360S IMU setting, the phone link's `kBleEnabled` and `kBleName`).
+- `pairing_button_commands.h`: what the pairing button does (short: `OpenPairingWindow(false)`; 5 s: `OpenPairingWindow(true)`, forget first; without a phone link a warning).
+- `settings.h/.cpp`: the settings file `dlidar.toml` in the project root (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the button, LED and pairing button pins (all different), the Mid-360S IMU setting, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
+- `device_config.h`: the settings' built-in defaults (the sensors' endpoints, work mode and mount, the button, LED and pairing button pins, the Mid-360S IMU setting, the phone link's `kBleEnabled` and `kBleName`).
 - `sensor_factory.h/.cpp`: the only code that knows every sensor adapter; opens the sensor the settings choose.
-- `signals.h`: SIGINT/SIGTERM/SIGHUP stop (a second signal kills); SIGUSR1 asks for the Bluetooth pairing window (`tools/pair.sh`, the loop in `main.cpp` passes it to `PhoneLink`); fatal signals truncate the CSV.
+- `signals.h`: SIGINT/SIGTERM/SIGHUP stop (a second signal kills); SIGUSR1 asks for the Bluetooth pairing window (`tools/pair.sh`), SIGUSR2 to forget every phone first (`tools/pair.sh --forget`); the loop in `main.cpp` passes both to `PhoneLink`; fatal signals truncate the CSV.
 
 ## Data flow of a recording
 
@@ -126,7 +127,7 @@ A new start is accepted from Idle or Error. A start command in any other state i
 
 The storage opens only once the sensor has started, so a recording that never started (sensor failure, stop during Preparing: Preparing → Idle) leaves no files for dMapper to read.
 
-The phone link only reads: `PhoneEvents` runs on the hub's thread for it and hands events to its own loop thread through the mailbox; requests are answered on the loop from `DeviceApi` (a mutex copy of the status, a statvfs). A client that does not read gets no events until it does (its latest state and progress are kept, the rest counted in `dropped`) and is closed past 64 KiB of unsent bytes, so no client can delay a recording.
+The phone link is an output and an input channel: `PhoneEvents` runs on the hub's thread for it and hands events to its own loop thread through the mailbox; requests are answered on the loop from `DeviceApi` (a mutex copy of the status, a statvfs; `recording.start` / `recording.stop` call `ScannerController`, which never blocks on a recording, so the loop never waits). A stop from the phone saves the recording like the button. A client that does not read gets no events until it does (its latest state and progress are kept, the rest counted in `dropped`) and is closed past 64 KiB of unsent bytes, so no client can delay a recording.
 
 Threads: the controller's worker runs the recordings (capture loop, `CaptureTiming`, the events of the recording) and each recording has a writer thread (storage, storage warnings). The sensor is only used by the worker and the storage only by the writer. The chunk queue between them is not bounded, since dropping chunks would break the recording; past 50 waiting chunks a warning is sent.
 
@@ -177,5 +178,5 @@ No core change is needed; `tests/application/fake_sensor.h` is a minimal example
 - `PointRecord` and the LAZ extra bytes keep the L2's layout (such as `raw_range` as uint16 mm); since format 3 each sensor defines what they mean (`RecordingProfile`, the Mid-360S puts distance and azimuth/elevation there). A sensor with other per-point data needs a new format.
 - The Mid-360S's lens/window status (HMS code 0x0104) is not read: the port's `LensDirtiness()` is a percentage, the Mid-360S gives a warning level.
 - `LidarSensor` has no IMU-clock capability yet. A sensor whose IMU is on another clock relies on the auto mode's fallback.
-- The phone link's commands that change the device (start/stop, the pairing button, a bond allow-list and "forget phone", phase 3) and Wi-Fi setup (phase 4). Today it serves protocol v1 (read-only) over the local socket and Bluetooth LE.
+- The phone link's Wi-Fi setup (phase 4) and logs (phase 5). Today it serves protocol v1 (status, info, start, stop) over the local socket and Bluetooth LE; any bonded phone may command (no per-phone allow-list).
 - The signal stop flag stays set once raised, so it ends every later recording too. Right for both modes: a signal ends the service.

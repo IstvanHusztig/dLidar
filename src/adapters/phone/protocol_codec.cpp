@@ -11,6 +11,7 @@ namespace dlidar::phone
     const char *const kUnsupportedVersion = "unsupported_version";
     const char *const kTooLarge = "too_large";
     const char *const kTooManyClients = "too_many_clients";
+    const char *const kBusy = "busy";
 
     namespace
     {
@@ -215,6 +216,14 @@ namespace dlidar::phone
         for (const DeviceWarning &w : warnings)
             r["warnings"].push_back(WarningFields(w));
         r["summary"] = summary ? SummaryFields(*summary) : Json(nullptr);
+        return Line(Response(id, std::move(r)));
+    }
+
+    std::string EncodeCommandResult(int64_t id, bool accepted, DeviceState state_seen)
+    {
+        Json r;
+        r["accepted"] = accepted;
+        r["state"] = StateName(state_seen);
         return Line(Response(id, std::move(r)));
     }
 

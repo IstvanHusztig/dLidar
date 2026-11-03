@@ -164,9 +164,15 @@ set_target_properties(test_button_commands PROPERTIES RUNTIME_OUTPUT_DIRECTORY $
 target_link_libraries(test_button_commands dlidar_app)
 add_test(NAME button_commands COMMAND test_button_commands)
 
+add_executable(test_pairing_button_commands tests/app/test_pairing_button_commands.cpp)
+set_target_properties(test_pairing_button_commands PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_pairing_button_commands dlidar_app)
+add_test(NAME pairing_button_commands COMMAND test_pairing_button_commands)
+
 add_executable(test_settings tests/app/test_settings.cpp)
 set_target_properties(test_settings PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_settings dlidar_app)
+target_compile_definitions(test_settings PRIVATE DLIDAR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 add_test(NAME settings COMMAND test_settings)
 
 foreach(t livox_conversion livox_sensor livox_time_alignment livox_packet_pool)

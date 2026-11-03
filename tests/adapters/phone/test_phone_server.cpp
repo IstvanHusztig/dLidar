@@ -9,6 +9,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -22,9 +25,19 @@ namespace
 struct FakeControl : DeviceControl
 {
     DeviceStatus status;
+    int starts = 0, stops = 0;
     DeviceStatus Status() const override { return status; }
-    bool StartRecording(DeviceState *) override { return false; }
-    void StopRecording() override {}
+    bool StartRecording(DeviceState *seen) override
+    {
+        if (seen)
+            *seen = status.state;
+        if (status.state != DeviceState::Idle && status.state != DeviceState::Error)
+            return false;
+        starts++;
+        status.state = DeviceState::Preparing;
+        return true;
+    }
+    void StopRecording() override { stops++; }
 };
 
 struct FakeSpace : StorageSpace
@@ -48,6 +61,7 @@ struct FakeConnection : Connection
     bool stalled = false;
     size_t unread = 0;
     bool closed = false;
+    const char *Kind() const override { return "phone"; }
 
     void Send(const std::string &bytes) override
     {
@@ -288,7 +302,7 @@ void TestStatusAndRequests()
     CHECK(v.size() == 5, "%zu responses", v.size());
     if (v.size() == 5)
     {
-        CHECK(v[0]["id"] == 2 && v[0]["result"]["commands"].size() == 3, "hello");
+        CHECK(v[0]["id"] == 2 && v[0]["result"]["commands"].size() == 5, "hello");
         CHECK(v[1]["id"] == 3 && v[1]["result"]["sensor"] == "unitree_l2", "info.get");
         CHECK(v[2]["id"].is_null() && v[2]["error"]["code"] == "bad_request", "unreadable line in its place");
         CHECK(v[3]["id"] == 4 && v[3]["ok"] == true, "status.get");
@@ -327,6 +341,59 @@ void TestStatusAndRequests()
     r.server.OnMailbox(); // no client: nothing to deliver, no crash
     CHECK(r.server.Drained(), "drained without clients");
 }
+void TestRecordingCommands()
+{
+    printf("recording.start and recording.stop: answers, busy, log lines, hello\n");
+    Rig r;
+    FakeConnection c;
+    r.server.OnOpen(c);
+    std::ostringstream log;
+    std::streambuf *old = std::cout.rdbuf(log.rdbuf());
+    auto ask = [&](int id, const char *cmd, const char *extra = "") {
+        r.server.OnBytes(c, "{\"v\":1,\"id\":" + std::to_string(id) + ",\"cmd\":\"" + cmd + "\"" + extra + "}\n");
+        std::vector<Json> v = c.Lines();
+        return v.empty() ? Json() : v.back();
+    };
+
+    r.control.status.state = DeviceState::Idle;
+    Json j = ask(1, "recording.start");
+    CHECK(j["id"] == 1 && j["ok"] == true && j["result"]["accepted"] == true && j["result"]["state"] == "idle",
+          "start from idle: %s", j.dump().c_str());
+    CHECK(r.control.starts == 1, "started once");
+    r.control.status.state = DeviceState::Recording;
+    j = ask(2, "recording.start");
+    CHECK(j["result"]["accepted"] == false && j["result"]["state"] == "recording", "start while recording");
+    j = ask(3, "recording.stop");
+    CHECK(j["result"]["accepted"] == true && j["result"]["state"] == "recording" && r.control.stops == 1,
+          "stop while recording");
+    r.control.status.state = DeviceState::Finalizing;
+    j = ask(4, "recording.start");
+    CHECK(j["id"] == 4 && j["ok"] == false && j["error"]["code"] == "busy" &&
+              j["error"]["message"].get<std::string>().find("saved") != std::string::npos,
+          "busy while saving: %s", j.dump().c_str());
+    j = ask(5, "recording.stop");
+    CHECK(j["result"]["accepted"] == false && j["result"]["state"] == "finalizing", "stop while saving");
+    r.control.status.state = DeviceState::Idle;
+    j = ask(6, "recording.stop");
+    CHECK(j["result"]["accepted"] == false && j["result"]["state"] == "idle", "stop while idle");
+    j = ask(7, "recording.start", ",\"args\":{\"seconds\":10}");
+    CHECK(j["ok"] == false && j["error"]["code"] == "bad_request", "unknown argument rejected");
+    CHECK(r.control.starts == 1 && r.control.stops == 1, "nothing else called");
+    j = ask(8, "hello");
+    std::vector<std::string> cmds = j["result"]["commands"];
+    CHECK(std::count(cmds.begin(), cmds.end(), "recording.start") == 1 &&
+              std::count(cmds.begin(), cmds.end(), "recording.stop") == 1,
+          "hello lists both");
+
+    std::cout.rdbuf(old);
+    std::string l = log.str();
+    CHECK(l.find("phone: start\n") != std::string::npos, "log: start");
+    CHECK(l.find("phone: start ignored, recording\n") != std::string::npos, "log: ignored");
+    CHECK(l.find("phone: stop\n") != std::string::npos, "log: stop");
+    CHECK(l.find("phone: start refused, the last recording is still being saved\n") != std::string::npos,
+          "log: busy");
+    CHECK(l.find("phone: stop ignored, idle\n") != std::string::npos, "log: stop ignored");
+}
 } // namespace
 
 int main()
@@ -336,5 +403,6 @@ int main()
     TestDropped();
     TestMailboxOverflow();
     TestStatusAndRequests();
+    TestRecordingCommands();
     return FinishTests("phone_server");
 }

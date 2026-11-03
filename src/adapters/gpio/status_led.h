@@ -24,6 +24,10 @@ namespace dlidar::gpio
 
         void OnState(const DeviceStatus &status) override;
 
+        // The Bluetooth pairing window opened (true) or closed (false); from
+        // any thread (the phone link's). Shown when no other pattern is.
+        void SetPairing(bool open);
+
         uint64_t WriteFailures() const { return failures_; }
 
     private:
@@ -31,6 +35,8 @@ namespace dlidar::gpio
         std::mutex mutex_;
         DeviceState state_ = DeviceState::Idle;
         std::chrono::steady_clock::time_point since_ = std::chrono::steady_clock::now();
+        bool pairing_ = false;
+        std::chrono::steady_clock::time_point pairing_since_{};
         std::atomic<bool> stop_{false};
         std::atomic<uint64_t> failures_{0};
         std::thread thread_;

@@ -274,6 +274,35 @@ void TestRequestsAndRecording()
     CHECK(r && (*r)["result"]["state"] == "idle" && !(*r)["result"]["summary"].is_null(), "status after");
 }
 
+void TestRemoteRecording()
+{
+    printf("recording.start and recording.stop over the socket\n");
+    TempDir dir;
+    Device d(dir.path);
+    if (!d.link)
+        return;
+    d.sensor.endless = true;
+    Client c(d.link->SocketPath());
+    CHECK(c.Send("{\"v\":1,\"id\":1,\"cmd\":\"recording.start\"}\n"), "send start");
+    std::optional<Json> r = c.Next();
+    CHECK(r && (*r)["id"] == 1 && (*r)["result"]["accepted"] == true && (*r)["result"]["state"] == "idle",
+          "start accepted");
+    std::vector<Json> v = c.EventsUntil("recording");
+    CHECK(!v.empty() && v.back()["data"]["state"] == "recording", "recording");
+    CHECK(WaitFor([&] { return d.controller->Status().chunks > 0; }), "chunks written");
+    CHECK(c.Send("{\"v\":1,\"id\":2,\"cmd\":\"recording.stop\"}\n"), "send stop");
+    // The answer may come after progress events.
+    std::optional<Json> a;
+    while ((a = c.Next()) && !a->contains("id"))
+        ;
+    CHECK(a && (*a)["id"] == 2 && (*a)["result"]["accepted"] == true && (*a)["result"]["state"] == "recording",
+          "stop accepted");
+    v = c.EventsUntil("idle");
+    CHECK(!v.empty() && v.back()["data"]["state"] == "idle" && v.back()["data"]["last_ok"] == true, "saved");
+    d.controller->WaitIdle();
+    CHECK(d.storage.opens == 1 && d.storage.closes == 1 && !d.storage.chunks.empty(), "one complete recording");
+}
+
 void TestFifthClient()
 {
     printf("a fifth client gets too_many_clients\n");
@@ -428,6 +457,7 @@ int main()
     int threads = Threads();
     TestSocketDirectory();
     TestRequestsAndRecording();
+    TestRemoteRecording();
     TestFifthClient();
     TestStalledClient();
     TestDisconnectMidLine();

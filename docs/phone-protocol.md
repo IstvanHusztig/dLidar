@@ -48,7 +48,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 → {"v":1,"id":6,"cmd":"hello"}
 ← {"id":5,"ok":true,"result":{"version":"0e1e413","sensor":"unitree_l2","sensor_model":"unitree_l2","recording_format":3,"protocol":1}}
 ← {"id":null,"ok":false,"error":{"code":"bad_request","message":"not valid JSON"}}
-← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
+← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
 
 ## Events and gaps
@@ -65,6 +65,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 | `bad_request` | not JSON, not an object, `v`/`id`/`cmd` missing or of the wrong type or range, `args` not an object, an argument the command does not define (the message names it) | the request's id, or `null` if none could be read |
 | `unknown_command` | `cmd` is not a command of this server | the request's id |
 | `unsupported_version` | `v` is not 1; the error carries `"supported":[1]` | the request's id |
+| `busy` | not now: `recording.start` while the last recording is still being saved (`finalizing`); try again once the state is `idle` | the request's id |
 | `too_large` | a line over 4096 bytes | `null` |
 | `too_many_clients` | another client is already connected; the connection is then closed | `null` |
 
@@ -86,7 +87,7 @@ Optional; a client is never required to send it first. Lists the server's comman
 
 ```
 → {"v":1,"id":1,"cmd":"hello"}
-← {"id":1,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
+← {"id":1,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
 
 ### `status.get`
@@ -123,6 +124,45 @@ The state is never older than a `state` event the client already received.
 ← {"id":3,"ok":true,"result":{"version":"0e1e413-dirty","sensor":"livox_mid360s","sensor_model":"livox_mid360s","recording_format":3,"protocol":1}}
 ```
 
+### `recording.start`
+
+Starts a recording, as a short press of the record button does in `idle` or `error`. No arguments. The answer comes at once and carries `accepted` and `state`, the state the command saw:
+
+| Answer | When |
+|---|---|
+| `accepted:true` | the state was `idle` or `error`; a recording starts, and the `state` events `preparing`, `recording`, … follow |
+| `accepted:false` | nothing to do: a recording is already `preparing` or `recording`, and goes on unaffected |
+| error `busy` | the last recording is still `finalizing`; nothing starts. Try again once the state is `idle`. |
+
+```
+→ {"v":1,"id":5,"cmd":"recording.start"}
+← {"id":5,"ok":true,"result":{"accepted":true,"state":"idle"}}
+→ {"v":1,"id":6,"cmd":"recording.start"}
+← {"id":6,"ok":true,"result":{"accepted":false,"state":"recording"}}
+→ {"v":1,"id":9,"cmd":"recording.start"}
+← {"id":9,"ok":false,"error":{"code":"busy","message":"the last recording is still being saved; try again when it is idle"}}
+```
+
+A start from `error` answers `{"accepted":true,"state":"error"}`. Whether the sensor started is told by the events (`recording`, or `error` with a `sensor_failed` warning), not by the answer.
+
+### `recording.stop`
+
+Stops the running recording, as a short press of the record button does in `preparing` or `recording`: the files are saved normally. No arguments.
+
+| Answer | When |
+|---|---|
+| `accepted:true` | the state was `recording` (then `finalizing` and `idle` follow) or `preparing` (the start-up is abandoned, no files are written, and `idle` follows) |
+| `accepted:false` | nothing to do: the state was `idle`, `error` or `finalizing` |
+
+```
+→ {"v":1,"id":7,"cmd":"recording.stop"}
+← {"id":7,"ok":true,"result":{"accepted":true,"state":"recording"}}
+→ {"v":1,"id":8,"cmd":"recording.stop"}
+← {"id":8,"ok":true,"result":{"accepted":false,"state":"idle"}}
+```
+
+Every client may send both commands: the bonded phone over BLE and a local socket client. They are handled one at a time with the record button, so a stop from the phone and a button press at the same moment save the recording once. dLidar prints one line per command (`phone: start`, `local client: stop ignored, idle`).
+
 ## Events
 
 | Event | `data` |
@@ -149,7 +189,7 @@ A whole recording, as a connected client sees it:
 
 ## Results that come later
 
-Used from a later phase on (`wifi.connect`). A command whose result takes time answers `{"accepted":true}` at once; the result comes later as event `result`, with `op` (that request's id) at the top level and `ok` plus `result` or `error` as in a response, and no `data`. It goes only to the connection that sent the request and is never left out; if that connection is lost first, the result is lost, and the command's status query gives the outcome.
+Used from a later phase on (`wifi.connect`). `recording.start` and `recording.stop` are not of this kind: their answer is final, and the `state` events show what follows. A command whose result takes time answers `{"accepted":true}` at once; the result comes later as event `result`, with `op` (that request's id) at the top level and `ok` plus `result` or `error` as in a response, and no `data`. It goes only to the connection that sent the request and is never left out; if that connection is lost first, the result is lost, and the command's status query gives the outcome.
 
 ```
 → {"v":1,"id":12,"cmd":"wifi.connect","args":{"ssid":"Home","psk":"secret123","security":"wpa2-psk"}}

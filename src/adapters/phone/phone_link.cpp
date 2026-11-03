@@ -55,6 +55,7 @@ namespace dlidar::phone
             p->loop.Call([&] {
                 BluezPeripheral::Options o;
                 o.name = ble.name;
+                o.on_pairing = ble.on_pairing;
                 p->peripheral = std::make_unique<BluezPeripheral>(p->loop.Context(), o);
                 p->ble = std::make_unique<BleLink>(*p->server, *p->peripheral, p->loop);
                 p->peripheral->Attach(*p->ble);
@@ -68,18 +69,23 @@ namespace dlidar::phone
 
     std::string PhoneLink::SocketPath() const { return impl_->socket->Path(); }
 
-    void PhoneLink::OpenPairingWindow(std::chrono::seconds seconds)
+    void PhoneLink::OpenPairingWindow(bool forget, std::chrono::seconds seconds)
     {
         Impl *p = impl_.get();
         if (p->stopped)
             return;
         if (!p->peripheral)
         {
-            std::cerr << "WARNING: no pairing window: Bluetooth is off ([phone] ble = false)" << std::endl;
+            std::cerr << "WARNING: no pairing window" << (forget ? " and no phones forgotten" : "")
+                      << ": Bluetooth is off ([phone] ble = false)" << std::endl;
             return;
         }
-        p->loop.Invoke([p, seconds] {
-            if (p->peripheral)
+        p->loop.Invoke([p, forget, seconds] {
+            if (!p->peripheral)
+                return;
+            if (forget)
+                p->peripheral->ForgetPhones(seconds);
+            else
                 p->peripheral->OpenPairingWindow(seconds);
         });
     }

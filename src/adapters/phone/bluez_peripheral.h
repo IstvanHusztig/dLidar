@@ -3,6 +3,7 @@
 #include "adapters/phone/ble_link.h"
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -24,6 +25,9 @@ namespace dlidar::phone
         struct Options
         {
             std::string name = "dLidar"; // advertised (BlueZ puts it in the scan response)
+            // On the loop thread: true once the adapter is really pairable,
+            // false when the window closes or BlueZ goes away (the LED).
+            std::function<void(bool open)> on_pairing;
         };
 
         BluezPeripheral(GMainContext *context, Options options);
@@ -39,6 +43,12 @@ namespace dlidar::phone
         // when a phone pairs and when it closes. If BlueZ is not there yet,
         // the window opens when it appears, for the time that remains.
         void OpenPairingWindow(std::chrono::seconds seconds);
+
+        // Removes every bonded phone from the adapter (RemoveDevice, which
+        // also disconnects a connected one), prints how many, then opens the
+        // pairing window for `seconds`. Without an adapter only a warning,
+        // and the window opens when it appears.
+        void ForgetPhones(std::chrono::seconds seconds);
 
         // Best effort, asynchronous: unregisters the advertisement, the
         // application and an open window's agent, sets Pairable false.

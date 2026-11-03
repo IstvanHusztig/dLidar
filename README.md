@@ -2,7 +2,7 @@
 
 **This code is not production ready. The project is in development.**
 
-dLidar is the software of a handheld LiDAR scanner. It runs on a Raspberry Pi 5 (at least 2 GB RAM), records a **Livox Mid-360S** or a **Unitree L2** (point cloud and IMU) into one LAZ file and one IMU CSV per recording, and is controlled by a push button with a status LED. A phone app can watch the scanner over Bluetooth LE. The recordings are processed by [dMapper](https://github.com/IstvanHusztig/dMapper), our SLAM solution.
+dLidar is the software of a handheld LiDAR scanner. It runs on a Raspberry Pi 5 (at least 2 GB RAM), records a **Livox Mid-360S** or a **Unitree L2** (point cloud and IMU) into one LAZ file and one IMU CSV per recording, and is controlled by a push button with a status LED. A phone app can watch it and start and stop recordings over Bluetooth LE. The recordings are processed by [dMapper](https://github.com/IstvanHusztig/dMapper), our SLAM solution.
 
 The full manual is [`docs/manual.html`](docs/manual.html).
 
@@ -18,7 +18,7 @@ ctest --test-dir build --output-on-failure # no sensor needed
 
 ## Settings
 
-dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button and LED pins, and the phone link (`[phone] ble`, `name`). Every key is listed there with its default, and explained in the manual ("Settings").
+dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button, LED and pairing button pins, and the phone link (`[phone] ble`, `name`). Every key is listed there with its default, and explained in the manual ("Settings").
 
 ## Run
 
@@ -41,10 +41,10 @@ Recordings go to `~/PointCloudDump/` (numbered `lidarNNNN.laz`, `imuNNNN.csv` an
 
 ## Phone link
 
-dLidar serves a read-only protocol (state, progress, warnings, summary, free space, sensor) over Bluetooth LE and a local socket. The contract for app authors is [`docs/phone-protocol.md`](docs/phone-protocol.md).
+dLidar serves a protocol (state, progress, warnings, summary, free space, sensor; `recording.start` and `recording.stop`) over Bluetooth LE and a local socket. Any bonded phone may start and stop; the journal says who did (`phone: start`). The contract for app authors is [`docs/phone-protocol.md`](docs/phone-protocol.md).
 
 - **Bluetooth LE:** the scanner advertises as `dLidar` while no phone is connected, one phone at a time, **bonded phones only**.
-- **Pairing a phone** (until the pairing button is mounted): run `tools/pair.sh` on the Pi, then within 2 minutes connect with the app and tap **Pair** (no PIN). Outside this window the Pi refuses every pairing. A phone that was unpaired on the phone: `tools/pair.sh --forget` (removes the Pi's old bonds first).
+- **Pairing a phone:** press the pairing button (GPIO 22, pin 15; or run `tools/pair.sh` on the Pi), then within 2 minutes connect with the app and tap **Pair** (no PIN). The LED flashes twice a second while the window is open. Outside this window the Pi refuses every pairing. A phone that was unpaired on the phone, or a lost one: hold the pairing button 5 s (or `tools/pair.sh --forget`), which forgets every bonded phone first.
 - **On the Pi itself:** `tools/phone_client.py status.get` (or `--follow` for events) talks to the socket `/run/dlidar/dlidar.sock`.
 
 ## Documentation

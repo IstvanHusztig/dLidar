@@ -22,7 +22,8 @@ const std::vector<std::string> kWifiArgs{"ssid", "psk"};
 
 const std::vector<std::string> *Args(const std::string &cmd)
 {
-    if (cmd == "hello" || cmd == "status.get" || cmd == "info.get")
+    if (cmd == "hello" || cmd == "status.get" || cmd == "info.get" || cmd == "recording.start" ||
+        cmd == "recording.stop")
         return &kNoArgs;
     if (cmd == "test.args")
         return &kWifiArgs;
@@ -285,8 +286,15 @@ void TestDocumentExamples()
     Request r;
     DecodeError e;
     CHECK(!DecodeRequest("this is not JSON", args, r, e) && replies.count(EncodeError(e)), "not JSON example");
-    CHECK(replies.count(EncodeHello(1, {"hello", "status.get", "info.get"}, {"state", "warning", "progress", "summary"})),
+    CHECK(replies.count(EncodeHello(1, {"hello", "status.get", "info.get", "recording.start", "recording.stop"},
+                                    {"state", "warning", "progress", "summary"})),
           "hello example");
+    CHECK(replies.count(EncodeCommandResult(5, true, DeviceState::Idle)), "recording.start example");
+    CHECK(replies.count(EncodeCommandResult(6, false, DeviceState::Recording)), "start ignored example");
+    CHECK(replies.count(EncodeCommandResult(7, true, DeviceState::Recording)), "recording.stop example");
+    CHECK(replies.count(EncodeCommandResult(8, false, DeviceState::Idle)), "stop ignored example");
+    CHECK(replies.count(EncodeError(9, kBusy, "the last recording is still being saved; try again when it is idle")),
+          "busy example");
     CHECK(replies.count(EncodeError(std::nullopt, kTooManyClients, "another client is connected")),
           "too_many_clients example");
 }

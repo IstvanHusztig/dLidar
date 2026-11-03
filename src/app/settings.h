@@ -48,11 +48,12 @@ struct LivoxMid360sSettings
 	double imu_gyro_range_dps = 0; // 2000, 1000, 500, 250, 125, 62.5, 31.25 or 15.625
 };
 
-// The push button and the status LED on the Pi's 40-pin header (docs/manual.html, "Wiring and pinout").
+// The push button, the status LED and the pairing button on the Pi's 40-pin header (docs/manual.html, "Wiring and pinout").
 struct GpioSettings
 {
 	int button_gpio = 0; // to GND, internal pull-up
 	int led_gpio = 0;    // through a resistor to GND, active high
+	int pairing_button_gpio = 0; // to GND, internal pull-up; optional (a warning if unusable)
 };
 
 // The phone link over Bluetooth LE (docs/manual.html, "Phone link").

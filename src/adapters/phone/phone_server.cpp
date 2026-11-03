@@ -2,6 +2,8 @@
 
 #include "adapters/phone/protocol_codec.h"
 
+#include <iostream>
+
 namespace dlidar::phone
 {
     namespace
@@ -12,18 +14,41 @@ namespace dlidar::phone
     PhoneServer::PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock)
         : api_(api), mailbox_(std::move(mailbox)), clock_(clock), last_status_(api.Status().status)
     {
-        AddCommand("hello", {}, [this](const Request &r) { return EncodeHello(r.id, command_names_, kEvents); });
-        AddCommand("status.get", {}, [this](const Request &r) {
+        AddCommand("hello", {}, [this](Connection &, const Request &r) {
+            return EncodeHello(r.id, command_names_, kEvents);
+        });
+        AddCommand("status.get", {}, [this](Connection &, const Request &r) {
             StatusView v;
             v.status = last_status_;
             v.free_bytes = api_.Status().free_bytes;
             return EncodeStatus(r.id, v, std::vector<DeviceWarning>(warnings_.begin(), warnings_.end()), summary_);
         });
-        AddCommand("info.get", {}, [this](const Request &r) { return EncodeInfo(r.id, api_.Info()); });
+        AddCommand("info.get", {}, [this](Connection &, const Request &r) { return EncodeInfo(r.id, api_.Info()); });
+        AddCommand("recording.start", {}, [this](Connection &c, const Request &r) { return RecordingCommand(c, r, true); });
+        AddCommand("recording.stop", {}, [this](Connection &c, const Request &r) { return RecordingCommand(c, r, false); });
+    }
+
+    // recording.start / recording.stop (design D1-D3): DeviceApi decides, the
+    // answer carries the state the command saw, and one console line says
+    // who did what, like the record button's "button: start".
+    std::string PhoneServer::RecordingCommand(Connection &c, const Request &r, bool start)
+    {
+        const char *what = start ? "start" : "stop";
+        CommandResult res = start ? api_.Start() : api_.Stop();
+        if (res.busy)
+        {
+            std::cout << c.Kind() << ": " << what << " refused, the last recording is still being saved" << std::endl;
+            return EncodeError(r.id, kBusy, "the last recording is still being saved; try again when it is idle");
+        }
+        if (res.accepted)
+            std::cout << c.Kind() << ": " << what << std::endl;
+        else
+            std::cout << c.Kind() << ": " << what << " ignored, " << StateName(res.state_seen) << std::endl;
+        return EncodeCommandResult(r.id, res.accepted, res.state_seen);
     }
 
     void PhoneServer::AddCommand(const std::string &name, std::vector<std::string> args,
-                                 std::function<std::string(const Request &)> run)
+                                 std::function<std::string(Connection &, const Request &)> run)
     {
         commands_[name] = Command{std::move(args), std::move(run)};
         command_names_.push_back(name);
@@ -54,7 +79,7 @@ namespace dlidar::phone
         if (!DecodeRequest(line, args, request, error))
             c.Send(EncodeError(error));
         else
-            c.Send(commands_.at(request.cmd).run(request));
+            c.Send(commands_.at(request.cmd).run(c, request));
     }
 
     void PhoneServer::OnWritable(Connection &c)

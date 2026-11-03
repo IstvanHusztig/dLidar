@@ -4,6 +4,7 @@
 #include "application/remote/device_api.h"
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -14,6 +15,9 @@ namespace dlidar::phone
     {
         bool enabled = false;          // [phone] ble
         std::string name = "dLidar";   // [phone] name
+        // Called on the phone loop thread: true when the pairing window is
+        // really open, false when it closes or BlueZ goes away (the LED).
+        std::function<void(bool open)> on_pairing;
     };
 
     // The phone link as the composition root sees it (design D6): the loop
@@ -36,9 +40,11 @@ namespace dlidar::phone
         std::shared_ptr<DeviceEvents> Events() const;
         std::string SocketPath() const;
 
-        // Opens the Bluetooth pairing window for `seconds` (SIGUSR1, later the
-        // pairing button). With BLE off only a warning. Thread-safe.
-        void OpenPairingWindow(std::chrono::seconds seconds = std::chrono::seconds(120));
+        // Opens the Bluetooth pairing window for `seconds`; with `forget`,
+        // first removes every bonded phone (openspec phone-link-commands,
+        // design D4). The one entry for the pairing button, SIGUSR1 and
+        // SIGUSR2. With BLE off only a warning. Thread-safe.
+        void OpenPairingWindow(bool forget = false, std::chrono::seconds seconds = std::chrono::seconds(120));
         size_t Connections();
 
         // Delivers what is pending, the final idle or error state included,

@@ -26,6 +26,8 @@ namespace dlidar::phone
 
         size_t Pending() const override { return link_.queued_; }
 
+        const char *Kind() const override { return "phone"; }
+
         void Close() override { link_.RequestClose(); }
 
         bool closed = false;
