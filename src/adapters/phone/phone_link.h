@@ -9,15 +9,17 @@
 
 namespace dlidar::phone
 {
-    // The phone link as the composition root sees it (design D6): the loop
-    // thread, the protocol server and the local socket. Events() goes to
-    // hub.AddAsync. A problem only prints a warning; dLidar records as usual.
+    // The [phone] settings the link needs for Bluetooth LE.
     struct BleOptions
     {
         bool enabled = false;          // [phone] ble
         std::string name = "dLidar";   // [phone] name
     };
 
+    // The phone link as the composition root sees it (design D6): the loop
+    // thread, the protocol server, the local socket and Bluetooth LE.
+    // Events() goes to hub.AddAsync. A problem only prints a warning; dLidar
+    // records as usual.
     class PhoneLink
     {
     public:

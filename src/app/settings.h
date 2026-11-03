@@ -58,8 +58,8 @@ struct GpioSettings
 // The phone link over Bluetooth LE (docs/manual.html, "Phone link").
 struct PhoneSettings
 {
-	bool ble = true;               // serve the phone link over Bluetooth LE
-	std::string name;              // the advertised name, 1-20 printable ASCII characters
+	bool ble = false;  // serve the phone link over Bluetooth LE (default kBleEnabled, set by DefaultSettings())
+	std::string name;  // the advertised name, 1-20 printable ASCII characters (default kBleName)
 };
 
 struct DeviceSettings
