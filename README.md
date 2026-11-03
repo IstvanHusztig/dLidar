@@ -1,8 +1,61 @@
-This Code is not production ready!
-This project is in Development!
+# dLidar
 
-Once ready a full description and documentation will be provided
+**This code is not production ready. The project is in development.**
 
+dLidar is the software of a handheld LiDAR scanner. It runs on a Raspberry Pi 5 (at least 2 GB RAM), records a **Livox Mid-360S** or a **Unitree L2** (point cloud and IMU) into one LAZ file and one IMU CSV per recording, and is controlled by a push button with a status LED. A phone app can watch the scanner over Bluetooth LE. The recordings are processed by [dMapper](https://github.com/IstvanHusztig/dMapper), our SLAM solution.
 
-after cloning the repo run
-git submodule update --init --recursive
+The full manual is [`docs/manual.html`](docs/manual.html).
+
+## Build
+
+```bash
+git submodule update --init --recursive    # LASzip, Livox-SDK2, nlohmann/json
+sudo apt install libglib2.0-dev            # GIO, for the phone link and Bluetooth
+cmake --preset ninja                       # configures into build/
+cmake --build build                        # bin/dLidar
+ctest --test-dir build --output-on-failure # no sensor needed
+```
+
+## Settings
+
+dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button and LED pins, and the phone link (`[phone] ble`, `name`, `pairing_at_start`). Every key is listed there with its default, and explained in the manual ("Settings").
+
+## Run
+
+**As a service** (the normal case on the device): dLidar starts at boot, waits for the button, and is visible to the phone. Short press: start; next short press: stop and save; hold 5 s: save and power down. Installation (once): see the manual, "Running as a service". It installs `systemd/dlidar.service` and the power-off rule, and sets `JustWorksRepairing = confirm` in `/etc/bluetooth/main.conf`.
+
+```bash
+systemctl status dlidar
+journalctl -fu dlidar                      # what it does, live
+```
+
+**By hand** (tests over SSH): only one dLidar can run at a time, so stop the service first.
+
+```bash
+sudo systemctl stop dlidar
+./bin/dLidar --once                        # one recording at once, Ctrl-C saves it
+sudo systemctl start dlidar
+```
+
+Recordings go to `~/PointCloudDump/` (numbered `lidarNNNN.laz`, `imuNNNN.csv` and diagnostics).
+
+## Phone link
+
+dLidar serves a read-only protocol (state, progress, warnings, summary, free space, sensor) over Bluetooth LE and a local socket. The contract for app authors is [`docs/phone-protocol.md`](docs/phone-protocol.md).
+
+- **Bluetooth LE:** the scanner advertises as `dLidar` while no phone is connected, one phone at a time, **bonded phones only**.
+- **Pairing a phone** (until the pairing button is mounted):
+  1. Set `pairing_at_start = true` under `[phone]` in `dlidar.toml`.
+  2. Run `sudo systemctl restart dlidar`.
+  3. Within 2 minutes, connect with the app and tap **Pair** (no PIN).
+  4. Set it back to `false` and restart the service. Outside this window the Pi refuses every pairing.
+- **On the Pi itself:** `tools/phone_client.py status.get` (or `--follow` for events) talks to the socket `/run/dlidar/dlidar.sock`.
+
+## Documentation
+
+- [`docs/manual.html`](docs/manual.html): how a recording works, the files, settings, wiring, the service, the phone link, failures.
+- [`docs/phone-protocol.md`](docs/phone-protocol.md): the phone protocol.
+- [`docs/recording-format.md`](docs/recording-format.md): every output file and field.
+- [`docs/architecture.md`](docs/architecture.md): the code's layers and how to extend them.
+- [`docs/livox_mid360s.md`](docs/livox_mid360s.md): the Mid-360S and its bring-up.
+- [`CLAUDE.md`](CLAUDE.md): the reference for development with Claude Code.
