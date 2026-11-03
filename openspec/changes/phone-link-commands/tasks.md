@@ -17,7 +17,7 @@
 ## 3. Forget and the pairing window (D4, D6, D7)
 
 - [x] 3.1 `BluezPeripheral::ForgetPhones()` (asynchronous `RemoveDevice` for every bonded device, then the window, printing `Bluetooth: forgot N phone(s)`). `PhoneLink::OpenPairingWindow(bool forget)`. `BleOptions::on_pairing`, called on open, close and BlueZ loss.
-- [ ] 3.2 `SIGUSR2` → `ForgetRequested()` in `signals.h`, polled by `main.cpp` next to `SIGUSR1`. `tools/pair.sh --forget` sends `SIGUSR2`. Verify on the dev board: with the phone bonded, `tools/pair.sh --forget` prints the forgotten count in the journal, the phone is disconnected, and it pairs anew within the window.
+- [x] 3.2 `SIGUSR2` → `ForgetRequested()` in `signals.h`, polled by `main.cpp` next to `SIGUSR1`. `tools/pair.sh --forget` sends `SIGUSR2`. Verify on the dev board: with the phone bonded, `tools/pair.sh --forget` prints the forgotten count in the journal, the phone is disconnected, and it pairs anew within the window.
 
 ## 4. Pairing button and LED (D5, D6, D8)
 
@@ -27,8 +27,8 @@
 
 ## 5. On the dev board
 
-- [ ] 5.1 With the service and no sensor: `tools/phone_client.py recording.start` gives `accepted:true` and `phone_client.py --follow` shows preparing → error. `recording.stop` while preparing gives `accepted:true` and no files. `recording.start` while preparing gives `accepted:false`. The journal shows the `local client: …` lines. With the phone: the same through the app once its agent offers start and stop.
-- [ ] 5.2 Pairing button (when mounted, GPIO 22 / pin 15 to GND / pin 20):
+- [x] 5.1 With the service and no sensor: `tools/phone_client.py recording.start` gives `accepted:true` and `phone_client.py --follow` shows preparing → error. `recording.stop` while preparing gives `accepted:true` and no files. `recording.start` while preparing gives `accepted:false`. The journal shows the `local client: …` lines. With the phone: the same through the app once its agent offers start and stop.
+- [ ] 5.2 **Parked** (user, 2026-11-03: the button and LED are mounted when the lidar arrives). Pairing button (when mounted, GPIO 22 / pin 15 to GND / pin 20):
   - a short press opens the window, and the LED flashes twice a second;
   - a 5 s hold forgets the phones and opens the window;
   - a press during a recording changes nothing in it;
