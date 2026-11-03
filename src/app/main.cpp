@@ -129,6 +129,9 @@ int main(int argc, char *argv[])
 		{
 			std::cerr << "Cannot use the push button on GPIO " << settings.gpio.button_gpio << " ([button] gpio): " << error
 					  << std::endl;
+			if (error.find("busy") != std::string::npos)
+				std::cerr << "Is dLidar already running as the service? Stop it first: sudo systemctl stop dlidar"
+						  << std::endl;
 			return 2;
 		}
 	}
