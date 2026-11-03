@@ -89,6 +89,13 @@ dLidar SHALL serve one phone at a time over BLE:
 - **WHEN** the connected phone disconnects
 - **THEN** dLidar advertises again within 2 s and the phone can reconnect
 
+### Requirement: Idle phones are disconnected
+A connected phone that has not turned on TX notifications within 30 s (of connecting, of dLidar's start, or of turning them off) SHALL be disconnected, so a leftover link never keeps the scanner from advertising.
+
+#### Scenario: Leftover link
+- **WHEN** dLidar restarts while a phone keeps its LE link to the Pi but no app subscribes
+- **THEN** dLidar disconnects that phone after 30 s and advertises again, so the app finds it
+
 ### Requirement: Slow link never holds up the device
 Notifications SHALL be sent at a bounded rate. A BLE connection SHALL follow the same rules as any other client:
 - events are held (latest state and progress kept, the rest counted in `dropped`) while its unsent output is backlogged;
@@ -112,7 +119,7 @@ A missing adapter, a stopped bluetoothd, Bluetooth switched off, or a failed reg
 - **THEN** it prints one warning, starts as fast as without the phone link, and records with the button as usual
 
 ### Requirement: Advertised name setting
-`[phone] name` SHALL be 1 to 20 printable ASCII characters (it fits the scan response); anything else stops the start with the line number, like every settings error. `[phone] ble` SHALL be `true` or `false`.
+`[phone] name` SHALL be 1 to 20 printable ASCII characters (it fits the scan response); anything else stops the start with the line number, like every settings error. dLidar SHALL also give the Bluetooth adapter this name, so a connected or bonded phone shows the same name as when scanning. `[phone] ble` SHALL be `true` or `false`.
 
 #### Scenario: Name too long
 - **WHEN** the settings file has `name = "dLidar scanner number 1"` (23 characters) under `[phone]`

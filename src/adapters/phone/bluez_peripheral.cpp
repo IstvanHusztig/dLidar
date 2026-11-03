@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <iostream>
+#include <set>
 #include <vector>
 
 namespace dlidar::phone
@@ -123,6 +124,7 @@ namespace dlidar::phone
         // off quietly for a moment after the adapter is found.
         std::chrono::steady_clock::time_point adapter_found{};
         GSource *check_timer = nullptr; // the deferred adapter check
+        std::set<GSource *> one_shots;  // After() timers still pending
 
         std::shared_ptr<int> stop_pending = std::make_shared<int>(0);
 
@@ -350,6 +352,13 @@ namespace dlidar::phone
                 g_variant_iter_free(it);
                 if (!window_wanted)
                     SetAdapter("Pairable", g_variant_new_boolean(FALSE)); // only the pairing window makes it pairable
+                // The adapter's name is what a connected or bonded phone shows
+                // (the GAP Device Name); without it, the hostname. BlueZ keeps it.
+                SetAdapter("Alias", g_variant_new_string(options.name.c_str()), [](GVariant *res, GError *e) {
+                    if (!res)
+                        std::cerr << "WARNING: Bluetooth: cannot set the adapter's name (" << e->message << ")"
+                                  << std::endl;
+                });
                 RegisterApplication();
                 if (window_wanted)
                     StartWindow();
@@ -430,16 +439,58 @@ namespace dlidar::phone
                      Call("/org/bluez", "org.bluez.AgentManager1", "RequestDefaultAgent",
                           g_variant_new("(o)", kAgentPath), nullptr);
                      SetAdapter("PairableTimeout", g_variant_new_uint32(0));
-                     SetAdapter("Pairable", g_variant_new_boolean(TRUE), [this, left](GVariant *res, GError *e) {
-                         if (!res)
-                         {
-                             std::cerr << "WARNING: Bluetooth pairing window: " << e->message << std::endl;
-                             return;
-                         }
-                         std::cout << "Bluetooth pairing started: a phone can pair for the next " << left.count()
-                                   << " s (Just Works, no PIN)" << std::endl;
-                     });
+                     MakePairable(left, 10);
                  });
+        }
+
+        // BlueZ makes the adapter pairable itself when our agent becomes the
+        // default; a Set at the same moment gets org.bluez.Error.Busy. Then
+        // try again shortly (up to `tries` times).
+        void MakePairable(std::chrono::seconds left, int tries)
+        {
+            SetAdapter("Pairable", g_variant_new_boolean(TRUE), [this, left, tries](GVariant *res, GError *e) {
+                if (res)
+                {
+                    std::cout << "Bluetooth pairing started: a phone can pair for the next " << left.count()
+                              << " s (Just Works, no PIN)" << std::endl;
+                    return;
+                }
+                bool busy = g_dbus_error_is_remote_error(e) &&
+                            std::string(g_dbus_error_get_remote_error(e) ? g_dbus_error_get_remote_error(e) : "") ==
+                                "org.bluez.Error.Busy";
+                if (busy && tries > 1 && window_open)
+                    After(200, [this, left, tries] {
+                        if (window_open)
+                            MakePairable(left, tries - 1);
+                    });
+                else
+                    std::cerr << "WARNING: Bluetooth pairing window: " << e->message << std::endl;
+            });
+        }
+
+        // Runs `fn` on the loop after `ms`, unless the peripheral is gone.
+        void After(guint ms, std::function<void()> fn)
+        {
+            struct Ctx
+            {
+                Impl *impl;
+                GSource *source;
+                std::function<void()> fn;
+            };
+            GSource *s = g_timeout_source_new(ms);
+            auto *ctx = new Ctx{this, s, std::move(fn)};
+            g_source_set_callback(
+                s,
+                [](gpointer data) -> gboolean {
+                    auto *c = static_cast<Ctx *>(data);
+                    c->impl->one_shots.erase(c->source);
+                    c->fn();
+                    return G_SOURCE_REMOVE;
+                },
+                ctx, [](gpointer data) { delete static_cast<Ctx *>(data); });
+            one_shots.insert(s);
+            g_source_attach(s, context);
+            g_source_unref(s);
         }
 
         void WindowExpired()
@@ -717,6 +768,8 @@ namespace dlidar::phone
     {
         Impl &d = *impl_;
         g_cancellable_cancel(d.cancel);
+        for (GSource *t : d.one_shots)
+            g_source_destroy(t); // their Ctx is freed by the destroy notify
         for (GSource *t : {d.window_timer, d.check_timer})
             if (t)
             {

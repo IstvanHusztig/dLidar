@@ -267,6 +267,45 @@ void TestWriteRules()
     CHECK(link.Open() && h.opens == 2, "reopened");
 }
 
+void TestIdlePhone()
+{
+    printf("a phone without notifications is disconnected after 30 s\n");
+    FakeClock clock;
+    FakePeripheral p;
+    FakeHandler h;
+    BleLink link(h, p, clock);
+    auto run = [&](std::chrono::milliseconds d) { RunUntil(clock, clock.now + d, [&] { link.OnWake(); }); };
+
+    // A leftover link at start: connected before BlueZ is reported up.
+    link.DeviceConnected("A");
+    link.BluezUp();
+    CHECK(!link.Advertising(), "no advertising while it is connected");
+    run(29900ms);
+    CHECK(p.disconnected.empty(), "not before 30 s");
+    run(200ms);
+    CHECK(p.disconnected == std::vector<std::string>{"A"}, "disconnected after 30 s");
+    link.DeviceDisconnected("A");
+    CHECK(link.Advertising(), "advertising again");
+
+    // A phone that subscribes in time stays.
+    link.DeviceConnected("A");
+    run(3s);
+    link.NotifyStarted();
+    run(60s);
+    CHECK(p.disconnected.size() == 1 && link.Open(), "subscribed: kept");
+
+    // Notifications off while the link stays: 10 s, then disconnected.
+    link.NotifyStopped();
+    run(15s);
+    CHECK(p.disconnected.size() == 1, "not yet");
+    link.NotifyStarted(); // back within 30 s: kept
+    run(60s);
+    CHECK(p.disconnected.size() == 1 && link.Open(), "resubscribed in time: kept");
+    link.NotifyStopped();
+    run(30100ms);
+    CHECK(p.disconnected.size() == 2 && p.disconnected[1] == "A", "off for 30 s: disconnected");
+}
+
 // With the real server: seq from 1 after a reconnect, held events after a
 // slow link drains.
 struct FakeControl : DeviceControl
@@ -353,6 +392,7 @@ int main()
     TestPacing();
     TestOnePhone();
     TestWriteRules();
+    TestIdlePhone();
     TestWithServer();
     return FinishTests("ble_link");
 }

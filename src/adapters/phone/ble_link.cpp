@@ -51,6 +51,7 @@ namespace dlidar::phone
     {
         CloseNow();
         up_ = false;
+        idle_since_.reset();
         advertising_ = false; // gone with bluetoothd, nothing to unregister
         notifying_ = false;
         connected_.clear();
@@ -66,6 +67,7 @@ namespace dlidar::phone
         {
             phone_ = device;
             mtu_ = kMinMtu;
+            StartIdle();
         }
         else if (device != phone_)
             peripheral_.Disconnect(device); // one phone at a time
@@ -80,6 +82,7 @@ namespace dlidar::phone
         if (device == phone_)
         {
             CloseNow();
+            idle_since_.reset();
             phone_.clear();
             mtu_ = kMinMtu;
             // A second device we disconnected is not promoted; ask again in
@@ -100,6 +103,8 @@ namespace dlidar::phone
     {
         notifying_ = false;
         CloseNow();
+        if (!phone_.empty())
+            StartIdle();
     }
 
     WriteResult BleLink::Write(const std::string &device, std::string_view bytes, uint16_t mtu, uint16_t offset)
@@ -127,7 +132,18 @@ namespace dlidar::phone
     {
         if (close_pending_)
             CloseNow();
+        if (idle_since_ && !phone_.empty() && !conn_ && clock_.Now() - *idle_since_ >= options_.idle)
+        {
+            idle_since_.reset();
+            peripheral_.Disconnect(phone_); // DeviceDisconnected follows
+        }
         Drain();
+    }
+
+    void BleLink::StartIdle()
+    {
+        idle_since_ = clock_.Now();
+        clock_.WakeAt(*idle_since_ + options_.idle);
     }
 
     void BleLink::UpdateAdvertising()
@@ -145,6 +161,7 @@ namespace dlidar::phone
         if (conn_ || !notifying_ || phone_.empty())
             return;
         conn_ = std::make_unique<Conn>(*this);
+        idle_since_.reset();
         tokens_ = Burst(); // the first message goes at once
         refilled_ = clock_.Now();
         handler_.OnOpen(*conn_);

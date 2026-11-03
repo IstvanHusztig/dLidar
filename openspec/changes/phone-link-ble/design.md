@@ -94,6 +94,7 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 - The connection opens on `StartNotify` while a phone is tracked, and closes on `StopNotify`, the phone's `Connected` false, or `BluezDown`.
 - Advertising resumes when the tracked phone disconnects and no other device stays connected.
 - A write from the phone while notifications are off is rejected with `NotPermitted`: its answer could not be delivered. The app always subscribes first.
+- **Idle phones are disconnected after 30 s.** A tracked phone without an open connection (not subscribed) for 30 s is disconnected (`Device1.Disconnect`). The clock starts when it connects, when BlueZ comes up with it already connected, and when notifications go off. Found in task 5.1: Android kept the LE link to the bonded Pi through dLidar restarts after the app's "Disconnect", so dLidar never advertised and the app's scan found nothing. First set to 10 s, which cut off Android's pairing prompt (capture 12:13: Security Request, then dLidar's disconnect 12 s later); 30 s leaves time to answer it.
 - Alternative: `AcquireNotify` for its device id. Rejected in D3. Alternative: let BlueZ advertise during a connection. Rejected: the second phone would find the scanner.
 
 **D6. MTU per connection.**
@@ -120,6 +121,7 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
   - `Discoverable` true (LE General Discoverable flag).
 - Measured (task 1.2, `btmon`): BlueZ 5.66 puts the 128-bit UUID list (18 bytes) in the advertisement data and the `LocalName` in the scan response, even with room left. With `Discoverable` the flags field (3 bytes) joins the UUID: 21 of 31 bytes. The app filters by UUID and Android scans actively, so it also gets the name. The settings cap the name at 20 characters (the scan response holds 29).
 - dLidar registers the advertisement while no phone is connected and BlueZ is up, and unregisters it when a phone connects.
+- **The adapter's `Alias` is set to the name too.** A connected or bonded Android phone shows the GAP Device Name, which BlueZ serves from the adapter's alias, by default the hostname (`lsh` on the dev board). Found in task 5.1: the phone showed `dLidar` while scanning and `lsh` once bonded. BlueZ keeps the alias after dLidar stops; on a dedicated scanner that is intended.
 
 **D10. Pairing window on the loop, never blocking.**
 - `OpenPairingWindow(120 s)` is asynchronous and returns at once. The `main.cpp` thread no longer waits.

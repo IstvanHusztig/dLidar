@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -49,6 +50,8 @@ namespace dlidar::phone
     //   writes are rejected (D5).
     // - The connection opens when the phone is connected and TX notifications
     //   are on, and closes when they go off, the phone leaves or BlueZ goes.
+    //   A phone connected without notifications for `idle` is disconnected,
+    //   so a leftover link never keeps the scanner from advertising.
     // - A message is split into notifications of at most MTU-3 bytes, the
     //   first piece fresh (D4, D6); the MTU is 23 until a write reports it.
     // - Pieces leave at `rate` bytes/s, drained on clock wakes in `tick`
@@ -65,6 +68,9 @@ namespace dlidar::phone
             double rate_bytes_per_s = 24 * 1024; // measured: 54 KiB/s at MTU 517 (design Measurements)
             size_t cap_bytes = 64 * 1024;
             std::chrono::milliseconds tick{10};
+            // A connected phone not subscribed this long is disconnected; long
+            // enough to answer Android's pairing prompt (design D5).
+            std::chrono::seconds idle{30};
         };
 
         BleLink(ConnectionHandler &handler, BlePeripheral &peripheral, ServerClock &clock, Options options);
@@ -115,6 +121,7 @@ namespace dlidar::phone
 
         std::unique_ptr<Conn> conn_;
         bool close_pending_ = false; // the server closed it; OnClosed on the next wake
+        std::optional<ServerClock::TimePoint> idle_since_; // the phone is connected but not subscribed
 
         std::deque<std::string> queue_; // pieces waiting to be notified
         size_t queued_ = 0;             // their bytes
@@ -122,6 +129,7 @@ namespace dlidar::phone
         ServerClock::TimePoint refilled_{};
 
         void UpdateAdvertising();
+        void StartIdle(); // the phone is there without a connection: disconnect it if that lasts
         void TryOpen();
         void CloseNow(); // OnClosed at once (BlueZ events, never inside a server call)
         void RequestClose();
