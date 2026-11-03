@@ -22,7 +22,7 @@ dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PA
 
 ## Run
 
-**As a service** (the normal case on the device): dLidar starts at boot, waits for the button, and is visible to the phone. Short press: start; next short press: stop and save; hold 5 s: save and power down. Installation (once): see the manual, "Running as a service". It installs `systemd/dlidar.service` and the power-off rule, and sets `JustWorksRepairing = confirm` in `/etc/bluetooth/main.conf`.
+**As a service** (the normal case on the device): dLidar starts at boot, waits for the button, and is visible to the phone. Short press: start; next short press: stop and save; hold 5 s: save and power down. Installation (once): see the manual, "Running as a service". It installs `systemd/dlidar.service` and the power-off rule, and sets `ControllerMode = le` (Bluetooth LE only) in `/etc/bluetooth/main.conf`.
 
 ```bash
 systemctl status dlidar
@@ -44,7 +44,7 @@ Recordings go to `~/PointCloudDump/` (numbered `lidarNNNN.laz`, `imuNNNN.csv` an
 dLidar serves a read-only protocol (state, progress, warnings, summary, free space, sensor) over Bluetooth LE and a local socket. The contract for app authors is [`docs/phone-protocol.md`](docs/phone-protocol.md).
 
 - **Bluetooth LE:** the scanner advertises as `dLidar` while no phone is connected, one phone at a time, **bonded phones only**.
-- **Pairing a phone** (until the pairing button is mounted): run `tools/pair.sh` on the Pi, then within 2 minutes connect with the app and tap **Pair** (no PIN). Outside this window the Pi refuses every pairing.
+- **Pairing a phone** (until the pairing button is mounted): run `tools/pair.sh` on the Pi, then within 2 minutes connect with the app and tap **Pair** (no PIN). Outside this window the Pi refuses every pairing. A phone that was unpaired on the phone: `tools/pair.sh --forget` (removes the Pi's old bonds first).
 - **On the Pi itself:** `tools/phone_client.py status.get` (or `--follow` for events) talks to the socket `/run/dlidar/dlidar.sock`.
 
 ## Documentation

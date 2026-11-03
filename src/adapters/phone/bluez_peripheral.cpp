@@ -832,6 +832,9 @@ namespace dlidar::phone
             },
             impl_.get(), nullptr);
         g_source_attach(d.window_timer, d.context);
+        if (d.window_open)
+            std::cout << "Bluetooth pairing window renewed: a phone can pair for the next " << seconds.count() << " s"
+                      << std::endl;
         d.StartWindow(); // or when the adapter is found
     }
 
