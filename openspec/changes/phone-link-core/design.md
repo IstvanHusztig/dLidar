@@ -46,7 +46,7 @@ See proposal.md (Why) and specs/phone-api/spec.md for the requirements. Facts fr
 ## Decisions
 
 **D1. A BLE spike comes first, and is throwaway.**
-- `tools/ble_spike/` is a standalone GIO program, built only with `-DDLIDAR_BLE_SPIKE=ON` and never linked into dLidar. It has:
+- (Deleted on 2026-11-03 in `phone-link-ble` task 6.3, once dLidar served BLE itself; it stays in the git history.) `tools/ble_spike/` was a standalone GIO program, built only with `-DDLIDAR_BLE_SPIKE=ON` and never linked into dLidar. It has:
   - an LE advertisement;
   - one service with an RX characteristic (write, write-without-response) and a TX characteristic (notify) that echoes lines.
 - Run it as the service user under systemd and measure with nRF Connect:

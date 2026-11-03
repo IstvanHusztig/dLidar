@@ -200,14 +200,6 @@ target_link_libraries(test_${t} dlidar_core)
 add_test(NAME ${t} COMMAND test_${t})
 endforeach()
 
-# Throwaway BLE spike (openspec/changes/phone-link-core, task 1); not part of
-# dLidar: cmake -DDLIDAR_BLE_SPIKE=ON.
-option(DLIDAR_BLE_SPIKE "Build the throwaway BLE spike tools/ble_spike" OFF)
-if(DLIDAR_BLE_SPIKE)
-pkg_check_modules(SPIKE_GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
-add_executable(ble_spike tools/ble_spike/ble_spike.cpp)
-target_link_libraries(ble_spike PkgConfig::SPIKE_GIO)
-endif()
 
 # Layer dependency rule (docs/architecture.md); --self-test checks the checker.
 find_package(Python3 COMPONENTS Interpreter)
