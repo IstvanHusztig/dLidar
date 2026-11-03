@@ -5,6 +5,7 @@
 #include "adapters/phone/mailbox.h"
 #include "adapters/phone/protocol_codec.h"
 #include "application/remote/device_api.h"
+#include "application/remote/wifi_setup.h"
 
 #include <chrono>
 #include <cstdint>
@@ -45,7 +46,15 @@ namespace dlidar::phone
         static const size_t kMaxWarnings = 16; // kept for status.get
         static constexpr std::chrono::seconds kProgressInterval{1};
 
-        PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock);
+        // Runs a function on the loop thread later; from any thread. It may
+        // drop the function once the link shuts down.
+        using Post = std::function<void(std::function<void()>)>;
+
+        // With `wifi` (and `post`, which brings the Wi-Fi results back to
+        // the loop) it also serves wifi.connect and wifi.status (openspec
+        // phone-link-wifi, design D7).
+        PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock,
+                    WifiSetup *wifi = nullptr, Post post = nullptr);
 
         void OnOpen(Connection &c) override;
         void OnBytes(Connection &c, std::string_view data) override;
@@ -84,7 +93,13 @@ namespace dlidar::phone
         const DeviceApi &api_;
         std::shared_ptr<Mailbox> mailbox_;
         ServerClock &clock_;
+        WifiSetup *wifi_;
+        Post post_;
         std::map<Connection *, Client> clients_;
+        // The connection that sent each running wifi.connect, by a serial
+        // the result carries (null once it closed: the result is only logged).
+        std::map<uint64_t, Connection *> wifi_waiting_;
+        uint64_t wifi_serial_ = 0;
         std::map<std::string, Command> commands_;
         std::vector<std::string> command_names_; // in hello's order
 
@@ -97,6 +112,8 @@ namespace dlidar::phone
         void AddCommand(const std::string &name, std::vector<std::string> args,
                         std::function<std::string(Connection &, const Request &)> run);
         std::string RecordingCommand(Connection &c, const Request &r, bool start);
+        std::string WifiConnect(Connection &c, const Request &r);
+        void OnWifiResult(uint64_t serial, int64_t op, const std::string &ssid, const WifiResult &result);
         void HandleLine(Connection &c, std::string_view line);
         void Deliver(Connection &c, Client &cl, const Mailbox::Event &e);
         void SendEvent(Connection &c, Client &cl, const std::function<std::string(uint64_t, uint64_t)> &encode);

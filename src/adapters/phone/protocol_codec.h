@@ -2,7 +2,9 @@
 
 #include "application/ports/device_events.h"
 #include "application/remote/device_api.h"
+#include "application/remote/wifi_setup.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -75,4 +77,24 @@ namespace dlidar::phone
                                   const std::string &message);
 
     const char *WarningKindName(WarningKind kind); // lens_dirty, storage_failed, ...
+
+    // wifi.connect and wifi.status (openspec phone-link-wifi). The password
+    // is in no encoded message and no error text.
+    struct WifiConnectArgs
+    {
+        std::optional<std::string> ssid, security, psk; // empty: not sent
+    };
+    // False with `message` set when an argument is not a string.
+    bool DecodeWifiConnectArgs(const Request &request, WifiConnectArgs &args, std::string &message);
+
+    std::optional<WifiSecurity> WifiSecurityFromName(const std::string &name); // wpa2-psk, wpa3-sae, open
+    const char *WifiSecurityName(WifiSecurity security);
+    const char *WifiOutcomeName(WifiOutcome outcome); // connected, or the result's error code
+    const char *WifiStateName(WifiState state);       // connected, connecting, disconnected, unavailable
+
+    std::string EncodeWifiAccepted(int64_t id, std::chrono::seconds timeout); // {"accepted":true,"timeout_s":…}
+    std::string EncodeWifiStatus(int64_t id, const WifiStatusView &status);
+    // The result event of the wifi.connect `op` for network `ssid`.
+    std::string EncodeWifiResultEvent(uint64_t seq, uint64_t dropped, int64_t op, const std::string &ssid,
+                                      const WifiResult &result);
 }

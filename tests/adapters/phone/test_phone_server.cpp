@@ -394,10 +394,225 @@ void TestRecordingCommands()
           "log: busy");
     CHECK(l.find("phone: stop ignored, idle\n") != std::string::npos, "log: stop ignored");
 }
+// A WifiManager whose joins end when the test says so.
+struct FakeWifi : WifiManager
+{
+    WifiLink link{WifiState::Connected, "Home", "192.168.1.106"};
+    std::vector<WifiNetwork> connects;
+    std::function<void(const WifiResult &)> pending;
+    std::optional<WifiResult> at_once; // ends inside Connect
+
+    WifiLink Link() const override { return link; }
+    void Connect(const WifiNetwork &n, std::chrono::seconds, std::function<void(const WifiResult &)> done) override
+    {
+        connects.push_back(n);
+        if (at_once)
+            done(*at_once);
+        else
+            pending = std::move(done);
+    }
+    void Finish(const WifiResult &r)
+    {
+        auto done = std::move(pending);
+        pending = nullptr;
+        done(r);
+    }
+};
+
+// A server with Wi-Fi; posted functions wait in `posted` until RunPosted().
+struct WifiRig : Rig
+{
+    FakeWifi wifi;
+    WifiSetup setup{wifi};
+    std::vector<std::function<void()>> posted;
+    PhoneServer wserver{api, mailbox, clock, &setup, [this](std::function<void()> fn) { posted.push_back(std::move(fn)); }};
+
+    void RunPosted()
+    {
+        std::vector<std::function<void()>> v;
+        v.swap(posted);
+        for (auto &fn : v)
+            fn();
+    }
+};
+
+Json Ask(PhoneServer &s, FakeConnection &c, int id, const std::string &cmd, const std::string &args = "")
+{
+    std::string line = "{\"v\":1,\"id\":" + std::to_string(id) + ",\"cmd\":\"" + cmd + "\"";
+    if (!args.empty())
+        line += ",\"args\":" + args;
+    s.OnBytes(c, line + "}\n");
+    std::vector<Json> v = c.Lines();
+    return v.empty() ? Json() : v.back();
+}
+
+std::string WifiArgs(const std::string &ssid, const std::string &security, const std::string &psk)
+{
+    Json a;
+    a["ssid"] = ssid;
+    a["security"] = security;
+    if (!psk.empty())
+        a["psk"] = psk;
+    return a.dump();
+}
+
+void TestWifiCommands()
+{
+    printf("wifi.connect and wifi.status: answers, busy, result to the requester only, log lines\n");
+    {
+        Rig plain;
+        FakeConnection c;
+        plain.server.OnOpen(c);
+        std::vector<std::string> cmds = Ask(plain.server, c, 1, "hello")["result"]["commands"];
+        CHECK(std::count(cmds.begin(), cmds.end(), "wifi.connect") == 0, "no Wi-Fi commands without a WifiSetup");
+        CHECK(Ask(plain.server, c, 2, "wifi.status")["error"]["code"] == "unknown_command", "wifi.status unknown");
+    }
+
+    WifiRig r;
+    FakeConnection c1, c2;
+    r.wserver.OnOpen(c1);
+    r.wserver.OnOpen(c2);
+    std::ostringstream log;
+    std::streambuf *old = std::cout.rdbuf(log.rdbuf());
+
+    std::vector<std::string> cmds = Ask(r.wserver, c1, 1, "hello")["result"]["commands"];
+    CHECK(std::count(cmds.begin(), cmds.end(), "wifi.connect") == 1 && std::count(cmds.begin(), cmds.end(), "wifi.status") == 1,
+          "hello lists both");
+
+    Json j = Ask(r.wserver, c1, 2, "wifi.status");
+    CHECK(j["result"]["state"] == "connected" && j["result"]["ssid"] == "Home" && j["result"]["last"].is_null(),
+          "status before: %s", j.dump().c_str());
+
+    j = Ask(r.wserver, c1, 12, "wifi.connect", WifiArgs("Site", "wpa2-psk", "secret123"));
+    CHECK(j["id"] == 12 && j["ok"] == true && j["result"]["accepted"] == true && j["result"]["timeout_s"] == 60,
+          "accepted: %s", j.dump().c_str());
+    CHECK(r.wifi.connects.size() == 1 && r.wifi.connects[0].ssid == "Site" &&
+              r.wifi.connects[0].security == WifiSecurity::Wpa2Psk && r.wifi.connects[0].psk == "secret123",
+          "passed on");
+    j = Ask(r.wserver, c2, 3, "wifi.status");
+    CHECK(j["result"]["state"] == "connecting" && j["result"]["ssid"] == "Site" && j["result"]["last"]["result"] == "pending",
+          "status while joining: %s", j.dump().c_str());
+
+    j = Ask(r.wserver, c2, 4, "wifi.connect", WifiArgs("Other", "open", ""));
+    CHECK(j["id"] == 4 && j["ok"] == false && j["error"]["code"] == "busy", "busy: %s", j.dump().c_str());
+    CHECK(r.wifi.connects.size() == 1, "the second join not started");
+
+    // The result, while c1 is behind on its events: it goes out anyway.
+    c1.stalled = true;
+    c1.unread = PhoneServer::kEventBacklogBytes + 1;
+    r.wifi.Finish(WifiResult{WifiOutcome::Connected, "192.168.1.50", ""});
+    CHECK(c1.Lines().empty(), "nothing before the loop runs it");
+    r.RunPosted();
+    std::vector<Json> got = c1.Lines();
+    CHECK(got.size() == 1 && got[0]["event"] == "result" && got[0]["op"] == 12 && got[0]["ok"] == true &&
+              got[0]["result"]["ssid"] == "Site" && got[0]["result"]["ip"] == "192.168.1.50" && got[0]["seq"] == 1,
+          "result to the requester: %s", got.empty() ? "none" : got[0].dump().c_str());
+    CHECK(c2.Lines().empty(), "nothing to the other client");
+    c1.stalled = false;
+    c1.unread = 0;
+
+    // Seq goes on for the requester only.
+    r.events.OnState(Status(DeviceState::Preparing));
+    r.wserver.OnMailbox();
+    got = c1.Lines();
+    CHECK(got.size() == 1 && got[0]["seq"] == 2, "c1's next event is seq 2");
+    got = c2.Lines();
+    CHECK(got.size() == 1 && got[0]["seq"] == 1, "c2's first event is seq 1");
+
+    j = Ask(r.wserver, c2, 5, "wifi.status");
+    CHECK(j["result"]["last"]["ssid"] == "Site" && j["result"]["last"]["result"] == "connected", "last connected");
+
+    // A requester that closes before the result: only logged.
+    j = Ask(r.wserver, c2, 6, "wifi.connect", WifiArgs("Cafe", "wpa3-sae", "jelszo-123"));
+    CHECK(j["result"]["accepted"] == true, "accepted from c2");
+    r.wserver.OnClosed(c2);
+    r.wifi.Finish(WifiResult{WifiOutcome::WrongPassword, "", ""});
+    r.RunPosted();
+    CHECK(c1.Lines().empty(), "the other client gets nothing");
+    j = Ask(r.wserver, c1, 7, "wifi.status");
+    CHECK(j["result"]["last"]["ssid"] == "Cafe" && j["result"]["last"]["result"] == "wrong_password",
+          "the lost result in status: %s", j.dump().c_str());
+
+    // A join that ends inside Connect: the answer still comes first.
+    r.wifi.at_once = WifiResult{WifiOutcome::Failed, "", "NetworkManager is not running"};
+    r.wserver.OnBytes(c1, "{\"v\":1,\"id\":8,\"cmd\":\"wifi.connect\",\"args\":" + WifiArgs("Home", "open", "") + "}\n");
+    r.RunPosted();
+    got = c1.Lines();
+    CHECK(got.size() == 2 && got[0]["id"] == 8 && got[1]["event"] == "result" && got[1]["op"] == 8 &&
+              got[1]["error"]["code"] == "failed" && got[1]["error"]["message"] == "NetworkManager is not running",
+          "answer, then result");
+
+    std::cout.rdbuf(old);
+    std::string l = log.str();
+    CHECK(l.find("phone: wifi.connect Site (wpa2-psk)\n") != std::string::npos, "log: request");
+    CHECK(l.find("phone: wifi.connect Other refused, another Wi-Fi join is running\n") != std::string::npos,
+          "log: busy");
+    CHECK(l.find("Wi-Fi: connected to Site, 192.168.1.50\n") != std::string::npos, "log: connected");
+    CHECK(l.find("Wi-Fi: Cafe: wrong password\n") != std::string::npos, "log: wrong password");
+    CHECK(l.find("Wi-Fi: Home: failed: NetworkManager is not running\n") != std::string::npos, "log: failed");
+    CHECK(l.find("secret123") == std::string::npos && l.find("jelszo-123") == std::string::npos, "no password logged");
+}
+
+void TestWifiBadArguments()
+{
+    printf("wifi.connect arguments: bad_request names the argument, never the password\n");
+    WifiRig r;
+    FakeConnection c;
+    r.wserver.OnOpen(c);
+    std::ostringstream log;
+    std::streambuf *old = std::cout.rdbuf(log.rdbuf());
+    const std::string marker = "MARKER-pw-7f3a";
+
+    struct Case
+    {
+        const char *what;
+        std::string args;
+        const char *names;
+    } cases[] = {
+        {"short psk", WifiArgs("Home", "wpa2-psk", "short7!"), "\"psk\""},
+        {"psk with open", WifiArgs("Home", "open", marker), "\"psk\""},
+        {"psk missing", WifiArgs("Home", "wpa3-sae", ""), "\"psk\""},
+        {"unknown security", WifiArgs("Home", "wep", marker), "\"security\""},
+        {"security missing", "{\"ssid\":\"Home\",\"psk\":\"" + marker + "\"}", "\"security\""},
+        {"ssid missing", "{\"security\":\"wpa2-psk\",\"psk\":\"" + marker + "\"}", "\"ssid\""},
+        {"ssid too long", WifiArgs(std::string(33, 's'), "wpa2-psk", marker), "\"ssid\""},
+        {"psk not a string", "{\"ssid\":\"Home\",\"security\":\"wpa2-psk\",\"psk\":123456789}", "\"psk\""},
+        {"psk with a control character", WifiArgs("Home", "wpa2-psk", marker + "\t"), "\"psk\""},
+        {"unknown argument", "{\"ssid\":\"Home\",\"security\":\"wpa2-psk\",\"psk\":\"" + marker + "\",\"password\":1}",
+         "\"password\""},
+    };
+    int id = 1;
+    for (const Case &k : cases)
+    {
+        Json j = Ask(r.wserver, c, id++, "wifi.connect", k.args);
+        CHECK(j["ok"] == false && j["error"]["code"] == "bad_request", "%s: %s", k.what, j.dump().c_str());
+        CHECK(j["error"]["message"].get<std::string>().find(k.names) != std::string::npos, "%s: names %s: %s", k.what,
+              k.names, j.dump().c_str());
+    }
+    CHECK(r.wifi.connects.empty(), "no join started");
+
+    // The marker through every outcome of a valid request too.
+    const WifiOutcome outcomes[] = {WifiOutcome::Connected, WifiOutcome::WrongPassword, WifiOutcome::NotFound,
+                                    WifiOutcome::Timeout, WifiOutcome::Failed};
+    for (WifiOutcome o : outcomes)
+    {
+        Json j = Ask(r.wserver, c, id++, "wifi.connect", WifiArgs("Home", "wpa2-psk", marker));
+        CHECK(j["result"]["accepted"] == true, "accepted");
+        Ask(r.wserver, c, id++, "wifi.connect", WifiArgs("Home", "wpa2-psk", marker)); // busy
+        r.wifi.Finish(WifiResult{o, "192.168.1.50", ""});
+        r.RunPosted();
+        Ask(r.wserver, c, id++, "wifi.status");
+    }
+    std::cout.rdbuf(old);
+    CHECK(c.out.find(marker) == std::string::npos, "the password in nothing sent");
+    CHECK(log.str().find(marker) == std::string::npos, "the password in no log line");
+}
 } // namespace
 
 int main()
 {
+    TestWifiCommands();
+    TestWifiBadArguments();
     TestOrderAndSeq();
     TestProgressRate();
     TestDropped();

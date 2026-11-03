@@ -2,6 +2,7 @@
 
 #include "application/ports/device_events.h"
 #include "application/remote/device_api.h"
+#include "application/remote/wifi_setup.h"
 
 #include <chrono>
 #include <functional>
@@ -32,9 +33,12 @@ namespace dlidar::phone
         // problem sets `socket_why`; BLE still starts unless another dLidar
         // answers on the socket (two GATT services with the same UUIDs would
         // confuse the phone). Null if nothing runs. Bluetooth problems only
-        // warn and recover later; they never fail the start.
+        // warn and recover later; they never fail the start. With `wifi`
+        // it also serves wifi.connect and wifi.status (openspec
+        // phone-link-wifi); stop the Wi-Fi adapter before destroying the link.
         static std::unique_ptr<PhoneLink> Start(const DeviceApi &api, const std::string &socket_dir,
-                                                const BleOptions &ble, std::string &socket_why);
+                                                const BleOptions &ble, std::string &socket_why,
+                                                WifiSetup *wifi = nullptr);
         ~PhoneLink(); // Shutdown()
 
         std::shared_ptr<DeviceEvents> Events() const;

@@ -2,7 +2,7 @@
 
 The contract between dLidar (the scanner) and a client such as the Android app. It is the same over every transport: the local Unix socket (now) and Bluetooth LE (next). The requirements are in `openspec/changes/phone-link-core/specs/phone-api/spec.md`; this document explains them for client authors.
 
-Version 1 is read-only: a client can query the scanner and watch it, but not start or stop recordings yet.
+Version 1 lets a client query and watch the scanner, start and stop recordings, and put the scanner on a Wi-Fi network.
 
 ## Framing
 
@@ -48,7 +48,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 → {"v":1,"id":6,"cmd":"hello"}
 ← {"id":5,"ok":true,"result":{"version":"0e1e413","sensor":"unitree_l2","sensor_model":"unitree_l2","recording_format":3,"protocol":1}}
 ← {"id":null,"ok":false,"error":{"code":"bad_request","message":"not valid JSON"}}
-← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
+← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop","wifi.connect","wifi.status"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
 
 ## Events and gaps
@@ -65,7 +65,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 | `bad_request` | not JSON, not an object, `v`/`id`/`cmd` missing or of the wrong type or range, `args` not an object, an argument the command does not define (the message names it) | the request's id, or `null` if none could be read |
 | `unknown_command` | `cmd` is not a command of this server | the request's id |
 | `unsupported_version` | `v` is not 1; the error carries `"supported":[1]` | the request's id |
-| `busy` | not now: `recording.start` while the last recording is still being saved (`finalizing`); try again once the state is `idle` | the request's id |
+| `busy` | not now: `recording.start` while the last recording is still being saved (`finalizing`), try again once the state is `idle`; `wifi.connect` while another Wi-Fi join is running, try again after its result | the request's id |
 | `too_large` | a line over 4096 bytes | `null` |
 | `too_many_clients` | another client is already connected; the connection is then closed | `null` |
 
@@ -87,7 +87,7 @@ Optional; a client is never required to send it first. Lists the server's comman
 
 ```
 → {"v":1,"id":1,"cmd":"hello"}
-← {"id":1,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
+← {"id":1,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop","wifi.connect","wifi.status"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
 
 ### `status.get`
@@ -163,6 +163,65 @@ Stops the running recording, as a short press of the record button does in `prep
 
 Every client may send both commands: the bonded phone over BLE and a local socket client. They are handled one at a time with the record button, so a stop from the phone and a button press at the same moment save the recording once. dLidar prints one line per command (`phone: start`, `local client: stop ignored, idle`).
 
+### `wifi.connect`
+
+Puts the scanner on a Wi-Fi network that the phone found by its own scan: the scanner never scans. Arguments:
+
+| Argument | |
+|---|---|
+| `ssid` | the network name, 1 to 32 bytes of UTF-8 (hidden networks and names that are not UTF-8 are not supported) |
+| `security` | `wpa2-psk` (also for a WPA2/WPA3 transition network), `wpa3-sae` or `open` |
+| `psk` | the password: 8 to 63 printable ASCII characters, or 64 hexadecimal digits. Required for `wpa2-psk` and `wpa3-sae`; leave it out for `open`. |
+
+The answer comes at once: `{"accepted":true,"timeout_s":60}`. The outcome follows as one `result` event ("Results that come later"), within `timeout_s` seconds:
+
+| Result | When |
+|---|---|
+| `ok:true`, `result` `{"ssid","ip"}` | the scanner joined; `ip` is its IPv4 address there (`null` if it got none) |
+| error `wrong_password` | the network rejected the password |
+| error `not_found` | the network is not in range. The scanner relies on its last periodic scan, so a network that is not there may also end in `timeout`. |
+| error `timeout` | no outcome within `timeout_s` |
+| error `failed` | any other reason; the message says which (for example the polkit rule missing on the scanner, NetworkManager not running, no Wi-Fi device). Show it as it is. |
+
+```
+→ {"v":1,"id":20,"cmd":"wifi.connect","args":{"ssid":"Home","security":"wpa2-psk","psk":"secret123"}}
+← {"id":20,"ok":true,"result":{"accepted":true,"timeout_s":60}}
+← {"event":"result","seq":4,"op":20,"ok":true,"result":{"ssid":"Home","ip":"192.168.1.50"}}
+→ {"v":1,"id":21,"cmd":"wifi.connect","args":{"ssid":"Site","security":"open"}}
+← {"id":21,"ok":false,"error":{"code":"busy","message":"another Wi-Fi join is still running; try again when it has ended"}}
+→ {"v":1,"id":22,"cmd":"wifi.connect","args":{"ssid":"Home","security":"wpa2-psk","psk":"short"}}
+← {"id":22,"ok":false,"error":{"code":"bad_request","message":"\"psk\" must be 8 to 63 printable ASCII characters or 64 hexadecimal digits"}}
+```
+
+Other `bad_request` cases name the argument the same way: `ssid` missing, empty or over 32 bytes; `security` missing or unknown; `psk` missing for a secured network or given for an open one; an argument that is not a string. The message never contains the password.
+
+What the scanner does with the network:
+- It saves the network only when the join succeeded, next to the networks it already knows, and joins whichever saved network is in range after a reboot. A network sent again under the same name replaces the saved one: this is how its password is changed.
+- After any error nothing is saved, the saved networks are unchanged, and the scanner rejoins the network it was on before, all within `timeout_s`. A wrong password therefore never cuts off a scanner that is reached over Wi-Fi.
+- The network the scanner is already on is joined again in full, with a short Wi-Fi drop.
+- It never touches the sensor's Ethernet connection, so a join during a recording is allowed.
+- The password appears in no log line, no message and no event.
+- Bluetooth and Wi-Fi share the Pi's radio: the BLE link may drop while the scanner joins. Reconnect through the bond and send `wifi.status`: `last` gives the outcome of the lost `result` event.
+
+dLidar prints one line for the request (`phone: wifi.connect Home (wpa2-psk)`) and one for the outcome (`Wi-Fi: connected to Home, 192.168.1.50`, `Wi-Fi: Home: wrong password`).
+
+### `wifi.status`
+
+No arguments; the answer comes at once.
+
+| Field | Meaning |
+|---|---|
+| `state` | `connected`, `connecting` (a `wifi.connect` is running, or the scanner is joining a saved network by itself), `disconnected` or `unavailable` (no Wi-Fi device, or NetworkManager is not running: do not offer Wi-Fi setup) |
+| `ssid`, `ip` | the network and the scanner's IPv4 address on it; while a `wifi.connect` runs, `ssid` is the network being joined. `null` when there is none. |
+| `last` | the most recent `wifi.connect` since dLidar started: `ssid` and `result`, which is `pending` while it runs, then `connected` or the result's error code. `null` if there was none. |
+
+```
+→ {"v":1,"id":23,"cmd":"wifi.status"}
+← {"id":23,"ok":true,"result":{"state":"connecting","ssid":"Home","ip":null,"last":{"ssid":"Home","result":"pending"}}}
+→ {"v":1,"id":24,"cmd":"wifi.status"}
+← {"id":24,"ok":true,"result":{"state":"connected","ssid":"Home","ip":"192.168.1.50","last":{"ssid":"Home","result":"connected"}}}
+```
+
 ## Events
 
 | Event | `data` |
@@ -189,11 +248,11 @@ A whole recording, as a connected client sees it:
 
 ## Results that come later
 
-Used from a later phase on (`wifi.connect`). `recording.start` and `recording.stop` are not of this kind: their answer is final, and the `state` events show what follows. A command whose result takes time answers `{"accepted":true}` at once; the result comes later as event `result`, with `op` (that request's id) at the top level and `ok` plus `result` or `error` as in a response, and no `data`. It goes only to the connection that sent the request and is never left out; if that connection is lost first, the result is lost, and the command's status query gives the outcome.
+Used by `wifi.connect`. `recording.start` and `recording.stop` are not of this kind: their answer is final, and the `state` events show what follows. A command whose result takes time answers `{"accepted":true}` at once; the result comes later as event `result`, with `op` (that request's id) at the top level and `ok` plus `result` or `error` as in a response, and no `data`. It goes only to the connection that sent the request and is never left out; if that connection is lost first, the result is lost, and the command's status query gives the outcome.
 
 ```
 → {"v":1,"id":12,"cmd":"wifi.connect","args":{"ssid":"Home","psk":"secret123","security":"wpa2-psk"}}
-← {"id":12,"ok":true,"result":{"accepted":true}}
+← {"id":12,"ok":true,"result":{"accepted":true,"timeout_s":60}}
 ← {"event":"result","seq":14,"op":12,"ok":false,"error":{"code":"wrong_password","message":"the network rejected the password"}}
 ```
 

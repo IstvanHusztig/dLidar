@@ -58,6 +58,14 @@ Answers to `protocol-open-questions.md`. **Binding** means it is in the spec (`s
     - The PSK is 8 to 63 printable ASCII characters, or 64 hex digits; anything else gets `bad_request`.
     - Result codes: `connected`, `wrong_password`, `not_found`, `timeout`, plus generic `failed`.
 
-    *Provisional, phase 4.*
+    *Binding (phone-link-wifi, 2026-11-03; reviewed by the app agent, no objections):*
+    - `wifi.connect {ssid, security, psk}` answers `{"accepted":true,"timeout_s":60}`, then one `result` event within `timeout_s`: `{ssid, ip}` or the codes above. A second join while one runs gets `busy`.
+    - `wifi.status` gives `state` (`connected`, `connecting`, `disconnected`, `unavailable`), `ssid`, `ip` and `last` (`pending` while the app's own join runs). This is how the app recovers a result lost when the BLE link dropped (app wish 1).
+    - A failed join changes nothing and the scanner rejoins its previous network.
+    - The network the scanner is on is joined again in full, with a short drop (app question 2).
+    - `failed` names its case: the polkit rule, NetworkManager, no Wi-Fi device (app wish 4).
+    - Later, not v1: `wifi.forget {ssid}` and a list of saved networks (app wish 5).
+
+    See `docs/phone-protocol.md`.
 35. **Not designed yet.** Likely an opaque cursor string, with pages sized to stay under 16 KiB. *Phase 5.*
 36. **`info`:** one line of space-separated `key=value`: `info mode=properties|acquire secure=0|1 mtu=N notifying=0|1 notify_fd=N devices=N`. **`flood` SIZE includes the `\n`** (12 to 4096 bytes). N is at most 10000. *Spike only; it is deleted after the spike.*

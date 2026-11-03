@@ -287,4 +287,125 @@ namespace dlidar::phone
         j["error"]["message"] = Clip(message, kMaxText);
         return Line(j);
     }
+
+    bool DecodeWifiConnectArgs(const Request &request, WifiConnectArgs &args, std::string &message)
+    {
+        args = WifiConnectArgs();
+        Json j = Json::parse(request.args_json, nullptr, false);
+        if (!j.is_object())
+        {
+            message = "\"args\" must be an object";
+            return false;
+        }
+        const std::pair<const char *, std::optional<std::string> *> fields[] = {
+            {"ssid", &args.ssid}, {"security", &args.security}, {"psk", &args.psk}};
+        for (const auto &f : fields)
+        {
+            auto it = j.find(f.first);
+            if (it == j.end())
+                continue;
+            if (!it->is_string())
+            {
+                message = std::string("\"") + f.first + "\" must be a string";
+                return false;
+            }
+            *f.second = it->get<std::string>();
+        }
+        return true;
+    }
+
+    std::optional<WifiSecurity> WifiSecurityFromName(const std::string &name)
+    {
+        for (WifiSecurity s : {WifiSecurity::Wpa2Psk, WifiSecurity::Wpa3Sae, WifiSecurity::Open})
+            if (name == WifiSecurityName(s))
+                return s;
+        return std::nullopt;
+    }
+
+    const char *WifiSecurityName(WifiSecurity security)
+    {
+        switch (security)
+        {
+        case WifiSecurity::Open: return "open";
+        case WifiSecurity::Wpa2Psk: return "wpa2-psk";
+        case WifiSecurity::Wpa3Sae: return "wpa3-sae";
+        }
+        return "unknown";
+    }
+
+    const char *WifiOutcomeName(WifiOutcome outcome)
+    {
+        switch (outcome)
+        {
+        case WifiOutcome::Connected: return "connected";
+        case WifiOutcome::WrongPassword: return "wrong_password";
+        case WifiOutcome::NotFound: return "not_found";
+        case WifiOutcome::Timeout: return "timeout";
+        case WifiOutcome::Failed: return "failed";
+        }
+        return "failed";
+    }
+
+    const char *WifiStateName(WifiState state)
+    {
+        switch (state)
+        {
+        case WifiState::Unavailable: return "unavailable";
+        case WifiState::Disconnected: return "disconnected";
+        case WifiState::Connecting: return "connecting";
+        case WifiState::Connected: return "connected";
+        }
+        return "unavailable";
+    }
+
+    std::string EncodeWifiAccepted(int64_t id, std::chrono::seconds timeout)
+    {
+        Json r;
+        r["accepted"] = true;
+        r["timeout_s"] = timeout.count();
+        return Line(Response(id, std::move(r)));
+    }
+
+    std::string EncodeWifiStatus(int64_t id, const WifiStatusView &status)
+    {
+        auto text_or_null = [](const std::string &s) { return s.empty() ? Json(nullptr) : Json(Clip(s, 64)); };
+        Json r;
+        r["state"] = WifiStateName(status.link.state);
+        r["ssid"] = text_or_null(status.link.ssid);
+        r["ip"] = text_or_null(status.link.ip);
+        if (status.last)
+        {
+            r["last"]["ssid"] = Clip(status.last->ssid, 64);
+            r["last"]["result"] = status.last->outcome ? WifiOutcomeName(*status.last->outcome) : "pending";
+        }
+        else
+            r["last"] = nullptr;
+        return Line(Response(id, std::move(r)));
+    }
+
+    std::string EncodeWifiResultEvent(uint64_t seq, uint64_t dropped, int64_t op, const std::string &ssid,
+                                      const WifiResult &result)
+    {
+        Json j = Event("result", seq, dropped);
+        j["op"] = op;
+        j["ok"] = result.outcome == WifiOutcome::Connected;
+        if (result.outcome == WifiOutcome::Connected)
+        {
+            j["result"]["ssid"] = Clip(ssid, 64);
+            j["result"]["ip"] = result.ip.empty() ? Json(nullptr) : Json(Clip(result.ip, 64));
+            return Line(j);
+        }
+        std::string message = result.message;
+        if (message.empty())
+            switch (result.outcome)
+            {
+            case WifiOutcome::WrongPassword: message = "the network rejected the password"; break;
+            case WifiOutcome::NotFound: message = "the network was not found"; break;
+            case WifiOutcome::Timeout: message = "the network did not answer in time"; break;
+            default: message = "the Wi-Fi join failed"; break;
+            }
+        j["error"]["code"] = WifiOutcomeName(result.outcome);
+        j["error"]["message"] = Clip(message, kMaxText);
+        return Line(j);
+    }
 }

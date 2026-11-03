@@ -81,6 +81,13 @@ add_library(dlidar_gpio STATIC src/adapters/gpio/gpio_line.cpp src/adapters/gpio
 set_target_properties(dlidar_gpio PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_gpio PUBLIC dlidar_core)
 
+# NetworkManager adapter (src/adapters/networkmanager): Wi-Fi setup from the
+# phone through nmcli; the only code that runs other programs.
+add_library(dlidar_network STATIC src/adapters/networkmanager/command_runner.cpp
+    src/adapters/networkmanager/nmcli_helpers.cpp src/adapters/networkmanager/nmcli_wifi.cpp)
+set_target_properties(dlidar_network PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_network PUBLIC dlidar_core)
+
 # Storage adapter (src/adapters/storage): recording files; the only code that sees LASzip.
 add_library(dlidar_storage STATIC
     src/adapters/storage/laz_encoder.cpp
@@ -101,7 +108,7 @@ set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_B
 target_link_libraries(dlidar_app PUBLIC dlidar_core)
 
 add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
-target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_phone dlidar_storage dlidar_console)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_phone dlidar_network dlidar_storage dlidar_console)
 add_dependencies(dLidar dlidar_version)
 target_include_directories(dLidar PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
@@ -147,7 +154,7 @@ set_target_properties(test_capture_timing PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${
 target_link_libraries(test_capture_timing dlidar_core)
 add_test(NAME capture_timing COMMAND test_capture_timing)
 
-foreach(t record_session device_control device_api)
+foreach(t record_session device_control device_api wifi_setup)
 add_executable(test_${t} tests/application/test_${t}.cpp)
 set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_${t} dlidar_core)
@@ -189,6 +196,11 @@ set_target_properties(test_${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BI
 target_link_libraries(test_${t} dlidar_gpio)
 add_test(NAME ${t} COMMAND test_${t})
 endforeach()
+
+add_executable(test_nmcli_wifi tests/adapters/networkmanager/test_nmcli_wifi.cpp)
+set_target_properties(test_nmcli_wifi PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_nmcli_wifi dlidar_network)
+add_test(NAME nmcli_wifi COMMAND test_nmcli_wifi)
 
 foreach(t line_framer protocol_codec phone_server phone_socket ble_link)
 add_executable(test_${t} tests/adapters/phone/test_${t}.cpp)

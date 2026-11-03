@@ -39,4 +39,4 @@
 ## 6. Docs and integration
 
 - [x] 6.1 `docs/manual.html` (wiring: the pairing button on pin 15, GND on pin 20; gestures; the LED pattern table; start/stop from the phone), `docs/architecture.md` (the commands as an input channel, `PairingButtonCommands`, `SetPairing`), `README.md`, `CLAUDE.md`. Send the app agent the two commands and `busy`. Verify that the manual and architecture.md agree.
-- [ ] 6.2 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, the architecture-reviewer agent on the tip before the push.
+- [x] 6.2 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, the architecture-reviewer agent on the tip before the push.

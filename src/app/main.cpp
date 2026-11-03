@@ -13,6 +13,8 @@
 #include "adapters/gpio/button_input.h"
 #include "adapters/gpio/gpio_line.h"
 #include "adapters/gpio/status_led.h"
+#include "adapters/networkmanager/command_runner.h"
+#include "adapters/networkmanager/nmcli_wifi.h"
 #include "adapters/phone/phone_link.h"
 #include "adapters/phone/socket_transport.h"
 #include "adapters/storage/file_recording_storage.h"
@@ -25,6 +27,7 @@
 #include "application/device/event_hub.h"
 #include "application/device/scanner_controller.h"
 #include "application/remote/device_api.h"
+#include "application/remote/wifi_setup.h"
 #include "domain/recording/recording_info.h"
 #include "dlidar_version.h"
 
@@ -183,12 +186,19 @@ int main(int argc, char *argv[])
 		dlidar::ScannerController controller(*sensor, storage, hub, config, &StopRequested());
 
 		// The phone link: its own thread, the local socket and Bluetooth LE
-		// ([phone] ble, name); an input (start, stop) and an output channel
+		// ([phone] ble, name); an input (start, stop, Wi-Fi) and an output channel
 		// on the hub. The pairing window opens on the pairing button,
 		// SIGUSR1 or SIGUSR2 (forget first). A problem only warns.
 		dlidar::DeviceApi api(controller, &storage,
 							  {DLIDAR_VERSION, SensorKindName(settings.sensor), ProfileFor(settings).sensor_model,
 							   dlidar::kRecordingFormatVersion});
+		// Wi-Fi setup from the phone (wifi.connect, wifi.status): NetworkManager
+		// through nmcli on its own thread. Without NetworkManager, wifi.status
+		// says unavailable and a join fails with the reason. Stopped before the
+		// phone link, so no result comes after it.
+		dlidar::network::NmcliWifi wifi(std::make_unique<dlidar::network::ProcessRunner>(), {});
+		wifi.Start();
+		dlidar::WifiSetup wifi_setup(wifi);
 		dlidar::phone::BleOptions ble;
 		ble.enabled = settings.phone.ble;
 		ble.name = settings.phone.name;
@@ -196,7 +206,7 @@ int main(int argc, char *argv[])
 			ble.on_pairing = [led](bool open) { led->SetPairing(open); };
 		std::string why;
 		std::unique_ptr<dlidar::phone::PhoneLink> phone =
-			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why);
+			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why, &wifi_setup);
 		if (!why.empty())
 			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (phone)
@@ -251,8 +261,10 @@ int main(int argc, char *argv[])
 			controller.StopRecording();
 			controller.WaitIdle();
 		}
-		// The final state reaches the clients (up to 200 ms), then the socket
+		// A running Wi-Fi join is abandoned (its unsaved profile removed). The
+		// final state reaches the clients (up to 200 ms), then the socket
 		// goes; before the controller the API points to.
+		wifi.Stop();
 		if (phone)
 			phone->Shutdown();
 	}

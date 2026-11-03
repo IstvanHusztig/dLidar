@@ -5,7 +5,7 @@
   tools/phone_client.py [--socket PATH] [--wait S] CMD [JSON_ARGS]
   tools/phone_client.py [--socket PATH] [--wait S] --follow [CMD [JSON_ARGS]]
 
-Prints the response to CMD (hello, status.get, info.get, recording.start, recording.stop) as one JSON line.
+Prints the response to CMD (hello, status.get, info.get, recording.start, recording.stop, wifi.status, wifi.connect) as one JSON line.
 --follow then keeps printing every event until Ctrl-C or the scanner closes
 the connection. The socket is /run/dlidar/dlidar.sock (the service), else
 $XDG_RUNTIME_DIR/dlidar.sock (dLidar run by hand). --wait retries the connect

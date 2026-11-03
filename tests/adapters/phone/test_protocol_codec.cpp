@@ -273,7 +273,7 @@ void TestDocumentExamples()
 
     static const std::vector<std::string> wifi{"ssid", "psk", "security"};
     auto args = [](const std::string &cmd) -> const std::vector<std::string> * {
-        return cmd == "wifi.connect" ? &wifi : Args(cmd);
+        return cmd == "wifi.connect" ? &wifi : cmd == "wifi.status" ? &kNoArgs : Args(cmd);
     };
     for (const std::string &q : requests)
     {
@@ -286,7 +286,9 @@ void TestDocumentExamples()
     Request r;
     DecodeError e;
     CHECK(!DecodeRequest("this is not JSON", args, r, e) && replies.count(EncodeError(e)), "not JSON example");
-    CHECK(replies.count(EncodeHello(1, {"hello", "status.get", "info.get", "recording.start", "recording.stop"},
+    CHECK(replies.count(EncodeHello(1,
+                                    {"hello", "status.get", "info.get", "recording.start", "recording.stop",
+                                     "wifi.connect", "wifi.status"},
                                     {"state", "warning", "progress", "summary"})),
           "hello example");
     CHECK(replies.count(EncodeCommandResult(5, true, DeviceState::Idle)), "recording.start example");
@@ -297,11 +299,108 @@ void TestDocumentExamples()
           "busy example");
     CHECK(replies.count(EncodeError(std::nullopt, kTooManyClients, "another client is connected")),
           "too_many_clients example");
+
+    // Wi-Fi (openspec phone-link-wifi): the answers and results as the code makes them.
+    CHECK(replies.count(EncodeWifiAccepted(12, kWifiConnectLimit)), "results-later example: accepted");
+    CHECK(replies.count(EncodeWifiResultEvent(14, 0, 12, "Home", WifiResult{WifiOutcome::WrongPassword, "", ""})),
+          "results-later example: wrong_password");
+    CHECK(replies.count(EncodeWifiAccepted(20, kWifiConnectLimit)), "wifi.connect example: accepted");
+    CHECK(replies.count(EncodeWifiResultEvent(4, 0, 20, "Home", WifiResult{WifiOutcome::Connected, "192.168.1.50", ""})),
+          "wifi.connect example: connected");
+    CHECK(replies.count(EncodeError(21, kBusy, "another Wi-Fi join is still running; try again when it has ended")),
+          "wifi.connect example: busy");
+    WifiNetwork n;
+    std::optional<WifiArgError> bad = WifiSetup::Check(std::string("Home"), WifiSecurity::Wpa2Psk, std::string("short"), n);
+    CHECK(bad && replies.count(EncodeError(22, kBadRequest, bad->message)), "wifi.connect example: bad psk");
+    WifiStatusView v;
+    v.link = WifiLink{WifiState::Connecting, "Home", ""};
+    v.last = WifiLast{"Home", std::nullopt};
+    CHECK(replies.count(EncodeWifiStatus(23, v)), "wifi.status example: pending");
+    v.link = WifiLink{WifiState::Connected, "Home", "192.168.1.50"};
+    v.last = WifiLast{"Home", WifiOutcome::Connected};
+    CHECK(replies.count(EncodeWifiStatus(24, v)), "wifi.status example: connected");
+}
+void TestWifi()
+{
+    printf("wifi.connect arguments, wifi.status, the result event\n");
+    static const std::vector<std::string> wifi{"ssid", "psk", "security"};
+    auto args = [](const std::string &cmd) -> const std::vector<std::string> * {
+        return cmd == "wifi.connect" ? &wifi : Args(cmd);
+    };
+    Request r;
+    DecodeError e;
+    WifiConnectArgs a;
+    std::string message;
+    CHECK(DecodeRequest(R"({"v":1,"id":12,"cmd":"wifi.connect","args":{"ssid":"Home","security":"wpa2-psk","psk":"secret123"}})",
+                        args, r, e),
+          "decoded");
+    CHECK(DecodeWifiConnectArgs(r, a, message), "args: %s", message.c_str());
+    CHECK(a.ssid == std::string("Home") && a.security == std::string("wpa2-psk") && a.psk == std::string("secret123"),
+          "the three arguments");
+    CHECK(DecodeRequest(R"({"v":1,"id":13,"cmd":"wifi.connect","args":{"ssid":"Café","security":"open"}})", args, r, e),
+          "decoded");
+    CHECK(DecodeWifiConnectArgs(r, a, message) && a.ssid == std::string("Café") && !a.psk, "psk left out");
+    CHECK(DecodeRequest(R"({"v":1,"id":14,"cmd":"wifi.connect","args":{"ssid":"Home","psk":12345678}})", args, r, e),
+          "decoded");
+    CHECK(!DecodeWifiConnectArgs(r, a, message) && message == "\"psk\" must be a string" &&
+              message.find("12345678") == std::string::npos,
+          "not a string: %s", message.c_str());
+
+    CHECK(WifiSecurityFromName("wpa2-psk") == WifiSecurity::Wpa2Psk && WifiSecurityFromName("wpa3-sae") == WifiSecurity::Wpa3Sae &&
+              WifiSecurityFromName("open") == WifiSecurity::Open && !WifiSecurityFromName("wep") &&
+              !WifiSecurityFromName("WPA2-PSK"),
+          "security names");
+
+    CHECK(EncodeWifiAccepted(12, std::chrono::seconds(60)) == "{\"id\":12,\"ok\":true,\"result\":{\"accepted\":true,\"timeout_s\":60}}\n",
+          "accepted: %s", EncodeWifiAccepted(12, std::chrono::seconds(60)).c_str());
+
+    WifiStatusView v;
+    v.link = WifiLink{WifiState::Connected, "Home", "192.168.1.50"};
+    v.last = WifiLast{"Home", WifiOutcome::Connected};
+    CHECK(EncodeWifiStatus(15, v) ==
+              "{\"id\":15,\"ok\":true,\"result\":{\"state\":\"connected\",\"ssid\":\"Home\",\"ip\":\"192.168.1.50\",\"last\":{\"ssid\":\"Home\",\"result\":\"connected\"}}}\n",
+          "status connected: %s", EncodeWifiStatus(15, v).c_str());
+    v.link = WifiLink{WifiState::Connecting, "Site", ""};
+    v.last = WifiLast{"Site", std::nullopt};
+    CHECK(EncodeWifiStatus(16, v) ==
+              "{\"id\":16,\"ok\":true,\"result\":{\"state\":\"connecting\",\"ssid\":\"Site\",\"ip\":null,\"last\":{\"ssid\":\"Site\",\"result\":\"pending\"}}}\n",
+          "status pending: %s", EncodeWifiStatus(16, v).c_str());
+    v.link = WifiLink{WifiState::Unavailable, "", ""};
+    v.last.reset();
+    CHECK(EncodeWifiStatus(17, v) ==
+              "{\"id\":17,\"ok\":true,\"result\":{\"state\":\"unavailable\",\"ssid\":null,\"ip\":null,\"last\":null}}\n",
+          "status unavailable: %s", EncodeWifiStatus(17, v).c_str());
+    v.link = WifiLink{WifiState::Disconnected, "", ""};
+    v.last = WifiLast{"Site", WifiOutcome::WrongPassword};
+    Json s = Check(EncodeWifiStatus(18, v), "status disconnected");
+    CHECK(s["result"]["state"] == "disconnected" && s["result"]["last"]["result"] == "wrong_password", "disconnected");
+
+    CHECK(EncodeWifiResultEvent(14, 0, 12, "Home", WifiResult{WifiOutcome::Connected, "192.168.1.50", ""}) ==
+              "{\"event\":\"result\",\"seq\":14,\"op\":12,\"ok\":true,\"result\":{\"ssid\":\"Home\",\"ip\":\"192.168.1.50\"}}\n",
+          "result connected");
+    CHECK(EncodeWifiResultEvent(3, 2, 12, "Home", WifiResult{WifiOutcome::Connected, "", ""}) ==
+              "{\"event\":\"result\",\"seq\":3,\"dropped\":2,\"op\":12,\"ok\":true,\"result\":{\"ssid\":\"Home\",\"ip\":null}}\n",
+          "result connected, no address");
+    CHECK(EncodeWifiResultEvent(14, 0, 12, "Home", WifiResult{WifiOutcome::WrongPassword, "", ""}) ==
+              "{\"event\":\"result\",\"seq\":14,\"op\":12,\"ok\":false,\"error\":{\"code\":\"wrong_password\",\"message\":\"the network rejected the password\"}}\n",
+          "result wrong_password");
+    const WifiOutcome errors[] = {WifiOutcome::NotFound, WifiOutcome::Timeout, WifiOutcome::Failed};
+    const char *codes[] = {"not_found", "timeout", "failed"};
+    for (int i = 0; i < 3; i++)
+    {
+        Json j = Check(EncodeWifiResultEvent(1, 0, 5, "Home", WifiResult{errors[i], "", ""}), codes[i]);
+        CHECK(j["ok"] == false && j["error"]["code"] == codes[i] && !j["error"]["message"].get<std::string>().empty(),
+              "%s", codes[i]);
+    }
+    Json f = Check(EncodeWifiResultEvent(1, 0, 5, "Home", WifiResult{WifiOutcome::Failed, "", std::string(5000, 'm')}),
+                   "long message");
+    CHECK(f["error"]["message"].get<std::string>().size() <= 1024, "message clipped");
 }
 } // namespace
 
 int main()
 {
+    TestWifi();
     TestRequests();
     TestErrors();
     TestResponses();
