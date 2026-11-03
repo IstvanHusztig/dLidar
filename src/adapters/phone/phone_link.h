@@ -16,7 +16,6 @@ namespace dlidar::phone
     {
         bool enabled = false;          // [phone] ble
         std::string name = "dLidar";   // [phone] name
-        bool pairing_at_start = false; // [phone] pairing_at_start: the window opens at start
     };
 
     class PhoneLink
@@ -34,6 +33,10 @@ namespace dlidar::phone
 
         std::shared_ptr<DeviceEvents> Events() const;
         std::string SocketPath() const;
+
+        // Opens the Bluetooth pairing window for `seconds` (SIGUSR1, later the
+        // pairing button). With BLE off only a warning. Thread-safe.
+        void OpenPairingWindow(std::chrono::seconds seconds = std::chrono::seconds(120));
         size_t Connections();
 
         // Delivers what is pending, the final idle or error state included,

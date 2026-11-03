@@ -246,13 +246,11 @@ const std::vector<Key> &Schema()
 			 s.phone.name = v.text;
 			 return std::string();
 		 }},
+		// Removed: the pairing window opens on request (SIGUSR1, tools/pair.sh).
 		{"phone", "pairing_at_start",
-		 [](const Value &v, S &s) {
-			 std::string e = Expect(v, Value::Boolean);
-			 if (!e.empty())
-				 return e;
-			 s.phone.pairing_at_start = v.boolean;
-			 return std::string();
+		 [](const Value &, S &) {
+			 return std::string("is no longer supported: open the pairing window with tools/pair.sh (signal "
+								"SIGUSR1); remove pairing_at_start");
 		 }},
 		{"livox_mid360s", "drop_low_confidence",
 		 [](const Value &v, S &s) {
@@ -397,7 +395,6 @@ DeviceSettings DefaultSettings()
 	s.livox_mid360s.mount = kLivoxMount;
 	s.gpio.button_gpio = kButtonGpio;
 	s.gpio.led_gpio = kLedGpio;
-	s.phone.pairing_at_start = kPairingAtStart;
 	s.phone.ble = kBleEnabled;
 	s.phone.name = kBleName;
 	s.livox_mid360s.imu_rate_hz = kLivoxImuRateHz;

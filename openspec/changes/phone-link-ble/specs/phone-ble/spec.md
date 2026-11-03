@@ -40,10 +40,10 @@ A phone SHALL only be able to write RX or turn on TX notifications over an encry
 - **THEN** it gets the response without a new pairing prompt
 
 ### Requirement: Pairing window
-New bonds SHALL be possible only while the pairing window is open: for 120 s after it is opened, Just Works (no PIN), any phone may pair. Outside the window the adapter SHALL not be pairable. The window SHALL be opened at start by `[phone] pairing_at_start = true` (default false) until the pairing button is mounted, SHALL print when it opens, when a phone pairs, and when it closes, and SHALL never delay dLidar's start or a recording.
+New bonds SHALL be possible only while the pairing window is open: for 120 s after it is opened, Just Works (no PIN), any phone may pair. Outside the window the adapter SHALL not be pairable. The window SHALL be opened by the signal `SIGUSR1` (`tools/pair.sh`) until the pairing button is mounted, SHALL print when it opens, when a phone pairs, and when it closes, and SHALL never delay dLidar's start or a recording.
 
-#### Scenario: Pairing at start
-- **WHEN** dLidar starts with `pairing_at_start = true` and an unbonded phone writes RX within 120 s
+#### Scenario: Pairing on request
+- **WHEN** `tools/pair.sh` is run and an unbonded phone writes RX within 120 s
 - **THEN** the phone pairs, the console prints that it paired, and its request is answered after the retry
 
 #### Scenario: Another program enables pairing
@@ -51,7 +51,7 @@ New bonds SHALL be possible only while the pairing window is open: for 120 s aft
 - **THEN** dLidar makes it not pairable again and prints a warning (once per start)
 
 #### Scenario: Window closed
-- **WHEN** 120 s after start an unbonded phone tries to pair
+- **WHEN** 120 s after the window opened an unbonded phone tries to pair
 - **THEN** the pairing fails and the console has printed that the pairing window closed
 
 ### Requirement: Messages over writes and notifications

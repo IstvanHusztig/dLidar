@@ -18,7 +18,7 @@ ctest --test-dir build --output-on-failure # no sensor needed
 
 ## Settings
 
-dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button and LED pins, and the phone link (`[phone] ble`, `name`, `pairing_at_start`). Every key is listed there with its default, and explained in the manual ("Settings").
+dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button and LED pins, and the phone link (`[phone] ble`, `name`). Every key is listed there with its default, and explained in the manual ("Settings").
 
 ## Run
 
@@ -44,11 +44,7 @@ Recordings go to `~/PointCloudDump/` (numbered `lidarNNNN.laz`, `imuNNNN.csv` an
 dLidar serves a read-only protocol (state, progress, warnings, summary, free space, sensor) over Bluetooth LE and a local socket. The contract for app authors is [`docs/phone-protocol.md`](docs/phone-protocol.md).
 
 - **Bluetooth LE:** the scanner advertises as `dLidar` while no phone is connected, one phone at a time, **bonded phones only**.
-- **Pairing a phone** (until the pairing button is mounted):
-  1. Set `pairing_at_start = true` under `[phone]` in `dlidar.toml`.
-  2. Run `sudo systemctl restart dlidar`.
-  3. Within 2 minutes, connect with the app and tap **Pair** (no PIN).
-  4. Set it back to `false` and restart the service. Outside this window the Pi refuses every pairing.
+- **Pairing a phone** (until the pairing button is mounted): run `tools/pair.sh` on the Pi, then within 2 minutes connect with the app and tap **Pair** (no PIN). Outside this window the Pi refuses every pairing.
 - **On the Pi itself:** `tools/phone_client.py status.get` (or `--follow` for events) talks to the socket `/run/dlidar/dlidar.sock`.
 
 ## Documentation

@@ -131,7 +131,7 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
   3. after 120 s on a loop timer, unregisters the agent, then sets `Pairable` false (order from the `phone-link-core` finding).
 - Device1 `Paired` becoming true prints `Bluetooth: paired with <alias>`.
 - If BlueZ is down when the window is due, it opens when BlueZ appears, with the remaining time.
-- `pairing_at_start` with `ble = false` prints a warning and opens nothing.
+- **Opened on request:** `SIGUSR1` (`tools/pair.sh`; `pkill -USR1 -x dLidar`, no sudo as the service runs as the user) sets a flag that `main.cpp` polls every 100 ms, in service mode and during `--once`, and passes to `PhoneLink::OpenPairingWindow`. It replaces the setting `[phone] pairing_at_start` (user decision 2026-11-03: a running service has no terminal for a key, and a setting left `true` opened a window at every boot); an old settings file with that key stops with a hint. With `ble = false` the request only warns.
 - The console messages are unchanged.
 
 **D11. Asynchronous D-Bus only, and recovery.**
@@ -159,7 +159,7 @@ See proposal.md (Why) and specs/phone-ble/spec.md for the requirements. Facts th
 
 **D13. Settings.**
 - `[phone] ble` (bool, default `true`) and `[phone] name` (string, 1–20 printable ASCII characters, default `"dLidar"`).
-- Their defaults live in `device_config.h` with `kPairingAtStart`.
+- Their defaults live in `device_config.h`.
 - `dlidar.toml` lists them.
 
 **D14. Service unit.**

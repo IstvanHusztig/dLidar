@@ -27,8 +27,6 @@ const uint32_t kLidarWorkMode = 0;
 const int kButtonGpio = 17;
 const int kLedGpio = 27;
 
-// [phone] pairing_at_start: no pairing window at start unless the settings ask.
-const bool kPairingAtStart = false;
 // [phone] ble, name: the phone link over Bluetooth LE, advertised as this name.
 const bool kBleEnabled = true;
 const char *const kBleName = "dLidar";

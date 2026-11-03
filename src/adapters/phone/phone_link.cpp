@@ -46,8 +46,6 @@ namespace dlidar::phone
         p->socket = std::make_unique<SocketTransport>(p->loop.Context(), *p->server);
         p->loop.Start();
         p->loop.Call([&] { p->socket_ok = p->socket->Listen(socket_dir, socket_why); });
-        if (ble.pairing_at_start && !ble.enabled)
-            std::cerr << "WARNING: [phone] pairing_at_start needs [phone] ble = true; no pairing window" << std::endl;
         if ((!p->socket_ok && (p->socket->AnotherRunning() || !ble.enabled)))
         {
             p->loop.Stop();
@@ -61,8 +59,6 @@ namespace dlidar::phone
                 p->ble = std::make_unique<BleLink>(*p->server, *p->peripheral, p->loop);
                 p->peripheral->Attach(*p->ble);
                 p->peripheral->Start(); // asynchronous: never waits for bluetoothd
-                if (ble.pairing_at_start)
-                    p->peripheral->OpenPairingWindow(std::chrono::seconds(120));
             });
         p->events = std::make_shared<PhoneEvents>(p->mailbox);
         return std::unique_ptr<PhoneLink>(new PhoneLink(std::move(impl)));
@@ -71,6 +67,22 @@ namespace dlidar::phone
     std::shared_ptr<DeviceEvents> PhoneLink::Events() const { return impl_->events; }
 
     std::string PhoneLink::SocketPath() const { return impl_->socket->Path(); }
+
+    void PhoneLink::OpenPairingWindow(std::chrono::seconds seconds)
+    {
+        Impl *p = impl_.get();
+        if (p->stopped)
+            return;
+        if (!p->peripheral)
+        {
+            std::cerr << "WARNING: no pairing window: Bluetooth is off ([phone] ble = false)" << std::endl;
+            return;
+        }
+        p->loop.Invoke([p, seconds] {
+            if (p->peripheral)
+                p->peripheral->OpenPairingWindow(seconds);
+        });
+    }
 
     size_t PhoneLink::Connections()
     {

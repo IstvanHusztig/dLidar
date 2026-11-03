@@ -58,7 +58,6 @@ struct GpioSettings
 // The phone link over Bluetooth LE (docs/manual.html, "Phone link").
 struct PhoneSettings
 {
-	bool pairing_at_start = false; // open the pairing window once at start (until the pairing button is mounted)
 	bool ble = true;               // serve the phone link over Bluetooth LE
 	std::string name;              // the advertised name, 1-20 printable ASCII characters
 };

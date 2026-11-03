@@ -45,9 +45,8 @@ gpio = 17
 gpio = 27
 
 [phone]
-# Testing until the pairing button is mounted: open the Bluetooth pairing
-# window for 2 minutes when dLidar starts.
-pairing_at_start = false
+# The pairing window (2 minutes) opens with tools/pair.sh, later with the
+# pairing button.
 # Serve the phone link over Bluetooth LE (the app finds the scanner by its
 # service UUID; this name is shown).
 ble = true

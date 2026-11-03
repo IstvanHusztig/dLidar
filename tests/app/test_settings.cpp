@@ -108,7 +108,6 @@ void TestFullFile()
 		  "other pins");
 
 	DeviceSettings p;
-	CHECK(!DefaultSettings().phone.pairing_at_start, "no pairing window by default");
 	CHECK(DefaultSettings().phone.ble && DefaultSettings().phone.name == "dLidar", "BLE on, named dLidar, by default");
 	CHECK(ParseError("[phone]\nble = false\nname = \"Cave 2\"\n", &p).empty() && !p.phone.ble && p.phone.name == "Cave 2",
 		  "[phone] ble and name");
@@ -118,8 +117,8 @@ void TestFullFile()
 	CHECK(ParseError("[phone]\nname = \"Gr\u00fcn\"\n", &p).find("ASCII") != std::string::npos, "non-ASCII name");
 	CHECK(ParseError("[phone]\nname = \"a\\tb\"\n", &p).find("ASCII") != std::string::npos, "control character");
 	CHECK(ParseError("[phone]\nble = 1\n", &p).find(":2:") != std::string::npos, "ble needs true/false");
-	CHECK(ParseError("[phone]\npairing_at_start = true\n", &p).empty() && p.phone.pairing_at_start, "[phone] pairing_at_start");
-	CHECK(ParseError("[phone]\npairing_at_start = 1\n", &p).find(":2:") != std::string::npos, "pairing_at_start needs true/false");
+	CHECK(ParseError("[phone]\npairing_at_start = false\n", &p).find("tools/pair.sh") != std::string::npos,
+		  "pairing_at_start removed: the error names tools/pair.sh");
 
 	// Keys may be left out; they keep their defaults. Strings take escapes.
 	CHECK(ParseError("[livox_mid360s]\nlidar_ip = \"\"\n", &s).empty() && s.livox_mid360s.lidar_ip.empty(),

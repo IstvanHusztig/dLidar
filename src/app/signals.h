@@ -11,6 +11,8 @@
 
 // Termination handling for a capture.
 //
+// SIGUSR1 opens the Bluetooth pairing window for 2 minutes.
+//
 // SIGINT / SIGTERM / SIGHUP request a stop: the capture loop ends and the
 // normal shutdown path writes the remaining data and finalizes the LAZ
 // files. A second such signal kills the process; the next start then
@@ -24,6 +26,14 @@ inline std::atomic<bool> &StopRequested()
 {
     static std::atomic<bool> stop{false};
     return stop;
+}
+
+// SIGUSR1 asks for the Bluetooth pairing window (tools/pair.sh); main takes
+// the request with exchange(false).
+inline std::atomic<bool> &PairingRequested()
+{
+    static std::atomic<bool> pairing{false};
+    return pairing;
 }
 
 using dlidar::CrashTruncateFd;
@@ -49,6 +59,8 @@ namespace shutdown_detail
         WriteStderr("\nStop requested, finishing the recording (signal again to abort)...\n");
     }
 
+    inline void OnPairingSignal(int) { PairingRequested() = true; }
+
     inline void OnFatalSignal(int sig)
     {
         int fd = CrashTruncateFd().load();
@@ -66,6 +78,7 @@ inline void InstallSignalHandlers()
 {
     // Initialize the function-local statics outside of any handler.
     StopRequested();
+    PairingRequested();
     CrashTruncateFd();
     CrashTruncateSize();
 
@@ -74,6 +87,12 @@ inline void InstallSignalHandlers()
     sigemptyset(&stop.sa_mask);
     for (int sig : {SIGINT, SIGTERM, SIGHUP})
         sigaction(sig, &stop, nullptr);
+
+    struct sigaction pairing = {};
+    pairing.sa_handler = shutdown_detail::OnPairingSignal;
+    sigemptyset(&pairing.sa_mask);
+    pairing.sa_flags = SA_RESTART;
+    sigaction(SIGUSR1, &pairing, nullptr);
 
     struct sigaction fatal = {};
     fatal.sa_handler = shutdown_detail::OnFatalSignal;

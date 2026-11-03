@@ -92,7 +92,7 @@ Enforcement:
 - `settings.h/.cpp`: the settings file `dlidar.toml` in the project root (`--config PATH`), a strict TOML subset: which sensor, its endpoints and mount, the button and LED pins, the Mid-360S IMU setting, the IMU time mode. Unknown keys and bad values stop the start with the line number. The keys are listed in `docs/manual.html` ("Settings").
 - `device_config.h`: the settings' built-in defaults (the sensors' endpoints, work mode and mount, the button and LED pins, the Mid-360S IMU setting).
 - `sensor_factory.h/.cpp`: the only code that knows every sensor adapter; opens the sensor the settings choose.
-- `signals.h`: SIGINT/SIGTERM/SIGHUP stop (a second signal kills); fatal signals truncate the CSV.
+- `signals.h`: SIGINT/SIGTERM/SIGHUP stop (a second signal kills); SIGUSR1 asks for the Bluetooth pairing window (`tools/pair.sh`, the loop in `main.cpp` passes it to `PhoneLink`); fatal signals truncate the CSV.
 
 ## Data flow of a recording
 

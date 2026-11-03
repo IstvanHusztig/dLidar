@@ -166,16 +166,15 @@ int main(int argc, char *argv[])
 		dlidar::ScannerController controller(*sensor, storage, hub, config, &StopRequested());
 
 		// The phone link (read-only so far): its own thread, the local socket
-		// and Bluetooth LE ([phone] ble, name; pairing_at_start opens the
-		// pairing window for 2 minutes until the pairing button is mounted).
-		// An output channel on the hub. A problem only warns.
+		// and Bluetooth LE ([phone] ble, name). SIGUSR1 (tools/pair.sh) opens
+		// the pairing window for 2 minutes. An output channel on the hub. A
+		// problem only warns.
 		dlidar::DeviceApi api(controller, &storage,
 							  {DLIDAR_VERSION, SensorKindName(settings.sensor), ProfileFor(settings).sensor_model,
 							   dlidar::kRecordingFormatVersion});
 		dlidar::phone::BleOptions ble;
 		ble.enabled = settings.phone.ble;
 		ble.name = settings.phone.name;
-		ble.pairing_at_start = settings.phone.pairing_at_start;
 		std::string why;
 		std::unique_ptr<dlidar::phone::PhoneLink> phone =
 			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why);
@@ -183,9 +182,25 @@ int main(int argc, char *argv[])
 			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (phone)
 			hub.AddAsync(phone->Events());
+		// SIGUSR1 (tools/pair.sh): the pairing window, while dLidar waits.
+		auto pairing = [&] {
+			if (PairingRequested().exchange(false))
+			{
+				if (phone)
+					phone->OpenPairingWindow();
+				else
+					std::cerr << "WARNING: no pairing window: the phone link is not running" << std::endl;
+			}
+		};
 		if (once)
 		{
 			controller.StartRecording();
+			for (dlidar::DeviceState s = controller.Status().state;
+				 s != dlidar::DeviceState::Idle && s != dlidar::DeviceState::Error; s = controller.Status().state)
+			{
+				pairing();
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
 			controller.WaitIdle();
 		}
 		else
@@ -196,7 +211,10 @@ int main(int argc, char *argv[])
 			std::cout << "Ready: press the button (GPIO " << settings.gpio.button_gpio
 					  << ") to start a recording, again to save it; hold it 5 s to power down." << std::endl;
 			while (!StopRequested())
+			{
+				pairing();
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
 			controller.StopRecording();
 			controller.WaitIdle();
 		}
