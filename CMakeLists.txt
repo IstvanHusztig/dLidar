@@ -200,7 +200,6 @@ target_link_libraries(test_${t} dlidar_core)
 add_test(NAME ${t} COMMAND test_${t})
 endforeach()
 
-
 # Layer dependency rule (docs/architecture.md); --self-test checks the checker.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
