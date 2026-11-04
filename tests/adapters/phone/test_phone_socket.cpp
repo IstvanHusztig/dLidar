@@ -192,12 +192,12 @@ struct Device
     std::unique_ptr<ScannerController> controller;
     std::unique_ptr<DeviceApi> api;
 
-    explicit Device(const std::string &dir, WifiSetup *wifi = nullptr)
+    explicit Device(const std::string &dir, WifiSetup *wifi = nullptr, LogReader *log = nullptr)
     {
         controller = std::make_unique<ScannerController>(sensor, storage, hub, Config());
         api = std::make_unique<DeviceApi>(*controller, nullptr, DeviceInfo{"test", "unitree_l2", "unitree_l2", 3});
         std::string why;
-        link = PhoneLink::Start(*api, dir, {}, why, wifi);
+        link = PhoneLink::Start(*api, dir, {}, why, wifi, log);
         CHECK(link != nullptr, "link: %s", why.c_str());
         if (link)
             hub.AddAsync(link->Events());
@@ -366,6 +366,44 @@ void TestWifiOverSocket()
         wifi.held(WifiResult{WifiOutcome::Timeout, "", ""});
 }
 
+// 200 long lines: the page reaches the client whole, within 16 KiB, read
+// on the loop thread.
+struct LongLog : LogReader
+{
+    std::vector<std::thread::id> threads;
+    LogPage Read(const LogQuery &q) override
+    {
+        threads.push_back(std::this_thread::get_id());
+        LogPage p;
+        for (int i = 0; i < q.limit; i++)
+            p.entries.push_back(LogEntry{1762246526123 - i, "36276c97", LogLevel::Info, LogSource::Dlidar,
+                                         std::string(1024, 'a'), "cursor" + std::to_string(i)});
+        p.more = "end";
+        return p;
+    }
+};
+
+void TestLogOverSocket()
+{
+    printf("log.get over the socket: a full page within 16 KiB, more at the cut\n");
+    TempDir dir;
+    LongLog log;
+    Device d(dir.path, nullptr, &log);
+    if (!d.link)
+        return;
+    Client c(d.link->SocketPath());
+    CHECK(c.Send("{\"v\":1,\"id\":30,\"cmd\":\"log.get\",\"args\":{\"limit\":200}}\n"), "send");
+    std::optional<Json> a = c.Next();
+    CHECK(a && (*a)["id"] == 30 && (*a)["ok"] == true, "answered");
+    if (a)
+    {
+        size_t kept = (*a)["result"]["entries"].size();
+        CHECK(kept >= 13 && kept < 200 && (*a)["result"]["more"] == "cursor" + std::to_string(kept - 1), "kept %zu", kept);
+        CHECK((*a).dump().size() + 1 <= 16384, "within 16 KiB");
+    }
+    CHECK(log.threads.size() == 1 && log.threads[0] != std::this_thread::get_id(), "read on the loop thread");
+}
+
 void TestFifthClient()
 {
     printf("a fifth client gets too_many_clients\n");
@@ -522,6 +560,7 @@ int main()
     TestRequestsAndRecording();
     TestRemoteRecording();
     TestWifiOverSocket();
+    TestLogOverSocket();
     TestFifthClient();
     TestStalledClient();
     TestDisconnectMidLine();

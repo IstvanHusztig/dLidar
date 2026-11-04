@@ -4,6 +4,7 @@
 #include "adapters/phone/line_framer.h"
 #include "adapters/phone/mailbox.h"
 #include "adapters/phone/protocol_codec.h"
+#include "application/ports/log_reader.h"
 #include "application/remote/device_api.h"
 #include "application/remote/wifi_setup.h"
 
@@ -52,9 +53,10 @@ namespace dlidar::phone
 
         // With `wifi` (and `post`, which brings the Wi-Fi results back to
         // the loop) it also serves wifi.connect and wifi.status (openspec
-        // phone-link-wifi, design D7).
+        // phone-link-wifi, design D7). With `log` it serves log.get (openspec
+        // phone-link-logs), read inline on the loop thread.
         PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock,
-                    WifiSetup *wifi = nullptr, Post post = nullptr);
+                    WifiSetup *wifi = nullptr, Post post = nullptr, LogReader *log = nullptr);
 
         void OnOpen(Connection &c) override;
         void OnBytes(Connection &c, std::string_view data) override;
@@ -95,6 +97,7 @@ namespace dlidar::phone
         ServerClock &clock_;
         WifiSetup *wifi_;
         Post post_;
+        LogReader *log_;
         std::map<Connection *, Client> clients_;
         // The connection that sent each running wifi.connect, by a serial
         // the result carries (null once it closed: the result is only logged).
@@ -113,6 +116,7 @@ namespace dlidar::phone
                         std::function<std::string(Connection &, const Request &)> run);
         std::string RecordingCommand(Connection &c, const Request &r, bool start);
         std::string WifiConnect(Connection &c, const Request &r);
+        std::string LogGet(const Request &r);
         void OnWifiResult(uint64_t serial, int64_t op, const std::string &ssid, const WifiResult &result);
         void HandleLine(Connection &c, std::string_view line);
         void Deliver(Connection &c, Client &cl, const Mailbox::Event &e);

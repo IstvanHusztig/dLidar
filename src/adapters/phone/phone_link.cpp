@@ -46,7 +46,7 @@ namespace dlidar::phone
 
     std::unique_ptr<PhoneLink> PhoneLink::Start(const DeviceApi &api, const std::string &socket_dir,
                                                 const BleOptions &ble, std::string &socket_why,
-                                                WifiSetup *wifi)
+                                                WifiSetup *wifi, LogReader *log)
     {
         auto impl = std::make_unique<Impl>();
         Impl *p = impl.get();
@@ -59,7 +59,7 @@ namespace dlidar::phone
         // The wake runs on the hub's thread, under the mailbox lock, so it
         // never runs after Mailbox::Close().
         p->mailbox = std::make_shared<Mailbox>([p] { p->loop.Invoke([p] { p->server->OnMailbox(); }); });
-        p->server = std::make_unique<PhoneServer>(api, p->mailbox, p->loop, wifi, std::move(post));
+        p->server = std::make_unique<PhoneServer>(api, p->mailbox, p->loop, wifi, std::move(post), log);
         p->loop.on_wake = [p] {
             p->server->OnWake();
             if (p->ble)

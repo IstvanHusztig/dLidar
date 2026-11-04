@@ -12,6 +12,7 @@ namespace dlidar::phone
     const char *const kTooLarge = "too_large";
     const char *const kTooManyClients = "too_many_clients";
     const char *const kBusy = "busy";
+    const char *const kUnavailable = "unavailable";
 
     namespace
     {
@@ -410,4 +411,104 @@ namespace dlidar::phone
         j["error"]["message"] = Clip(message, kMaxText);
         return Line(j);
     }
+
+    bool DecodeLogGetArgs(const Request &request, LogQuery &query, std::string &message)
+    {
+        query = LogQuery();
+        query.limit = kDefaultLogLimit;
+        Json j = Json::parse(request.args_json, nullptr, false);
+        if (!j.is_object())
+        {
+            message = "\"args\" must be an object";
+            return false;
+        }
+        if (auto it = j.find("before"); it != j.end())
+        {
+            if (!it->is_string())
+            {
+                message = "\"before\" must be a string";
+                return false;
+            }
+            query.before = it->get<std::string>();
+        }
+        if (auto it = j.find("limit"); it != j.end())
+        {
+            if (!it->is_number_integer() || it->get<int64_t>() < 1 || it->get<int64_t>() > kMaxLogLimit)
+            {
+                message = "\"limit\" must be an integer from 1 to " + std::to_string(kMaxLogLimit);
+                return false;
+            }
+            query.limit = it->get<int>();
+        }
+        if (auto it = j.find("level"); it != j.end())
+        {
+            bool known = false;
+            for (LogLevel l : {LogLevel::Info, LogLevel::Warning, LogLevel::Error})
+                if (it->is_string() && it->get<std::string>() == LogLevelName(l))
+                    query.min_level = l, known = true;
+            if (!known)
+            {
+                message = "\"level\" must be info, warning or error";
+                return false;
+            }
+        }
+        return true;
+    }
+
+    const char *LogLevelName(LogLevel level)
+    {
+        switch (level)
+        {
+        case LogLevel::Info: return "info";
+        case LogLevel::Warning: return "warning";
+        case LogLevel::Error: return "error";
+        }
+        return "info";
+    }
+
+    const char *LogSourceName(LogSource source) { return source == LogSource::System ? "system" : "dlidar"; }
+
+    std::string EncodeLogPage(int64_t id, const LogPage &page)
+    {
+        auto dump = [](const Json &j) { return j.dump(-1, ' ', false, Json::error_handler_t::replace); };
+        std::vector<Json> entries;
+        std::vector<size_t> sizes;
+        for (const LogEntry &e : page.entries)
+        {
+            Json j;
+            j["t"] = e.time_ms;
+            j["boot"] = Clip(e.boot, 32);
+            j["level"] = LogLevelName(e.level);
+            j["source"] = LogSourceName(e.source);
+            j["text"] = Clip(e.text, kMaxText);
+            sizes.push_back(dump(j).size());
+            entries.push_back(std::move(j));
+        }
+        // D5: the most entries that fit, `more` included.
+        Json empty;
+        empty["entries"] = Json::array();
+        empty["more"] = nullptr;
+        const size_t base = Line(Response(id, empty)).size() - 4; // without "null"
+        auto more_size = [&](size_t n) {
+            if (n < entries.size())
+                return dump(Json(page.entries[n - 1].cursor)).size();
+            return page.more ? dump(Json(*page.more)).size() : 4;
+        };
+        size_t n = 0, used = 0;
+        while (n < entries.size() && base + used + sizes[n] + (n ? 1 : 0) + more_size(n + 1) <= kMaxMessageBytes)
+            used += sizes[n] + (n ? 1 : 0), n++;
+        if (n == 0 && !entries.empty())
+            n = 1; // an entry is at most ~6 KiB escaped (1024 text bytes), so this never cuts
+
+        Json r;
+        r["entries"] = Json::array();
+        for (size_t i = 0; i < n; i++)
+            r["entries"].push_back(std::move(entries[i]));
+        if (n < entries.size())
+            r["more"] = page.entries[n - 1].cursor;
+        else
+            r["more"] = page.more ? Json(*page.more) : Json(nullptr);
+        return Line(Response(id, std::move(r)));
+    }
 }
+

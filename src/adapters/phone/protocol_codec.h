@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/ports/device_events.h"
+#include "application/ports/log_reader.h"
 #include "application/remote/device_api.h"
 #include "application/remote/wifi_setup.h"
 
@@ -29,6 +30,7 @@ namespace dlidar::phone
     extern const char *const kTooLarge;
     extern const char *const kTooManyClients;
     extern const char *const kBusy; // not now: the last recording is being saved
+    extern const char *const kUnavailable; // log.get: the log cannot be read
 
     struct Request
     {
@@ -97,4 +99,19 @@ namespace dlidar::phone
     // The result event of the wifi.connect `op` for network `ssid`.
     std::string EncodeWifiResultEvent(uint64_t seq, uint64_t dropped, int64_t op, const std::string &ssid,
                                       const WifiResult &result);
+
+    // log.get (openspec phone-link-logs, design D2, D5).
+    const int kDefaultLogLimit = 50;
+    const int kMaxLogLimit = 200;
+    // `before` a string, `limit` an integer 1..kMaxLogLimit, `level` info,
+    // warning or error. False with `message` naming the argument.
+    bool DecodeLogGetArgs(const Request &request, LogQuery &query, std::string &message);
+
+    const char *LogLevelName(LogLevel level);    // info, warning, error
+    const char *LogSourceName(LogSource source); // dlidar, system
+
+    // {"entries":[…],"more":…}: the page's entries in order, as many as fit
+    // kMaxMessageBytes; when it stops early, `more` is the cursor of the last
+    // entry kept.
+    std::string EncodeLogPage(int64_t id, const LogPage &page);
 }

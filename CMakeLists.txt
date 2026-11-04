@@ -88,6 +88,13 @@ add_library(dlidar_network STATIC src/adapters/networkmanager/command_runner.cpp
 set_target_properties(dlidar_network PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 target_link_libraries(dlidar_network PUBLIC dlidar_core)
 
+# Journal adapter (src/adapters/journal): the scanner's log for the phone
+# (log.get) through libsystemd's sd-journal; the only code that sees it.
+pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+add_library(dlidar_journal STATIC src/adapters/journal/journal_text.cpp src/adapters/journal/journal_reader.cpp)
+set_target_properties(dlidar_journal PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+target_link_libraries(dlidar_journal PUBLIC dlidar_core PRIVATE PkgConfig::SYSTEMD)
+
 # Storage adapter (src/adapters/storage): recording files; the only code that sees LASzip.
 add_library(dlidar_storage STATIC
     src/adapters/storage/laz_encoder.cpp
@@ -108,7 +115,7 @@ set_target_properties(dlidar_app PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_B
 target_link_libraries(dlidar_app PUBLIC dlidar_core)
 
 add_executable(dLidar src/app/main.cpp src/app/sensor_factory.cpp)
-target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_phone dlidar_network dlidar_storage dlidar_console)
+target_link_libraries(dLidar dlidar_app dlidar_l2 dlidar_livox dlidar_gpio dlidar_phone dlidar_network dlidar_journal dlidar_storage dlidar_console)
 add_dependencies(dLidar dlidar_version)
 target_include_directories(dLidar PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
@@ -201,6 +208,11 @@ add_executable(test_nmcli_wifi tests/adapters/networkmanager/test_nmcli_wifi.cpp
 set_target_properties(test_nmcli_wifi PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
 target_link_libraries(test_nmcli_wifi dlidar_network)
 add_test(NAME nmcli_wifi COMMAND test_nmcli_wifi)
+
+add_executable(test_journal_reader tests/adapters/journal/test_journal_reader.cpp)
+set_target_properties(test_journal_reader PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/tests)
+target_link_libraries(test_journal_reader dlidar_journal PkgConfig::SYSTEMD)
+add_test(NAME journal_reader COMMAND test_journal_reader)
 
 foreach(t line_framer protocol_codec phone_server phone_socket ble_link)
 add_executable(test_${t} tests/adapters/phone/test_${t}.cpp)

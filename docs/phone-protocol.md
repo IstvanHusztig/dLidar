@@ -2,7 +2,7 @@
 
 The contract between dLidar (the scanner) and a client such as the Android app. It is the same over every transport: the local Unix socket (now) and Bluetooth LE (next). The requirements are in `openspec/changes/phone-link-core/specs/phone-api/spec.md`; this document explains them for client authors.
 
-Version 1 lets a client query and watch the scanner, start and stop recordings, and put the scanner on a Wi-Fi network.
+Version 1 lets a client query and watch the scanner, start and stop recordings, put the scanner on a Wi-Fi network, and read its log.
 
 ## Framing
 
@@ -48,7 +48,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 → {"v":1,"id":6,"cmd":"hello"}
 ← {"id":5,"ok":true,"result":{"version":"0e1e413","sensor":"unitree_l2","sensor_model":"unitree_l2","recording_format":3,"protocol":1}}
 ← {"id":null,"ok":false,"error":{"code":"bad_request","message":"not valid JSON"}}
-← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop","wifi.connect","wifi.status"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
+← {"id":6,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop","wifi.connect","wifi.status","log.get"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
 
 ## Events and gaps
@@ -66,6 +66,7 @@ In the examples, `→` is a message from the client and `←` one from dLidar.
 | `unknown_command` | `cmd` is not a command of this server | the request's id |
 | `unsupported_version` | `v` is not 1; the error carries `"supported":[1]` | the request's id |
 | `busy` | not now: `recording.start` while the last recording is still being saved (`finalizing`), try again once the state is `idle`; `wifi.connect` while another Wi-Fi join is running, try again after its result | the request's id |
+| `unavailable` | `log.get`: the scanner's log cannot be read (the message says why) | the request's id |
 | `too_large` | a line over 4096 bytes | `null` |
 | `too_many_clients` | another client is already connected; the connection is then closed | `null` |
 
@@ -87,7 +88,7 @@ Optional; a client is never required to send it first. Lists the server's comman
 
 ```
 → {"v":1,"id":1,"cmd":"hello"}
-← {"id":1,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop","wifi.connect","wifi.status"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
+← {"id":1,"ok":true,"result":{"protocol":1,"server":"dLidar","commands":["hello","status.get","info.get","recording.start","recording.stop","wifi.connect","wifi.status","log.get"],"events":["state","warning","progress","summary"],"limits":{"max_request_bytes":4096,"max_message_bytes":16384}}}
 ```
 
 ### `status.get`
@@ -222,6 +223,45 @@ No arguments; the answer comes at once.
 → {"v":1,"id":24,"cmd":"wifi.status"}
 ← {"id":24,"ok":true,"result":{"state":"connected","ssid":"Home","ip":"192.168.1.50","last":{"ssid":"Home","result":"connected"}}}
 ```
+
+### `log.get`
+
+Reads the scanner's log: the lines of the dLidar service, and systemd's lines about it (started, stopped, exited, crashed, restarted), newest first, one page per request. Nothing else from the system is ever included. Lines of a dLidar started by hand (over SSH) go to its terminal and are not in the log.
+
+| Argument | Meaning |
+|---|---|
+| `before` | optional: the `more` of an earlier answer; the page then starts just older than that page's last line. Without it the page starts at the newest line. |
+| `limit` | optional: at most this many lines, an integer 1–200, default 50 |
+| `level` | optional: the lowest level returned, `info` (default, every line), `warning` (warnings and errors) or `error` |
+
+The answer has `entries` and `more`. Each entry:
+
+| Field | Meaning |
+|---|---|
+| `t` | the time in Unix milliseconds, from the scanner's clock. The Pi has no battery-backed clock, so offline the time can be wrong or jump at a reboot: order lines by their position, not by `t`. |
+| `boot` | a short id of the boot the line was written in; it changes at each reboot, so a client can mark restarts |
+| `level` | `info`, `warning` (dLidar's lines starting `WARNING:`, systemd's warnings) or `error` (dLidar's `ERROR:` lines, systemd's errors) |
+| `source` | `dlidar` (the service's own lines) or `system` (systemd's lines about the service) |
+| `text` | the line, at most 1024 bytes of UTF-8 |
+
+`more` is the cursor for the next, older page, an opaque string (about 130 characters), or `null` at the start of the log. Pages do not shift while new lines arrive: paging with `before` until `more` is `null` returns every line once. To see new lines, ask again without `before` and drop the lines you already hold.
+
+A page always fits the 16384-byte message limit, and one request reads a bounded part of the log. So a page may hold fewer lines than `limit`, even none (a rare `level` over a long stretch), while `more` is not `null`: keep paging. A `before` that is not in the form of a cursor answers `bad_request`; a cursor whose line was removed by the log's rotation continues at the newest remaining older line.
+
+```
+→ {"v":1,"id":30,"cmd":"log.get","args":{"limit":3}}
+← {"id":30,"ok":true,"result":{"entries":[{"t":1793781326123,"boot":"36276c97","level":"info","source":"dlidar","text":"Ready: press the button (GPIO 17) to start a recording, again to save it; hold it 5 s to power down."},{"t":1793781325870,"boot":"36276c97","level":"warning","source":"dlidar","text":"WARNING: Bluetooth (bluetoothd) is gone; the phone link waits for it"},{"t":1793781320410,"boot":"36276c97","level":"info","source":"system","text":"Started dlidar.service - dLidar LiDAR scanner (push button recording, phone link)."}],"more":"s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fa91;b=36276c9730b3433b91d86044fa35fc8a;m=8f1e2a;t=65f6ee2e1c4a2;x=7d1c0e5f3a9b2c44"}}
+→ {"v":1,"id":31,"cmd":"log.get","args":{"before":"s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fa91;b=36276c9730b3433b91d86044fa35fc8a;m=8f1e2a;t=65f6ee2e1c4a2;x=7d1c0e5f3a9b2c44","limit":2}}
+← {"id":31,"ok":true,"result":{"entries":[{"t":1793781315402,"boot":"36276c97","level":"info","source":"system","text":"dlidar.service: Scheduled restart job, restart counter is at 1."},{"t":1793781310398,"boot":"36276c97","level":"warning","source":"system","text":"dlidar.service: Failed with result 'signal'."}],"more":"s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fa8e;b=36276c9730b3433b91d86044fa35fc8a;m=8b0c11;t=65f6ee2d4f8a0;x=1a2b3c4d5e6f7081"}}
+→ {"v":1,"id":32,"cmd":"log.get","args":{"level":"warning","limit":1}}
+← {"id":32,"ok":true,"result":{"entries":[{"t":1793781325870,"boot":"36276c97","level":"warning","source":"dlidar","text":"WARNING: Bluetooth (bluetoothd) is gone; the phone link waits for it"}],"more":"s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fac7;b=36276c9730b3433b91d86044fa35fc8a;m=c1efbf;t=65f6ee330bd6f;x=22fe7aa7b597862e"}}
+→ {"v":1,"id":33,"cmd":"log.get","args":{"limit":500}}
+← {"id":33,"ok":false,"error":{"code":"bad_request","message":"\"limit\" must be an integer from 1 to 200"}}
+→ {"v":1,"id":34,"cmd":"log.get"}
+← {"id":34,"ok":false,"error":{"code":"unavailable","message":"cannot open the journal: Permission denied"}}
+```
+
+dLidar prints nothing for `log.get`, so reading the log adds no lines to it.
 
 ## Events
 

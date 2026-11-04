@@ -23,8 +23,8 @@ namespace dlidar::phone
     }
 
     PhoneServer::PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock,
-                             WifiSetup *wifi, Post post)
-        : api_(api), mailbox_(std::move(mailbox)), clock_(clock), wifi_(wifi), post_(std::move(post)),
+                             WifiSetup *wifi, Post post, LogReader *log)
+        : api_(api), mailbox_(std::move(mailbox)), clock_(clock), wifi_(wifi), post_(std::move(post)), log_(log),
           last_status_(api.Status().status)
     {
         AddCommand("hello", {}, [this](Connection &, const Request &r) {
@@ -45,6 +45,30 @@ namespace dlidar::phone
                        [this](Connection &c, const Request &r) { return WifiConnect(c, r); });
             AddCommand("wifi.status", {},
                        [this](Connection &, const Request &r) { return EncodeWifiStatus(r.id, wifi_->Status()); });
+        }
+        if (log_)
+            AddCommand("log.get", {"before", "limit", "level"}, [this](Connection &, const Request &r) { return LogGet(r); });
+    }
+
+    // log.get (openspec phone-link-logs, design D2, D8): one bounded page,
+    // read inline. Not printed: reading the log adds no lines to it.
+    std::string PhoneServer::LogGet(const Request &r)
+    {
+        LogQuery query;
+        std::string message;
+        if (!DecodeLogGetArgs(r, query, message))
+            return EncodeError(r.id, kBadRequest, message);
+        try
+        {
+            return EncodeLogPage(r.id, log_->Read(query));
+        }
+        catch (const LogCursorError &e)
+        {
+            return EncodeError(r.id, kBadRequest, e.what());
+        }
+        catch (const std::exception &e) // LogUnavailable, or anything else from the reader
+        {
+            return EncodeError(r.id, kUnavailable, e.what());
         }
     }
 

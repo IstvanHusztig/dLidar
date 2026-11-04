@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/ports/device_events.h"
+#include "application/ports/log_reader.h"
 #include "application/remote/device_api.h"
 #include "application/remote/wifi_setup.h"
 
@@ -36,9 +37,10 @@ namespace dlidar::phone
         // warn and recover later; they never fail the start. With `wifi`
         // it also serves wifi.connect and wifi.status (openspec
         // phone-link-wifi); stop the Wi-Fi adapter before destroying the link.
+        // With `log`, log.get (openspec phone-link-logs); it must outlive the link.
         static std::unique_ptr<PhoneLink> Start(const DeviceApi &api, const std::string &socket_dir,
                                                 const BleOptions &ble, std::string &socket_why,
-                                                WifiSetup *wifi = nullptr);
+                                                WifiSetup *wifi = nullptr, LogReader *log = nullptr);
         ~PhoneLink(); // Shutdown()
 
         std::shared_ptr<DeviceEvents> Events() const;

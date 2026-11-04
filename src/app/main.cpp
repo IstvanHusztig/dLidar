@@ -13,6 +13,7 @@
 #include "adapters/gpio/button_input.h"
 #include "adapters/gpio/gpio_line.h"
 #include "adapters/gpio/status_led.h"
+#include "adapters/journal/journal_reader.h"
 #include "adapters/networkmanager/command_runner.h"
 #include "adapters/networkmanager/nmcli_wifi.h"
 #include "adapters/phone/phone_link.h"
@@ -217,6 +218,9 @@ int main(int argc, char *argv[])
 			dlidar::network::NmcliWifi &wifi;
 			~StopWifi() { wifi.Stop(); }
 		} stop_wifi{wifi};
+		// The service's log for log.get (openspec phone-link-logs): the journal,
+		// read on the phone loop's thread.
+		dlidar::journal::JournalReader log_reader({});
 		dlidar::phone::BleOptions ble;
 		ble.enabled = settings.phone.ble;
 		ble.name = settings.phone.name;
@@ -224,7 +228,7 @@ int main(int argc, char *argv[])
 			ble.on_pairing = [led](bool open) { led->SetPairing(open); };
 		std::string why;
 		std::unique_ptr<dlidar::phone::PhoneLink> phone =
-			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why, &wifi_setup);
+			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why, &wifi_setup, &log_reader);
 		if (!why.empty())
 			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (phone)

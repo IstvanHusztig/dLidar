@@ -607,10 +607,95 @@ void TestWifiBadArguments()
     CHECK(c.out.find(marker) == std::string::npos, "the password in nothing sent");
     CHECK(log.str().find(marker) == std::string::npos, "the password in no log line");
 }
+
+struct FakeLog : LogReader
+{
+    std::vector<LogQuery> queries;
+    enum
+    {
+        Page,
+        BadCursor,
+        Unavailable,
+        Other
+    } mode = Page;
+    LogPage Read(const LogQuery &q) override
+    {
+        queries.push_back(q);
+        if (mode == BadCursor)
+            throw LogCursorError("\"before\" is not a log cursor");
+        if (mode == Unavailable)
+            throw LogUnavailable("cannot open the journal: Permission denied");
+        if (mode == Other)
+            throw std::runtime_error("something else");
+        LogPage p;
+        p.entries.push_back(LogEntry{1762246526123, "36276c97", LogLevel::Warning, LogSource::Dlidar, "WARNING: x", "c1"});
+        p.more = "c1";
+        return p;
+    }
+};
+
+void TestLogGet()
+{
+    printf("log.get: the query passed through, the page, bad cursor, unavailable, hello\n");
+    {
+        Rig plain;
+        FakeConnection c;
+        plain.server.OnOpen(c);
+        std::vector<std::string> cmds = Ask(plain.server, c, 1, "hello")["result"]["commands"];
+        CHECK(std::count(cmds.begin(), cmds.end(), "log.get") == 0, "no log.get without a LogReader");
+        CHECK(Ask(plain.server, c, 2, "log.get")["error"]["code"] == "unknown_command", "log.get unknown");
+    }
+    Rig r;
+    FakeLog log;
+    PhoneServer server{r.api, r.mailbox, r.clock, nullptr, nullptr, &log};
+    FakeConnection c;
+    server.OnOpen(c);
+    std::ostringstream out;
+    std::streambuf *old = std::cout.rdbuf(out.rdbuf());
+
+    std::vector<std::string> cmds = Ask(server, c, 1, "hello")["result"]["commands"];
+    CHECK(std::count(cmds.begin(), cmds.end(), "log.get") == 1, "hello lists log.get");
+
+    Json j = Ask(server, c, 2, "log.get");
+    CHECK(j["ok"] == true && j["result"]["entries"].size() == 1 && j["result"]["more"] == "c1" &&
+              j["result"]["entries"][0]["level"] == "warning",
+          "page: %s", j.dump().c_str());
+    CHECK(log.queries.size() == 1 && !log.queries[0].before && log.queries[0].limit == 50 &&
+              log.queries[0].min_level == LogLevel::Info,
+          "defaults passed");
+    Ask(server, c, 3, "log.get", R"({"before":"c1","limit":7,"level":"error"})");
+    CHECK(log.queries.size() == 2 && log.queries[1].before == std::string("c1") && log.queries[1].limit == 7 &&
+              log.queries[1].min_level == LogLevel::Error,
+          "arguments passed");
+
+    j = Ask(server, c, 4, "log.get", R"({"limit":0})");
+    CHECK(j["error"]["code"] == "bad_request" && j["error"]["message"].get<std::string>().find("\"limit\"") != std::string::npos &&
+              log.queries.size() == 2,
+          "bad limit, nothing read: %s", j.dump().c_str());
+    j = Ask(server, c, 5, "log.get", R"({"since":1})");
+    CHECK(j["error"]["code"] == "bad_request", "unknown argument");
+
+    log.mode = FakeLog::BadCursor;
+    j = Ask(server, c, 6, "log.get", R"({"before":"garbage"})");
+    CHECK(j["id"] == 6 && j["error"]["code"] == "bad_request" &&
+              j["error"]["message"].get<std::string>().find("\"before\"") != std::string::npos,
+          "bad cursor: %s", j.dump().c_str());
+    log.mode = FakeLog::Unavailable;
+    j = Ask(server, c, 7, "log.get");
+    CHECK(j["error"]["code"] == "unavailable" && j["error"]["message"] == "cannot open the journal: Permission denied",
+          "unavailable: %s", j.dump().c_str());
+    log.mode = FakeLog::Other;
+    j = Ask(server, c, 8, "log.get");
+    CHECK(j["error"]["code"] == "unavailable", "any other failure: %s", j.dump().c_str());
+    CHECK(Ask(server, c, 9, "status.get")["ok"] == true, "status.get still answers");
+    std::cout.rdbuf(old);
+    CHECK(out.str().empty(), "log.get prints nothing: %s", out.str().c_str());
+}
 } // namespace
 
 int main()
 {
+    TestLogGet();
     TestWifiCommands();
     TestWifiBadArguments();
     TestOrderAndSeq();

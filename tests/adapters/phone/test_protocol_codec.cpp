@@ -273,9 +273,12 @@ void TestDocumentExamples()
             CHECK(j["data"].is_object(), "data: %s", r.c_str());
     }
 
-    static const std::vector<std::string> wifi{"ssid", "psk", "security"};
+    static const std::vector<std::string> wifi{"ssid", "psk", "security"}, log{"before", "limit", "level"};
     auto args = [](const std::string &cmd) -> const std::vector<std::string> * {
-        return cmd == "wifi.connect" ? &wifi : cmd == "wifi.status" ? &kNoArgs : Args(cmd);
+        return cmd == "wifi.connect"  ? &wifi
+               : cmd == "wifi.status" ? &kNoArgs
+               : cmd == "log.get"     ? &log
+                                      : Args(cmd);
     };
     for (const std::string &q : requests)
     {
@@ -290,7 +293,7 @@ void TestDocumentExamples()
     CHECK(!DecodeRequest("this is not JSON", args, r, e) && replies.count(EncodeError(e)), "not JSON example");
     CHECK(replies.count(EncodeHello(1,
                                     {"hello", "status.get", "info.get", "recording.start", "recording.stop",
-                                     "wifi.connect", "wifi.status"},
+                                     "wifi.connect", "wifi.status", "log.get"},
                                     {"state", "warning", "progress", "summary"})),
           "hello example");
     CHECK(replies.count(EncodeCommandResult(5, true, DeviceState::Idle)), "recording.start example");
@@ -321,6 +324,31 @@ void TestDocumentExamples()
     v.link = WifiLink{WifiState::Connected, "Home", "192.168.1.50"};
     v.last = WifiLast{"Home", WifiOutcome::Connected};
     CHECK(replies.count(EncodeWifiStatus(24, v)), "wifi.status example: connected");
+
+    // log.get (openspec phone-link-logs): the pages, the bad limit, unavailable.
+    const std::string c1 = "s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fa91;b=36276c9730b3433b91d86044fa35fc8a;m=8f1e2a;t=65f6ee2e1c4a2;x=7d1c0e5f3a9b2c44",
+                      c2 = "s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fa8e;b=36276c9730b3433b91d86044fa35fc8a;m=8b0c11;t=65f6ee2d4f8a0;x=1a2b3c4d5e6f7081",
+                      c3 = "s=3e6faae9ca9e45fb808bd1e603aa7e2d;i=3fac7;b=36276c9730b3433b91d86044fa35fc8a;m=c1efbf;t=65f6ee330bd6f;x=22fe7aa7b597862e";
+    const LogEntry ready{1793781326123, "36276c97", LogLevel::Info, LogSource::Dlidar,
+                         "Ready: press the button (GPIO 17) to start a recording, again to save it; hold it 5 s to power down.", "c4"},
+        gone{1793781325870, "36276c97", LogLevel::Warning, LogSource::Dlidar,
+             "WARNING: Bluetooth (bluetoothd) is gone; the phone link waits for it", c3},
+        started{1793781320410, "36276c97", LogLevel::Info, LogSource::System,
+                "Started dlidar.service - dLidar LiDAR scanner (push button recording, phone link).", c1},
+        scheduled{1793781315402, "36276c97", LogLevel::Info, LogSource::System,
+                  "dlidar.service: Scheduled restart job, restart counter is at 1.", "c5"},
+        failed{1793781310398, "36276c97", LogLevel::Warning, LogSource::System,
+               "dlidar.service: Failed with result 'signal'.", c2};
+    CHECK(replies.count(EncodeLogPage(30, LogPage{{ready, gone, started}, c1})), "log.get example: first page");
+    CHECK(replies.count(EncodeLogPage(31, LogPage{{scheduled, failed}, c2})), "log.get example: next page");
+    CHECK(replies.count(EncodeLogPage(32, LogPage{{gone}, c3})), "log.get example: warnings");
+    CHECK(DecodeRequest(R"({"v":1,"id":33,"cmd":"log.get","args":{"limit":500}})", args, r, e), "decoded");
+    LogQuery q;
+    std::string message;
+    CHECK(!DecodeLogGetArgs(r, q, message) && replies.count(EncodeError(33, kBadRequest, message)),
+          "log.get example: bad limit");
+    CHECK(replies.count(EncodeError(34, kUnavailable, "cannot open the journal: Permission denied")),
+          "log.get example: unavailable");
 }
 void TestWifi()
 {
@@ -398,11 +426,93 @@ void TestWifi()
                    "long message");
     CHECK(f["error"]["message"].get<std::string>().size() <= 1024, "message clipped");
 }
+
+LogEntry Entry(int64_t t, LogLevel level, LogSource source, const std::string &text, const std::string &cursor)
+{
+    return LogEntry{t, "36276c97", level, source, text, cursor};
+}
+
+void TestLogGet()
+{
+    printf("log.get arguments and pages\n");
+    static const std::vector<std::string> log{"before", "limit", "level"};
+    auto args = [](const std::string &cmd) -> const std::vector<std::string> * {
+        return cmd == "log.get" ? &log : Args(cmd);
+    };
+    auto decode = [&](const std::string &a, LogQuery &q, std::string &message) {
+        Request r;
+        DecodeError e;
+        CHECK(DecodeRequest(R"({"v":1,"id":30,"cmd":"log.get","args":)" + a + "}", args, r, e), "decoded %s", a.c_str());
+        return DecodeLogGetArgs(r, q, message);
+    };
+    LogQuery q;
+    std::string message;
+    CHECK(decode("{}", q, message) && !q.before && q.limit == 50 && q.min_level == LogLevel::Info, "defaults");
+    CHECK(decode(R"({"before":"s=1;i=2","limit":200,"level":"warning"})", q, message) &&
+              q.before == std::string("s=1;i=2") && q.limit == 200 && q.min_level == LogLevel::Warning,
+          "all three");
+    CHECK(decode(R"({"limit":1,"level":"error"})", q, message) && q.limit == 1 && q.min_level == LogLevel::Error,
+          "limit 1, error");
+    CHECK(decode(R"({"level":"info"})", q, message) && q.min_level == LogLevel::Info, "info");
+    for (const char *bad : {R"({"limit":0})", R"({"limit":201})", R"({"limit":-5})", R"({"limit":50.5})",
+                            R"({"limit":"50"})", R"({"limit":null})"})
+    {
+        CHECK(!decode(bad, q, message) && message == "\"limit\" must be an integer from 1 to 200", "%s: %s", bad,
+              message.c_str());
+    }
+    for (const char *bad : {R"({"level":"debug"})", R"({"level":"WARNING"})", R"({"level":2})"})
+        CHECK(!decode(bad, q, message) && message == "\"level\" must be info, warning or error", "%s: %s", bad,
+              message.c_str());
+    for (const char *bad : {R"({"before":12})", R"({"before":null})", R"({"before":["a"]})"})
+        CHECK(!decode(bad, q, message) && message == "\"before\" must be a string", "%s: %s", bad, message.c_str());
+
+    LogPage page;
+    page.entries.push_back(Entry(1762246526123, LogLevel::Warning, LogSource::Dlidar,
+                                 "WARNING: Bluetooth (bluetoothd) is gone; the phone link waits for it", "c2"));
+    page.entries.push_back(Entry(1762246520000, LogLevel::Info, LogSource::System, "Started dlidar.service.", "c1"));
+    page.more = "c1";
+    CHECK(EncodeLogPage(31, page) ==
+              "{\"id\":31,\"ok\":true,\"result\":{\"entries\":[{\"t\":1762246526123,\"boot\":\"36276c97\",\"level\":\"warning\","
+              "\"source\":\"dlidar\",\"text\":\"WARNING: Bluetooth (bluetoothd) is gone; the phone link waits for it\"},"
+              "{\"t\":1762246520000,\"boot\":\"36276c97\",\"level\":\"info\",\"source\":\"system\",\"text\":\"Started "
+              "dlidar.service.\"}],\"more\":\"c1\"}}\n",
+          "page: %s", EncodeLogPage(31, page).c_str());
+    CHECK(EncodeLogPage(32, LogPage{}) == "{\"id\":32,\"ok\":true,\"result\":{\"entries\":[],\"more\":null}}\n",
+          "empty page");
+
+    // D5: 200 long lines are cut to fit, `more` at the last entry kept.
+    LogPage big;
+    const std::string cursor(130, 'x');
+    for (int i = 0; i < 200; i++)
+        big.entries.push_back(Entry(1762246526123 - i, LogLevel::Info, LogSource::Dlidar, std::string(1024, 'a' + i % 26),
+                                    cursor + std::to_string(i)));
+    big.more = "end";
+    Json j = Check(EncodeLogPage(33, big), "big page");
+    size_t kept = j["result"]["entries"].size();
+    CHECK(kept >= 13 && kept < 200, "kept %zu", kept);
+    CHECK(j["result"]["more"] == cursor + std::to_string(kept - 1), "more at the cut");
+    // Control characters escape to 6 bytes each: still within the limit.
+    for (LogEntry &e : big.entries)
+        e.text = std::string(1024, '\x01');
+    j = Check(EncodeLogPage(34, big), "escaped page");
+    kept = j["result"]["entries"].size();
+    CHECK(kept >= 2 && j["result"]["more"] == cursor + std::to_string(kept - 1), "escaped: kept %zu", kept);
+    // Everything fits: `more` is the page's own.
+    big.entries.resize(3);
+    for (LogEntry &e : big.entries)
+        e.text = "short";
+    j = Check(EncodeLogPage(35, big), "small page");
+    CHECK(j["result"]["entries"].size() == 3 && j["result"]["more"] == "end", "page's more");
+    big.more.reset();
+    j = Check(EncodeLogPage(36, big), "last page");
+    CHECK(j["result"]["more"].is_null(), "head of the log");
+}
 } // namespace
 
 int main()
 {
     TestWifi();
+    TestLogGet();
     TestRequests();
     TestErrors();
     TestResponses();
