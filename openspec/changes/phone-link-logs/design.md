@@ -99,3 +99,18 @@ Chosen by the user (2026-11-04), so the phone shows systemd's crash and restart 
 3. Clients see `log.get` in `hello`. Older builds answer `unknown_command`; the app already handles that.
 
 Rollback: the previous build; the extra group does no harm to it.
+
+## Board results (2026-11-04)
+
+On the dev board, `dlidar.service` with build 4fdd72e, over the local socket (`/run/dlidar/dlidar.sock`):
+
+| Check | Result |
+|---|---|
+| Unit reinstalled with `systemd-journal` | the service process has group 999; `log.get` returns systemd's lines with `source` `system`: `Started`/`Stopping`/`Stopped dlidar.service …`, `Deactivated successfully`, `Consumed … CPU time`, and from the previous boot `Main process exited, code=killed, status=12/USR2` and `Failed with result 'signal'` (warning) |
+| Paging to the head, 200 lines a page | 205 lines in 2 pages, each once; root's `journalctl -u dlidar` counts 205 too. 152 `dlidar`, 53 `system` |
+| Message size | the largest page 16378 bytes (limit 16384) |
+| Time | the reader alone: a 200-line page 2.0 ms (ctest `journal_reader`); a page over the socket, request to answer: 10–15 ms. D6's fallback (keeping the journal open) is not needed |
+| `"level":"warning"` | 7 lines: 4 `dlidar` (2 `ERROR: the sensor did not start.`, 2 `WARNING: Bluetooth …`), 3 `system` warnings |
+| Without the group (5.2: drop-in `SupplementaryGroups=gpio bluetooth`) | 161 lines, all `dlidar`, no error; the drop-in removed afterwards, the group back |
+
+Not yet checked: `log.get` from the app over BLE.

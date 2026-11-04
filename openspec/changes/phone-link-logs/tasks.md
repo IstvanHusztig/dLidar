@@ -53,7 +53,7 @@
   - `log.get` from the app over BLE (with the app agent).
 
   Record the results in design.md ("Board results").
-- [ ] 5.2 Without the group (the old unit), `log.get` returns dLidar's lines only, without an error. Verify on the board with a temporary unit drop-in, then remove it.
+- [x] 5.2 Without the group (the old unit), `log.get` returns dLidar's lines only, without an error. Verify on the board with a temporary unit drop-in, then remove it.
 
 ## 6. Review
 
