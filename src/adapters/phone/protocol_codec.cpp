@@ -235,6 +235,8 @@ namespace dlidar::phone
         r["sensor_model"] = info.sensor_model;
         r["recording_format"] = info.recording_format;
         r["protocol"] = kProtocolVersion;
+        if (!info.hostname.empty())
+            r["hostname"] = Clip(info.hostname, 64);
         return Line(Response(id, std::move(r)));
     }
 

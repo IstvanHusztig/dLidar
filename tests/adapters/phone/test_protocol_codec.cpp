@@ -162,8 +162,10 @@ void TestResponses()
     j = Check(EncodeInfo(4, {"0e1e413", "livox_mid360s", "livox_mid360s", 3}), "info");
     r = j["result"];
     CHECK(r["version"] == "0e1e413" && r["sensor"] == "livox_mid360s" && r["sensor_model"] == "livox_mid360s" &&
-              r["recording_format"] == 3 && r["protocol"] == 1,
+              r["recording_format"] == 3 && r["protocol"] == 1 && !r.contains("hostname"),
           "info fields");
+    j = Check(EncodeInfo(5, {"0e1e413", "unitree_l2", "unitree_l2", 3, "dlidar-01"}), "info with hostname");
+    CHECK(j["result"]["hostname"] == "dlidar-01", "hostname");
 }
 
 void TestEvents()

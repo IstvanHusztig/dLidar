@@ -37,6 +37,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unistd.h>
 
 namespace
 {
@@ -50,6 +51,16 @@ std::string OutputDirectory()
 {
 	const char *linuxUser = getenv("USER");
 	return std::string("/home/") + (linuxUser ? linuxUser : "") + "/PointCloudDump/";
+}
+
+// The host name up to the first '.', for info.get; empty if it cannot be read.
+std::string ShortHostname()
+{
+	char name[256] = {};
+	if (gethostname(name, sizeof name - 1) != 0)
+		return "";
+	std::string s = name;
+	return s.substr(0, s.find('.'));
 }
 } // namespace
 
@@ -191,7 +202,7 @@ int main(int argc, char *argv[])
 		// SIGUSR1 or SIGUSR2 (forget first). A problem only warns.
 		dlidar::DeviceApi api(controller, &storage,
 							  {DLIDAR_VERSION, SensorKindName(settings.sensor), ProfileFor(settings).sensor_model,
-							   dlidar::kRecordingFormatVersion});
+							   dlidar::kRecordingFormatVersion, ShortHostname()});
 		// Wi-Fi setup from the phone (wifi.connect, wifi.status): NetworkManager
 		// through nmcli on its own thread. Without NetworkManager, wifi.status
 		// says unavailable and a join fails with the reason. Stopped before the

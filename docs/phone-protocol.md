@@ -118,10 +118,11 @@ The state is never older than a `state` event the client already received.
 | `sensor_model` | the sensor model, as in `timingNNNN.json`: `unitree_l2`, `livox_mid360s` (today the same as `sensor`; a model name may differ from the sensor id later) |
 | `recording_format` | the recording format version (3) |
 | `protocol` | 1 |
+| `hostname` | the scanner's short host name (`gethostname()` up to the first `.`), e.g. `dlidar-01`. Optional: older builds leave it out, and it is left out when the name cannot be read. |
 
 ```
 → {"v":1,"id":3,"cmd":"info.get"}
-← {"id":3,"ok":true,"result":{"version":"0e1e413-dirty","sensor":"livox_mid360s","sensor_model":"livox_mid360s","recording_format":3,"protocol":1}}
+← {"id":3,"ok":true,"result":{"version":"0e1e413-dirty","sensor":"livox_mid360s","sensor_model":"livox_mid360s","recording_format":3,"protocol":1,"hostname":"dlidar-01"}}
 ```
 
 ### `recording.start`

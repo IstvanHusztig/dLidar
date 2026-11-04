@@ -19,6 +19,7 @@ namespace dlidar
         std::string sensor;       // the configured sensor's id: unitree_l2, livox_mid360s
         std::string sensor_model; // its name, as in timingNNNN.json
         int recording_format = 0;
+        std::string hostname;     // the short host name; empty: left out of info.get
     };
 
     struct StatusView
