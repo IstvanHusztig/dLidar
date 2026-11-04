@@ -4,8 +4,8 @@
 
 ### Requirement: Messages over writes and notifications
 Over BLE the protocol's byte stream SHALL map as follows:
-- dLidar joins the phone's writes in order into one stream, so a request may arrive in several writes and a write may hold several requests;
-- dLidar splits each message into notifications of at most MTU−3 bytes, using the MTU negotiated on this connection, and never more than 512 bytes (the longest attribute value; Android delivers no more of a notification, also at MTU 517), and starts each message in a fresh notification;
+- dLidar joins the phone's writes in order into one stream (a request may span writes, a write may hold several);
+- dLidar splits each message into notifications of at most MTU−3 bytes of this connection, and at most 512 bytes (Android's longest), each message starting in a fresh notification;
 - until the phone's first write reports the MTU, dLidar assumes the minimum MTU of 23.
 
 #### Scenario: Request in pieces at MTU 517
