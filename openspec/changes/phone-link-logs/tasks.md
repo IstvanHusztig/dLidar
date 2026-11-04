@@ -14,7 +14,7 @@
 
   Verify with ctest `protocol_codec`: every argument rule and boundary, 200 entries with 1024-byte texts (answer ≤ 16384 bytes, `more` at the cut), an empty page (`more` `null`).
 - [x] 2.2 `PhoneServer` and `PhoneLink::Start`: the `log.get` command, offered only with a `LogReader`; `LogCursorError` → `bad_request` naming `before`; `LogUnavailable` → `unavailable` with its reason; `hello` lists `log.get`. Verify with ctest `phone_server` (fake `LogReader`: query passed through, both errors, `hello` with and without) and `phone_socket` (`log.get` over the socket).
-- [ ] 2.3 `docs/phone-protocol.md`:
+- [x] 2.3 `docs/phone-protocol.md`:
   - a `log.get` section: arguments, entry fields, paging with `more`, the fewer-than-`limit` note, examples (first page, next page, `"level":"warning"`, `bad_request` for `limit`, `unavailable`);
   - the `unavailable` row in the error table;
   - `hello`'s examples list `log.get`.
@@ -46,7 +46,7 @@
 
 ## 5. Board checks
 
-- [ ] 5.1 Ask the user before restarting `dlidar.service` and reinstalling the unit with the group. Then, on the dev board:
+- [x] 5.1 Ask the user before restarting `dlidar.service` and reinstalling the unit with the group. Then, on the dev board:
   - `tools/phone_client.py log.get` and paging to the head;
   - systemd's start and stop lines with `source` `system`, after `sudo systemctl restart dlidar`;
   - the time of opening the journal and of a 200-entry page, logged once; if a page takes over 100 ms, apply D6's fallback;
@@ -55,11 +55,11 @@
   Record the results in design.md ("Board results").
 - [x] 5.2 Without the group (the old unit), `log.get` returns dLidar's lines only, without an error. Verify on the board with a temporary unit drop-in, then remove it.
 
-- [ ] 5.3 BLE notifications at most 512 bytes (`BleLink::kMaxValue`; spec delta `phone-ble`): the app agent saw 2 bytes lost per 514-byte notification at MTU 517. Verify with ctest `ble_link` (MTU 517: 512 + 488; a 5000-byte message in pieces ≤ 512, joined unchanged) and `log.get` paging from the app over BLE.
+- [x] 5.3 BLE notifications at most 512 bytes (`BleLink::kMaxValue`; spec delta `phone-ble`): the app agent saw 2 bytes lost per 514-byte notification at MTU 517. Verify with ctest `ble_link` (MTU 517: 512 + 488; a 5000-byte message in pieces ≤ 512, joined unchanged) and `log.get` paging from the app over BLE.
 
 ## 6. Review
 
-- [ ] 6.1 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, and the architecture-reviewer agent on the tip before the push.
+- [x] 6.1 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, and the architecture-reviewer agent on the tip before the push.
 
 ## Workflow follow-up
 

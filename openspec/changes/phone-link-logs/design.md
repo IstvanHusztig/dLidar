@@ -113,4 +113,6 @@ On the dev board, `dlidar.service` with build 4fdd72e, over the local socket (`/
 | `"level":"warning"` | 7 lines: 4 `dlidar` (2 `ERROR: the sensor did not start.`, 2 `WARNING: Bluetooth …`), 3 `system` warnings |
 | Without the group (5.2: drop-in `SupplementaryGroups=gpio bluetooth`) | 161 lines, all `dlidar`, no error; the drop-in removed afterwards, the group back |
 
-Not yet checked: `log.get` from the app over BLE.
+Over BLE, from the app (app agent, Galaxy S25, MTU 517, build c064e6f with the 512-byte cap):
+- The first try (build 4fdd72e) failed: notifications were MTU−3 = 514 bytes, Android delivers at most 512, so 2 bytes per piece were lost and no answer over 512 bytes parsed. Fixed in c064e6f (`BleLink::kMaxValue`, spec delta `phone-ble`).
+- With the cap: the newest page plus two older pages to the head (`more` `null`), 0.5–0.65 s a page, nothing lost or corrupted; `"level":"warning"` in one request; boot headers for 40d4c4f4, d88b8c53, 36276c97; `system` lines labelled. The app reads 100 lines a request and keeps paging through empty pages.

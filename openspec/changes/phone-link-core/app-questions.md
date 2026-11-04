@@ -67,13 +67,13 @@ Answers to `protocol-open-questions.md`. **Binding** means it is in the spec (`s
     - Later, not v1: `wifi.forget {ssid}` and a list of saved networks (app wish 5).
 
     See `docs/phone-protocol.md`.
-35. **`log.get` (phone-link-logs, draft 2026-11-04, sent to the app agent; its answer is pending):**
+35. **`log.get` (phone-link-logs, 2026-11-04):**
     - Arguments, all optional: `before` (an opaque cursor, about 130 characters, from an answer's `more`), `limit` 1–200 (default 50), `level` `info`/`warning`/`error` (the lowest level returned).
     - Answer `{"entries":[…],"more":C|null}`, newest first. Each entry: `t` (Unix ms, the Pi's clock: may be wrong offline, so order by position), `boot` (short boot id, changes at a reboot), `level`, `source` (`dlidar` or `system`, systemd's lines about the service), `text` (≤ 1024 bytes).
     - Pages are stable while new lines arrive; `more` is `null` at the start of the log. A page fits 16 KiB and reads a bounded part of the log, so it may hold fewer than `limit` lines, even none, while `more` is set.
     - Errors: `bad_request` naming the argument; a new code `unavailable` (the journal cannot be read).
     - Only the service's lines; a dLidar run by hand is not in it. No live streaming in v1: poll without `before`.
 
-    *Draft; see `docs/phone-protocol.md`, `log.get`.*
+    *Binding (reviewed by the app agent: "OK as built"; verified on the phone over BLE, 2026-11-04). Over BLE every notification is at most 512 bytes (Android's limit, found with `log.get`). No secrets in the log: passwords never reach it. See `docs/phone-protocol.md`, `log.get`.*
 36. **`info`:** one line of space-separated `key=value`: `info mode=properties|acquire secure=0|1 mtu=N notifying=0|1 notify_fd=N devices=N`. **`flood` SIZE includes the `\n`** (12 to 4096 bytes). N is at most 10000. *Spike only; it is deleted after the spike.*
 37. **`info.get` `hostname` (app request, 2026-11-04):** the short host name (`gethostname()` up to the first `.`), after `protocol`; optional: older builds and a host name that cannot be read leave it out. Protocol stays 1. Deployed on the dev board in 5250d33. *Binding.*
