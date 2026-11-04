@@ -50,14 +50,30 @@ Answers to `protocol-open-questions.md`. **Binding** means it is in the spec (`s
 ## Later phases
 
 31. **One shared event, `result`, with `op` at top level** and `ok` plus `result` or `error`, shaped like a response: `{"event":"result","seq":9,"op":12,"ok":true,"result":{…}}`. It goes only to the connection that sent the request and is never left out. If that connection is lost first, the result is lost; the command's status query (for Wi-Fi: `wifi.status`) gives the outcome. *Binding.*
-32. **`accepted:false` means "nothing to do"**: start while already recording, stop while idle. `state` says why. **`busy` means "not now, try again"**: start while the last recording is still being saved. *Provisional, phase 3.*
-33. **Decided (user, 2026-11-02): every request needs the bond.** RX requires an encrypted link (`encrypt-write`), so an unbonded phone gets the ATT error "insufficient encryption" on its first write, and Android starts pairing by itself. That works only while the pairing window is open (the pairing button, or `[phone] pairing_at_start` until the button is mounted); outside it, pairing fails and Android reports it. There is no protocol error `not_paired`. dLidar keeps a small allow-list (about 4 phones); holding the pairing button long clears it. *Binding for phone-link-ble; the allow-list is phase 3.*
+32. **`accepted:false` means "nothing to do"**: start while already recording, stop while idle. `state` says why. **`busy` means "not now, try again"**: start while the last recording is still being saved. *Binding (phone-link-commands): `recording.start` and `recording.stop` answer `{"accepted":…,"state":…}`, `busy` is error code `busy`; see `docs/phone-protocol.md`.*
+33. **Decided (user, 2026-11-02): every request needs the bond.** RX requires an encrypted link (`encrypt-write`), so an unbonded phone gets the ATT error "insufficient encryption" on its first write, and Android starts pairing by itself. That works only while the pairing window is open (a short press of the pairing button, or `tools/pair.sh`); outside it, pairing fails and Android reports it. There is no protocol error `not_paired`. Every bonded phone may command; there is no allow-list. Holding the pairing button 5 s (or `tools/pair.sh --forget`) removes every bond and opens the window. *Binding.*
 34. **Planned:**
     - WPA2/WPA3 transition networks: send `wpa2-psk`.
     - Out of scope for v1: hidden SSIDs, WPA-Enterprise, WEP (show them as not supported), and SSIDs that are not valid UTF-8 (leave them out).
     - The PSK is 8 to 63 printable ASCII characters, or 64 hex digits; anything else gets `bad_request`.
     - Result codes: `connected`, `wrong_password`, `not_found`, `timeout`, plus generic `failed`.
 
-    *Provisional, phase 4.*
-35. **Not designed yet.** Likely an opaque cursor string, with pages sized to stay under 16 KiB. *Phase 5.*
+    *Binding (phone-link-wifi, 2026-11-03; reviewed by the app agent, no objections):*
+    - `wifi.connect {ssid, security, psk}` answers `{"accepted":true,"timeout_s":60}`, then one `result` event within `timeout_s`: `{ssid, ip}` or the codes above. A second join while one runs gets `busy`.
+    - `wifi.status` gives `state` (`connected`, `connecting`, `disconnected`, `unavailable`), `ssid`, `ip` and `last` (`pending` while the app's own join runs). This is how the app recovers a result lost when the BLE link dropped (app wish 1).
+    - A failed join changes nothing and the scanner rejoins its previous network.
+    - The network the scanner is on is joined again in full, with a short drop (app question 2).
+    - `failed` names its case: the polkit rule, NetworkManager, no Wi-Fi device (app wish 4).
+    - Later, not v1: `wifi.forget {ssid}` and a list of saved networks (app wish 5).
+
+    See `docs/phone-protocol.md`.
+35. **`log.get` (phone-link-logs, 2026-11-04):**
+    - Arguments, all optional: `before` (an opaque cursor, about 130 characters, from an answer's `more`), `limit` 1–200 (default 50), `level` `info`/`warning`/`error` (the lowest level returned).
+    - Answer `{"entries":[…],"more":C|null}`, newest first. Each entry: `t` (Unix ms, the Pi's clock: may be wrong offline, so order by position), `boot` (short boot id, changes at a reboot), `level`, `source` (`dlidar` or `system`, systemd's lines about the service), `text` (≤ 1024 bytes).
+    - Pages are stable while new lines arrive; `more` is `null` at the start of the log. A page fits 16 KiB and reads a bounded part of the log, so it may hold fewer than `limit` lines, even none, while `more` is set.
+    - Errors: `bad_request` naming the argument; a new code `unavailable` (the journal cannot be read).
+    - Only the service's lines; a dLidar run by hand is not in it. No live streaming in v1: poll without `before`.
+
+    *Binding (reviewed by the app agent: "OK as built"; verified on the phone over BLE, 2026-11-04). Over BLE every notification is at most 512 bytes (Android's limit, found with `log.get`). No secrets in the log: passwords never reach it. See `docs/phone-protocol.md`, `log.get`.*
 36. **`info`:** one line of space-separated `key=value`: `info mode=properties|acquire secure=0|1 mtu=N notifying=0|1 notify_fd=N devices=N`. **`flood` SIZE includes the `\n`** (12 to 4096 bytes). N is at most 10000. *Spike only; it is deleted after the spike.*
+37. **`info.get` `hostname` (app request, 2026-11-04):** the short host name (`gethostname()` up to the first `.`), after `protocol`; optional: older builds and a host name that cannot be read leave it out. Protocol stays 1. Deployed on the dev board in 5250d33. *Binding.*

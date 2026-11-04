@@ -1,8 +1,11 @@
 #pragma once
 
 #include "application/ports/device_events.h"
+#include "application/ports/log_reader.h"
 #include "application/remote/device_api.h"
+#include "application/remote/wifi_setup.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -26,6 +29,8 @@ namespace dlidar::phone
     extern const char *const kUnsupportedVersion;
     extern const char *const kTooLarge;
     extern const char *const kTooManyClients;
+    extern const char *const kBusy; // not now: the last recording is being saved
+    extern const char *const kUnavailable; // log.get: the log cannot be read
 
     struct Request
     {
@@ -58,6 +63,9 @@ namespace dlidar::phone
     std::string EncodeStatus(int64_t id, const StatusView &status, const std::vector<DeviceWarning> &warnings,
                              const std::optional<RecordingSummary> &summary);
     std::string EncodeInfo(int64_t id, const DeviceInfo &info);
+    // recording.start / recording.stop: {"accepted":…,"state":…} (busy is an
+    // error, EncodeError with kBusy).
+    std::string EncodeCommandResult(int64_t id, bool accepted, DeviceState state_seen);
 
     // Events: `dropped` > 0 adds "dropped".
     std::string EncodeStateEvent(uint64_t seq, uint64_t dropped, const DeviceStatus &status);
@@ -71,4 +79,39 @@ namespace dlidar::phone
                                   const std::string &message);
 
     const char *WarningKindName(WarningKind kind); // lens_dirty, storage_failed, ...
+
+    // wifi.connect and wifi.status (openspec phone-link-wifi). The password
+    // is in no encoded message and no error text.
+    struct WifiConnectArgs
+    {
+        std::optional<std::string> ssid, security, psk; // empty: not sent
+    };
+    // False with `message` set when an argument is not a string.
+    bool DecodeWifiConnectArgs(const Request &request, WifiConnectArgs &args, std::string &message);
+
+    std::optional<WifiSecurity> WifiSecurityFromName(const std::string &name); // wpa2-psk, wpa3-sae, open
+    const char *WifiSecurityName(WifiSecurity security);
+    const char *WifiOutcomeName(WifiOutcome outcome); // connected, or the result's error code
+    const char *WifiStateName(WifiState state);       // connected, connecting, disconnected, unavailable
+
+    std::string EncodeWifiAccepted(int64_t id, std::chrono::seconds timeout); // {"accepted":true,"timeout_s":…}
+    std::string EncodeWifiStatus(int64_t id, const WifiStatusView &status);
+    // The result event of the wifi.connect `op` for network `ssid`.
+    std::string EncodeWifiResultEvent(uint64_t seq, uint64_t dropped, int64_t op, const std::string &ssid,
+                                      const WifiResult &result);
+
+    // log.get (openspec phone-link-logs, design D2, D5).
+    const int kDefaultLogLimit = 50;
+    const int kMaxLogLimit = 200;
+    // `before` a string, `limit` an integer 1..kMaxLogLimit, `level` info,
+    // warning or error. False with `message` naming the argument.
+    bool DecodeLogGetArgs(const Request &request, LogQuery &query, std::string &message);
+
+    const char *LogLevelName(LogLevel level);    // info, warning, error
+    const char *LogSourceName(LogSource source); // dlidar, system
+
+    // {"entries":[…],"more":…}: the page's entries in order, as many as fit
+    // kMaxMessageBytes; when it stops early, `more` is the cursor of the last
+    // entry kept.
+    std::string EncodeLogPage(int64_t id, const LogPage &page);
 }

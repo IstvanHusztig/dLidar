@@ -2,28 +2,165 @@
 
 #include "adapters/phone/protocol_codec.h"
 
+#include <iostream>
+
 namespace dlidar::phone
 {
     namespace
     {
         const std::vector<std::string> kEvents{"state", "warning", "progress", "summary"};
+
+        // A network name for a log line: control characters become '?', so a
+        // name cannot start a fake journal line.
+        std::string Printable(const std::string &ssid)
+        {
+            std::string s = ssid;
+            for (char &ch : s)
+                if ((unsigned char)ch < 0x20 || ch == 0x7f)
+                    ch = '?';
+            return s;
+        }
     }
 
-    PhoneServer::PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock)
-        : api_(api), mailbox_(std::move(mailbox)), clock_(clock), last_status_(api.Status().status)
+    PhoneServer::PhoneServer(const DeviceApi &api, std::shared_ptr<Mailbox> mailbox, ServerClock &clock,
+                             WifiSetup *wifi, Post post, LogReader *log)
+        : api_(api), mailbox_(std::move(mailbox)), clock_(clock), wifi_(wifi), post_(std::move(post)), log_(log),
+          last_status_(api.Status().status)
     {
-        AddCommand("hello", {}, [this](const Request &r) { return EncodeHello(r.id, command_names_, kEvents); });
-        AddCommand("status.get", {}, [this](const Request &r) {
+        AddCommand("hello", {}, [this](Connection &, const Request &r) {
+            return EncodeHello(r.id, command_names_, kEvents);
+        });
+        AddCommand("status.get", {}, [this](Connection &, const Request &r) {
             StatusView v;
             v.status = last_status_;
             v.free_bytes = api_.Status().free_bytes;
             return EncodeStatus(r.id, v, std::vector<DeviceWarning>(warnings_.begin(), warnings_.end()), summary_);
         });
-        AddCommand("info.get", {}, [this](const Request &r) { return EncodeInfo(r.id, api_.Info()); });
+        AddCommand("info.get", {}, [this](Connection &, const Request &r) { return EncodeInfo(r.id, api_.Info()); });
+        AddCommand("recording.start", {}, [this](Connection &c, const Request &r) { return RecordingCommand(c, r, true); });
+        AddCommand("recording.stop", {}, [this](Connection &c, const Request &r) { return RecordingCommand(c, r, false); });
+        if (wifi_ && post_)
+        {
+            AddCommand("wifi.connect", {"ssid", "security", "psk"},
+                       [this](Connection &c, const Request &r) { return WifiConnect(c, r); });
+            AddCommand("wifi.status", {},
+                       [this](Connection &, const Request &r) { return EncodeWifiStatus(r.id, wifi_->Status()); });
+        }
+        if (log_)
+            AddCommand("log.get", {"before", "limit", "level"}, [this](Connection &, const Request &r) { return LogGet(r); });
+    }
+
+    // log.get (openspec phone-link-logs, design D2, D8): one bounded page,
+    // read inline. Not printed: reading the log adds no lines to it.
+    std::string PhoneServer::LogGet(const Request &r)
+    {
+        LogQuery query;
+        std::string message;
+        if (!DecodeLogGetArgs(r, query, message))
+            return EncodeError(r.id, kBadRequest, message);
+        try
+        {
+            return EncodeLogPage(r.id, log_->Read(query));
+        }
+        catch (const LogCursorError &e)
+        {
+            return EncodeError(r.id, kBadRequest, e.what());
+        }
+        catch (const std::exception &e) // LogUnavailable, or anything else from the reader
+        {
+            return EncodeError(r.id, kUnavailable, e.what());
+        }
+    }
+
+    // wifi.connect (openspec phone-link-wifi, design D7): WifiSetup checks
+    // and runs the join; the answer is at once, the result comes later as an
+    // event to this connection only. The password is never printed.
+    std::string PhoneServer::WifiConnect(Connection &c, const Request &r)
+    {
+        WifiConnectArgs a;
+        std::string message;
+        if (!DecodeWifiConnectArgs(r, a, message))
+            return EncodeError(r.id, kBadRequest, message);
+        std::optional<WifiSecurity> security;
+        if (a.security)
+        {
+            security = WifiSecurityFromName(*a.security);
+            if (!security)
+                return EncodeError(r.id, kBadRequest, "unknown \"security\": use wpa2-psk, wpa3-sae or open");
+        }
+        WifiNetwork network;
+        if (std::optional<WifiArgError> e = WifiSetup::Check(a.ssid, security, a.psk, network))
+            return EncodeError(r.id, kBadRequest, e->message);
+
+        uint64_t serial = ++wifi_serial_;
+        wifi_waiting_[serial] = &c;
+        int64_t op = r.id;
+        std::string ssid = network.ssid;
+        auto done = [this, post = post_, serial, op, ssid](const WifiResult &result) {
+            post([this, serial, op, ssid, result] { OnWifiResult(serial, op, ssid, result); });
+        };
+        if (wifi_->Begin(network, done) == WifiSetup::Begun::Busy)
+        {
+            wifi_waiting_.erase(serial);
+            std::cout << c.Kind() << ": wifi.connect " << Printable(ssid) << " refused, another Wi-Fi join is running"
+                      << std::endl;
+            return EncodeError(r.id, kBusy, "another Wi-Fi join is still running; try again when it has ended");
+        }
+        std::cout << c.Kind() << ": wifi.connect " << Printable(ssid) << " (" << WifiSecurityName(network.security)
+                  << ")" << std::endl;
+        return EncodeWifiAccepted(r.id, kWifiConnectLimit);
+    }
+
+    // On the loop: one log line, and the result event to the connection
+    // that asked if it is still there, even when it is behind on events
+    // (a result is never left out; the transport's cap still bounds memory).
+    void PhoneServer::OnWifiResult(uint64_t serial, int64_t op, const std::string &ssid, const WifiResult &result)
+    {
+        auto w = wifi_waiting_.find(serial);
+        Connection *requester = w == wifi_waiting_.end() ? nullptr : w->second;
+        if (w != wifi_waiting_.end())
+            wifi_waiting_.erase(w);
+
+        std::cout << "Wi-Fi: ";
+        switch (result.outcome)
+        {
+        case WifiOutcome::Connected:
+            std::cout << "connected to " << Printable(ssid) << (result.ip.empty() ? "" : ", " + result.ip);
+            break;
+        case WifiOutcome::WrongPassword: std::cout << Printable(ssid) << ": wrong password"; break;
+        case WifiOutcome::NotFound: std::cout << Printable(ssid) << ": network not found"; break;
+        case WifiOutcome::Timeout: std::cout << Printable(ssid) << ": no outcome in time"; break;
+        case WifiOutcome::Failed: std::cout << Printable(ssid) << ": failed: " << result.message; break;
+        }
+        std::cout << std::endl;
+
+        auto it = requester ? clients_.find(requester) : clients_.end();
+        if (it != clients_.end())
+            SendEvent(*requester, it->second,
+                      [&](uint64_t seq, uint64_t d) { return EncodeWifiResultEvent(seq, d, op, ssid, result); });
+    }
+
+    // recording.start / recording.stop (design D1-D3): DeviceApi decides, the
+    // answer carries the state the command saw, and one console line says
+    // who did what, like the record button's "button: start".
+    std::string PhoneServer::RecordingCommand(Connection &c, const Request &r, bool start)
+    {
+        const char *what = start ? "start" : "stop";
+        CommandResult res = start ? api_.Start() : api_.Stop();
+        if (res.busy)
+        {
+            std::cout << c.Kind() << ": " << what << " refused, the last recording is still being saved" << std::endl;
+            return EncodeError(r.id, kBusy, "the last recording is still being saved; try again when it is idle");
+        }
+        if (res.accepted)
+            std::cout << c.Kind() << ": " << what << std::endl;
+        else
+            std::cout << c.Kind() << ": " << what << " ignored, " << StateName(res.state_seen) << std::endl;
+        return EncodeCommandResult(r.id, res.accepted, res.state_seen);
     }
 
     void PhoneServer::AddCommand(const std::string &name, std::vector<std::string> args,
-                                 std::function<std::string(const Request &)> run)
+                                 std::function<std::string(Connection &, const Request &)> run)
     {
         commands_[name] = Command{std::move(args), std::move(run)};
         command_names_.push_back(name);
@@ -54,7 +191,7 @@ namespace dlidar::phone
         if (!DecodeRequest(line, args, request, error))
             c.Send(EncodeError(error));
         else
-            c.Send(commands_.at(request.cmd).run(request));
+            c.Send(commands_.at(request.cmd).run(c, request));
     }
 
     void PhoneServer::OnWritable(Connection &c)
@@ -64,7 +201,13 @@ namespace dlidar::phone
             SendHeld(c, it->second);
     }
 
-    void PhoneServer::OnClosed(Connection &c) { clients_.erase(&c); }
+    void PhoneServer::OnClosed(Connection &c)
+    {
+        clients_.erase(&c);
+        for (auto &w : wifi_waiting_)
+            if (w.second == &c)
+                w.second = nullptr;
+    }
 
     void PhoneServer::OnMailbox()
     {

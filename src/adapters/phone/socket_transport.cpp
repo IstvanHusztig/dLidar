@@ -82,6 +82,8 @@ namespace dlidar::phone
 
         size_t Pending() const override { return out_.size() - sent_; }
 
+        const char *Kind() const override { return "local client"; }
+
         void Close() override
         {
             if (fd_ < 0)

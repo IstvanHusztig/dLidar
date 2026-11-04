@@ -11,7 +11,8 @@
 
 // Termination handling for a capture.
 //
-// SIGUSR1 opens the Bluetooth pairing window for 2 minutes.
+// SIGUSR1 opens the Bluetooth pairing window for 2 minutes; SIGUSR2 first
+// removes every bonded phone, then opens it.
 //
 // SIGINT / SIGTERM / SIGHUP request a stop: the capture loop ends and the
 // normal shutdown path writes the remaining data and finalizes the LAZ
@@ -34,6 +35,14 @@ inline std::atomic<bool> &PairingRequested()
 {
     static std::atomic<bool> pairing{false};
     return pairing;
+}
+
+// SIGUSR2 asks to forget every bonded phone, then open the pairing window
+// (tools/pair.sh --forget); main takes it with exchange(false).
+inline std::atomic<bool> &ForgetRequested()
+{
+    static std::atomic<bool> forget{false};
+    return forget;
 }
 
 using dlidar::CrashTruncateFd;
@@ -59,7 +68,7 @@ namespace shutdown_detail
         WriteStderr("\nStop requested, finishing the recording (signal again to abort)...\n");
     }
 
-    inline void OnPairingSignal(int) { PairingRequested() = true; }
+    inline void OnPairingSignal(int sig) { (sig == SIGUSR2 ? ForgetRequested() : PairingRequested()) = true; }
 
     inline void OnFatalSignal(int sig)
     {
@@ -79,6 +88,7 @@ inline void InstallSignalHandlers()
     // Initialize the function-local statics outside of any handler.
     StopRequested();
     PairingRequested();
+    ForgetRequested();
     CrashTruncateFd();
     CrashTruncateSize();
 
@@ -92,7 +102,8 @@ inline void InstallSignalHandlers()
     pairing.sa_handler = shutdown_detail::OnPairingSignal;
     sigemptyset(&pairing.sa_mask);
     pairing.sa_flags = SA_RESTART;
-    sigaction(SIGUSR1, &pairing, nullptr);
+    for (int sig : {SIGUSR1, SIGUSR2})
+        sigaction(sig, &pairing, nullptr);
 
     struct sigaction fatal = {};
     fatal.sa_handler = shutdown_detail::OnFatalSignal;

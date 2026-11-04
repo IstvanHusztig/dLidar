@@ -41,7 +41,8 @@ void TestDefaults()
 	CHECK(s.livox_mid360s.lidar_ip.empty() && s.livox_mid360s.host_ip == "192.168.1.50", "Livox addresses");
 	CHECK(s.livox_mid360s.cmd_data_port == 56101 && s.livox_mid360s.log_data_port == 56501, "Livox ports");
 	CHECK(!s.livox_mid360s.drop_low_confidence, "low-confidence points kept by default");
-	CHECK(s.gpio.button_gpio == 17 && s.gpio.led_gpio == 27, "button and LED pins");
+	CHECK(s.gpio.button_gpio == 17 && s.gpio.led_gpio == 27 && s.gpio.pairing_button_gpio == 22,
+		  "button, LED and pairing button pins");
 	CHECK(s.livox_mid360s.imu_rate_hz == 500 && s.livox_mid360s.imu_accel_range_g == 8 &&
 			  s.livox_mid360s.imu_gyro_range_dps == 2000,
 		  "IMU defaults");
@@ -103,8 +104,8 @@ void TestFullFile()
 	CHECK(s.source == "dlidar.toml", "%s", s.source.c_str());
 
 	DeviceSettings g;
-	CHECK(ParseError("[button]\ngpio = 22\n[led]\ngpio = 23\n", &g).empty() && g.gpio.button_gpio == 22 &&
-			  g.gpio.led_gpio == 23,
+	CHECK(ParseError("[button]\ngpio = 23\n[led]\ngpio = 24\n[pairing_button]\ngpio = 5\n", &g).empty() &&
+			  g.gpio.button_gpio == 23 && g.gpio.led_gpio == 24 && g.gpio.pairing_button_gpio == 5,
 		  "other pins");
 
 	DeviceSettings p;
@@ -191,6 +192,10 @@ void TestUnknownAndBadValues()
 		{"[led]\ngpio = \"13\"\n", ":2:", "must be an integer"},
 		{"[button]\ngpio = 5\n\n[led]\ngpio = 5\n", ":5:", "the LED and the button need different lines"},
 		{"[led]\ngpio = 17\n", ":2:", "both 17"},
+		{"[pairing_button]\ngpio = 17\n", ":2:", "[button] gpio and [pairing_button] gpio are both 17; the two buttons"},
+		{"[led]\ngpio = 4\n\n[pairing_button]\ngpio = 4\n", ":5:", "the LED and the pairing button need different lines"},
+		{"[pairing_button]\ngpio = 22\n[button]\ngpio = 22\n", ":4:", "the two buttons need different lines"},
+		{"[pairing_button]\ngpio = -1\n", ":2:", "0 to 27"},
 		{"[livox_mid360s]\nimu_rate_hz = 500.0\n", ":2:", "must be an integer"},
 		{"[livox_mid360s]\nimu_accel_range_g = 2\n", ":2:", "must be one of 4, 8, 16, 32"},
 		{"[livox_mid360s]\nimu_gyro_range_dps = 300\n", ":2:", "must be one of 2000, 1000, 500, 250, 125, 62.5, 31.25, 15.625"},
@@ -229,6 +234,13 @@ void TestFiles()
 	unlink(path);
 
 	CHECK(Has(DefaultSettingsPath(), "/dlidar.toml"), "%s", DefaultSettingsPath().c_str());
+
+	// The project's dlidar.toml lists every key with its default.
+	s = DefaultSettings();
+	CHECK(LoadSettings(DLIDAR_SOURCE_DIR "/dlidar.toml", true, s, error), "project dlidar.toml: %s", error.c_str());
+	CHECK(s.gpio.button_gpio == kButtonGpio && s.gpio.led_gpio == kLedGpio &&
+			  s.gpio.pairing_button_gpio == kPairingButtonGpio && s.phone.ble == kBleEnabled,
+		  "project dlidar.toml: the GPIO and phone defaults");
 }
 } // namespace
 

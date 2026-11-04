@@ -26,6 +26,16 @@ namespace dlidar::gpio
         }
     }
 
+    void StatusLed::SetPairing(bool open)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (open != pairing_)
+        {
+            pairing_ = open;
+            pairing_since_ = std::chrono::steady_clock::now();
+        }
+    }
+
     void StatusLed::Write(bool on)
     {
         if (!line_->Set(on) && failures_++ == 0)
@@ -38,14 +48,19 @@ namespace dlidar::gpio
         while (!stop_)
         {
             DeviceState state;
-            std::chrono::steady_clock::time_point since;
+            std::chrono::steady_clock::time_point since, pairing_since;
+            bool pairing;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 state = state_;
                 since = since_;
+                pairing = pairing_;
+                pairing_since = pairing_since_;
             }
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - since).count();
-            int on = LedOn(state, ms) ? 1 : 0;
+            auto now = std::chrono::steady_clock::now();
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - since).count();
+            auto pairing_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - pairing_since).count();
+            int on = LedOn(state, ms, pairing, pairing_ms) ? 1 : 0;
             if (on != last)
             {
                 Write(on);

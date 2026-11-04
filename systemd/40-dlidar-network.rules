@@ -1,0 +1,15 @@
+// Lets the dLidar service user set up Wi-Fi for the phone (wifi.connect):
+// add, save and delete NetworkManager profiles, and join a network. A
+// service has no login session, so NetworkManager's defaults never allow it.
+// Named 40- so it runs before Debian's 49-polkit-pkla-compat.rules, whose
+// NetworkManager .pkla answers "no" for settings.modify.system to the sudo
+// group outside a local session and would end the check first.
+// Install: replace USER, then
+//   sudo cp systemd/40-dlidar-network.rules /etc/polkit-1/rules.d/
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+         action.id == "org.freedesktop.NetworkManager.network-control") &&
+        subject.user == "USER") {
+        return polkit.Result.YES;
+    }
+});

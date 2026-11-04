@@ -19,6 +19,7 @@ namespace dlidar
         std::string sensor;       // the configured sensor's id: unitree_l2, livox_mid360s
         std::string sensor_model; // its name, as in timingNNNN.json
         int recording_format = 0;
+        std::string hostname;     // the short host name; empty: left out of info.get
     };
 
     struct StatusView
@@ -27,9 +28,17 @@ namespace dlidar
         std::optional<uint64_t> free_bytes; // empty: unknown
     };
 
+    // The answer to a command that changes the device (openspec
+    // phone-link-commands, design D1, D2).
+    struct CommandResult
+    {
+        bool accepted = false;  // it changed something
+        DeviceState state_seen = DeviceState::Idle; // the state the command saw
+        bool busy = false;      // not now: the last recording is being saved
+    };
+
     // The typed commands a remote client (the phone) may give, independent of
-    // any transport or message format. Thread-safe like DeviceControl. Phase
-    // 3 adds Start() and Stop().
+    // any transport or message format. Thread-safe like DeviceControl.
     class DeviceApi
     {
     public:
@@ -47,6 +56,30 @@ namespace dlidar
         }
 
         const DeviceInfo &Info() const { return info_; }
+
+        // Starts a recording as a short press of the button does in Idle or
+        // Error. Busy while the last recording is being saved; nothing to do
+        // while one is preparing or running. The state is checked and the
+        // start made in one call, so it never races the button.
+        CommandResult Start() const
+        {
+            CommandResult r;
+            r.accepted = control_.StartRecording(&r.state_seen);
+            r.busy = !r.accepted && r.state_seen == DeviceState::Finalizing;
+            return r;
+        }
+
+        // Stops the recording that is preparing or running (its files are
+        // saved, a start-up is abandoned); nothing to do in any other state.
+        CommandResult Stop() const
+        {
+            CommandResult r;
+            r.state_seen = control_.Status().state;
+            r.accepted = r.state_seen == DeviceState::Preparing || r.state_seen == DeviceState::Recording;
+            if (r.accepted)
+                control_.StopRecording();
+            return r;
+        }
 
     private:
         DeviceControl &control_;

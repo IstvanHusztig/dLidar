@@ -19,6 +19,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <mutex>
 #include <optional>
 #include <poll.h>
 #include <string>
@@ -192,12 +193,12 @@ struct Device
     std::unique_ptr<ScannerController> controller;
     std::unique_ptr<DeviceApi> api;
 
-    explicit Device(const std::string &dir)
+    explicit Device(const std::string &dir, WifiSetup *wifi = nullptr, LogReader *log = nullptr)
     {
         controller = std::make_unique<ScannerController>(sensor, storage, hub, Config());
         api = std::make_unique<DeviceApi>(*controller, nullptr, DeviceInfo{"test", "unitree_l2", "unitree_l2", 3});
         std::string why;
-        link = PhoneLink::Start(*api, dir, {}, why);
+        link = PhoneLink::Start(*api, dir, {}, why, wifi, log);
         CHECK(link != nullptr, "link: %s", why.c_str());
         if (link)
             hub.AddAsync(link->Events());
@@ -272,6 +273,141 @@ void TestRequestsAndRecording()
     c.Send(kStatus);
     std::optional<Json> r = c.Next();
     CHECK(r && (*r)["result"]["state"] == "idle" && !(*r)["result"]["summary"].is_null(), "status after");
+}
+
+void TestRemoteRecording()
+{
+    printf("recording.start and recording.stop over the socket\n");
+    TempDir dir;
+    Device d(dir.path);
+    if (!d.link)
+        return;
+    d.sensor.endless = true;
+    Client c(d.link->SocketPath());
+    CHECK(c.Send("{\"v\":1,\"id\":1,\"cmd\":\"recording.start\"}\n"), "send start");
+    std::optional<Json> r = c.Next();
+    CHECK(r && (*r)["id"] == 1 && (*r)["result"]["accepted"] == true && (*r)["result"]["state"] == "idle",
+          "start accepted");
+    std::vector<Json> v = c.EventsUntil("recording");
+    CHECK(!v.empty() && v.back()["data"]["state"] == "recording", "recording");
+    CHECK(WaitFor([&] { return d.controller->Status().chunks > 0; }), "chunks written");
+    CHECK(c.Send("{\"v\":1,\"id\":2,\"cmd\":\"recording.stop\"}\n"), "send stop");
+    // The answer may come after progress events.
+    std::optional<Json> a;
+    while ((a = c.Next()) && !a->contains("id"))
+        ;
+    CHECK(a && (*a)["id"] == 2 && (*a)["result"]["accepted"] == true && (*a)["result"]["state"] == "recording",
+          "stop accepted");
+    v = c.EventsUntil("idle");
+    CHECK(!v.empty() && v.back()["data"]["state"] == "idle" && v.back()["data"]["last_ok"] == true, "saved");
+    d.controller->WaitIdle();
+    CHECK(d.storage.opens == 1 && d.storage.closes == 1 && !d.storage.chunks.empty(), "one complete recording");
+}
+
+// A WifiManager that answers from its own thread, like the real adapter,
+// or holds the answer until the test releases it.
+struct ThreadWifi : WifiManager
+{
+    std::thread worker;
+    bool hold = false;
+    std::function<void(const WifiResult &)> held;
+    WifiLink Link() const override { return WifiLink{WifiState::Connected, "Home", "192.168.1.106"}; }
+    void Connect(const WifiNetwork &, std::chrono::seconds, std::function<void(const WifiResult &)> done) override
+    {
+        if (hold)
+        {
+            held = std::move(done);
+            return;
+        }
+        if (worker.joinable())
+            worker.join();
+        worker = std::thread([done] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            done(WifiResult{WifiOutcome::Connected, "192.168.1.50", ""});
+        });
+    }
+    ~ThreadWifi()
+    {
+        if (worker.joinable())
+            worker.join();
+    }
+};
+
+void TestWifiOverSocket()
+{
+    printf("wifi.connect over the socket: the result from another thread, a late result after shutdown\n");
+    TempDir dir;
+    ThreadWifi wifi;
+    WifiSetup setup(wifi);
+    {
+        Device d(dir.path, &setup);
+        if (!d.link)
+            return;
+        Client c(d.link->SocketPath());
+        CHECK(c.Send("{\"v\":1,\"id\":12,\"cmd\":\"wifi.connect\",\"args\":{\"ssid\":\"Site\",\"security\":\"wpa2-psk\",\"psk\":\"secret123\"}}\n"),
+              "send");
+        std::optional<Json> a = c.Next();
+        CHECK(a && (*a)["id"] == 12 && (*a)["result"]["accepted"] == true, "accepted");
+        std::optional<Json> e = c.Next();
+        CHECK(e && (*e)["event"] == "result" && (*e)["op"] == 12 && (*e)["result"]["ip"] == "192.168.1.50",
+              "result event");
+        CHECK(c.Send("{\"v\":1,\"id\":13,\"cmd\":\"wifi.status\"}\n"), "send status");
+        a = c.Next();
+        CHECK(a && (*a)["result"]["last"]["result"] == "connected", "status: last connected");
+
+        wifi.hold = true;
+        CHECK(c.Send("{\"v\":1,\"id\":14,\"cmd\":\"wifi.connect\",\"args\":{\"ssid\":\"Late\",\"security\":\"open\"}}\n"),
+              "send late");
+        a = c.Next();
+        CHECK(a && (*a)["result"]["accepted"] == true, "accepted late");
+    }
+    // The link is gone; the adapter's answer must be dropped safely.
+    CHECK(wifi.held != nullptr, "held");
+    if (wifi.held)
+        wifi.held(WifiResult{WifiOutcome::Timeout, "", ""});
+}
+
+// 200 long lines: the page reaches the client whole, within 16 KiB, read
+// on the loop thread.
+struct LongLog : LogReader
+{
+    std::mutex mutex; // Read runs on the loop thread, the checks on the test's
+    std::vector<std::thread::id> threads;
+    LogPage Read(const LogQuery &q) override
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            threads.push_back(std::this_thread::get_id());
+        }
+        LogPage p;
+        for (int i = 0; i < q.limit; i++)
+            p.entries.push_back(LogEntry{1762246526123 - i, "36276c97", LogLevel::Info, LogSource::Dlidar,
+                                         std::string(1024, 'a'), "cursor" + std::to_string(i)});
+        p.more = "end";
+        return p;
+    }
+};
+
+void TestLogOverSocket()
+{
+    printf("log.get over the socket: a full page within 16 KiB, more at the cut\n");
+    TempDir dir;
+    LongLog log;
+    Device d(dir.path, nullptr, &log);
+    if (!d.link)
+        return;
+    Client c(d.link->SocketPath());
+    CHECK(c.Send("{\"v\":1,\"id\":30,\"cmd\":\"log.get\",\"args\":{\"limit\":200}}\n"), "send");
+    std::optional<Json> a = c.Next();
+    CHECK(a && (*a)["id"] == 30 && (*a)["ok"] == true, "answered");
+    if (a)
+    {
+        size_t kept = (*a)["result"]["entries"].size();
+        CHECK(kept >= 13 && kept < 200 && (*a)["result"]["more"] == "cursor" + std::to_string(kept - 1), "kept %zu", kept);
+        CHECK((*a).dump().size() + 1 <= 16384, "within 16 KiB");
+    }
+    std::lock_guard<std::mutex> lock(log.mutex);
+    CHECK(log.threads.size() == 1 && log.threads[0] != std::this_thread::get_id(), "read on the loop thread");
 }
 
 void TestFifthClient()
@@ -428,6 +564,9 @@ int main()
     int threads = Threads();
     TestSocketDirectory();
     TestRequestsAndRecording();
+    TestRemoteRecording();
+    TestWifiOverSocket();
+    TestLogOverSocket();
     TestFifthClient();
     TestStalledClient();
     TestDisconnectMidLine();

@@ -13,10 +13,14 @@
 #include "adapters/gpio/button_input.h"
 #include "adapters/gpio/gpio_line.h"
 #include "adapters/gpio/status_led.h"
+#include "adapters/journal/journal_reader.h"
+#include "adapters/networkmanager/command_runner.h"
+#include "adapters/networkmanager/nmcli_wifi.h"
 #include "adapters/phone/phone_link.h"
 #include "adapters/phone/socket_transport.h"
 #include "adapters/storage/file_recording_storage.h"
 #include "app/button_commands.h"
+#include "app/pairing_button_commands.h"
 #include "app/power.h"
 #include "app/sensor_factory.h"
 #include "app/settings.h"
@@ -24,6 +28,7 @@
 #include "application/device/event_hub.h"
 #include "application/device/scanner_controller.h"
 #include "application/remote/device_api.h"
+#include "application/remote/wifi_setup.h"
 #include "domain/recording/recording_info.h"
 #include "dlidar_version.h"
 
@@ -33,6 +38,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unistd.h>
 
 namespace
 {
@@ -46,6 +52,16 @@ std::string OutputDirectory()
 {
 	const char *linuxUser = getenv("USER");
 	return std::string("/home/") + (linuxUser ? linuxUser : "") + "/PointCloudDump/";
+}
+
+// The host name up to the first '.', for info.get; empty if it cannot be read.
+std::string ShortHostname()
+{
+	char name[256] = {};
+	if (gethostname(name, sizeof name - 1) != 0)
+		return "";
+	std::string s = name;
+	return s.substr(0, s.find('.'));
 }
 } // namespace
 
@@ -135,6 +151,17 @@ int main(int argc, char *argv[])
 			return 2;
 		}
 	}
+	// The pairing button is optional too (service mode): without it the
+	// pairing window still opens with tools/pair.sh.
+	std::unique_ptr<dlidar::gpio::GpioLine> pairing_line;
+	if (!once)
+	{
+		pairing_line = dlidar::gpio::GpioLine::OpenButton(settings.gpio.pairing_button_gpio, error);
+		if (!pairing_line)
+			std::cerr << "WARNING: no pairing button on GPIO " << settings.gpio.pairing_button_gpio
+					  << " ([pairing_button] gpio): " << error << "; tools/pair.sh still opens the pairing window"
+					  << std::endl;
+	}
 	// The status LED is optional: without it the recordings still work.
 	std::unique_ptr<dlidar::gpio::GpioLine> led_line = dlidar::gpio::GpioLine::OpenLed(settings.gpio.led_gpio, error);
 	if (!led_line)
@@ -149,8 +176,12 @@ int main(int argc, char *argv[])
 	dlidar::ConsoleEvents console;
 	dlidar::EventHub hub;
 	hub.AddSync(console);
+	std::shared_ptr<dlidar::gpio::StatusLed> led;
 	if (led_line)
-		hub.AddAsync(std::make_shared<dlidar::gpio::StatusLed>(std::move(led_line)));
+	{
+		led = std::make_shared<dlidar::gpio::StatusLed>(std::move(led_line));
+		hub.AddAsync(led);
+	}
 
 	// A stop during recovery or the sensor set-up: no recording (it would
 	// leave an empty file pair that dMapper reads).
@@ -162,32 +193,54 @@ int main(int argc, char *argv[])
 
 	{
 		// Input channels: SIGINT/SIGTERM/SIGHUP (the stop flag, which also
-		// ends a running recording), the push button. Later: the phone.
+		// ends a running recording), the push button, and the phone link's
+		// recording.start / recording.stop (through DeviceApi).
 		dlidar::ScannerController controller(*sensor, storage, hub, config, &StopRequested());
 
-		// The phone link (read-only so far): its own thread, the local socket
-		// and Bluetooth LE ([phone] ble, name). SIGUSR1 (tools/pair.sh) opens
-		// the pairing window for 2 minutes. An output channel on the hub. A
-		// problem only warns.
+		// The phone link: its own thread, the local socket and Bluetooth LE
+		// ([phone] ble, name); an input (start, stop, Wi-Fi) and an output channel
+		// on the hub. The pairing window opens on the pairing button,
+		// SIGUSR1 or SIGUSR2 (forget first). A problem only warns.
 		dlidar::DeviceApi api(controller, &storage,
 							  {DLIDAR_VERSION, SensorKindName(settings.sensor), ProfileFor(settings).sensor_model,
-							   dlidar::kRecordingFormatVersion});
+							   dlidar::kRecordingFormatVersion, ShortHostname()});
+		// Wi-Fi setup from the phone (wifi.connect, wifi.status): NetworkManager
+		// through nmcli on its own thread. Without NetworkManager, wifi.status
+		// says unavailable and a join fails with the reason. Stopped before the
+		// phone link, so no result comes after it.
+		dlidar::network::NmcliWifi wifi(std::make_unique<dlidar::network::ProcessRunner>(), {});
+		wifi.Start();
+		dlidar::WifiSetup wifi_setup(wifi);
+		// If the block unwinds, the join stops before wifi_setup goes, so no
+		// late result reaches it.
+		struct StopWifi
+		{
+			dlidar::network::NmcliWifi &wifi;
+			~StopWifi() { wifi.Stop(); }
+		} stop_wifi{wifi};
+		// The service's log for log.get (openspec phone-link-logs): the journal,
+		// read on the phone loop's thread.
+		dlidar::journal::JournalReader log_reader({});
 		dlidar::phone::BleOptions ble;
 		ble.enabled = settings.phone.ble;
 		ble.name = settings.phone.name;
+		if (led) // the LED flashes twice a second while the pairing window is open
+			ble.on_pairing = [led](bool open) { led->SetPairing(open); };
 		std::string why;
 		std::unique_ptr<dlidar::phone::PhoneLink> phone =
-			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why);
+			dlidar::phone::PhoneLink::Start(api, dlidar::phone::SocketDirectory(), ble, why, &wifi_setup, &log_reader);
 		if (!why.empty())
 			std::cerr << "WARNING: no phone socket (" << why << ")" << std::endl;
 		if (phone)
 			hub.AddAsync(phone->Events());
-		// SIGUSR1 (tools/pair.sh): the pairing window, while dLidar waits.
+		// SIGUSR1 (tools/pair.sh): the pairing window; SIGUSR2 (tools/pair.sh
+		// --forget): forget every phone, then the window. While dLidar waits.
 		auto pairing = [&] {
-			if (PairingRequested().exchange(false))
+			bool forget = ForgetRequested().exchange(false);
+			if (PairingRequested().exchange(false) || forget)
 			{
 				if (phone)
-					phone->OpenPairingWindow();
+					phone->OpenPairingWindow(forget);
 				else
 					std::cerr << "WARNING: no pairing window: the phone link is not running" << std::endl;
 			}
@@ -208,8 +261,20 @@ int main(int argc, char *argv[])
 			ButtonCommands commands(controller, PowerOff);
 			dlidar::gpio::ButtonInput button(
 				std::move(button_line), [&] { commands.OnShort(); }, [&] { commands.OnLong(); });
+			// The pairing button: short = the pairing window, 5 s = forget every
+			// phone first (PhoneLink::OpenPairingWindow).
+			PairingButtonCommands pairing_commands(
+				phone ? std::function<void(bool)>([&](bool forget) { phone->OpenPairingWindow(forget); }) : nullptr);
+			std::unique_ptr<dlidar::gpio::ButtonInput> pairing_button;
+			if (pairing_line)
+				pairing_button = std::make_unique<dlidar::gpio::ButtonInput>(
+					std::move(pairing_line), [&] { pairing_commands.OnShort(); },
+					[&] { pairing_commands.OnLong(); });
 			std::cout << "Ready: press the button (GPIO " << settings.gpio.button_gpio
 					  << ") to start a recording, again to save it; hold it 5 s to power down." << std::endl;
+			if (pairing_button)
+				std::cout << "The pairing button (GPIO " << settings.gpio.pairing_button_gpio
+						  << ") opens the Bluetooth pairing window; hold it 5 s to forget every phone first." << std::endl;
 			while (!StopRequested())
 			{
 				pairing();
@@ -218,8 +283,10 @@ int main(int argc, char *argv[])
 			controller.StopRecording();
 			controller.WaitIdle();
 		}
-		// The final state reaches the clients (up to 200 ms), then the socket
+		// A running Wi-Fi join is abandoned (its unsaved profile removed). The
+		// final state reaches the clients (up to 200 ms), then the socket
 		// goes; before the controller the API points to.
+		wifi.Stop();
 		if (phone)
 			phone->Shutdown();
 	}

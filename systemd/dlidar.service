@@ -11,8 +11,11 @@ After=network-online.target bluetooth.service
 Type=simple
 User=USER
 # The button and LED lines (/dev/gpiochip*, group gpio); BlueZ over D-Bus for
-# the phone link (upstream BlueZ allows only root and group bluetooth).
-SupplementaryGroups=gpio bluetooth
+# the phone link (upstream BlueZ allows only root and group bluetooth);
+# systemd's own lines about this service (start, exit, crash, restart) for the
+# phone's log.get, group systemd-journal. The group may read the whole system
+# journal; log.get returns only this unit's lines.
+SupplementaryGroups=gpio bluetooth systemd-journal
 WorkingDirectory=REPO
 ExecStart=REPO/bin/dLidar
 # SIGTERM saves a running recording before exiting; saving a 1 h Mid-360S

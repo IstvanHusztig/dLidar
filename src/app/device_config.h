@@ -26,6 +26,9 @@ const uint32_t kLidarWorkMode = 0;
 // 27, header pin 13, through 330 ohm to GND); docs/manual.html, "Wiring and pinout".
 const int kButtonGpio = 17;
 const int kLedGpio = 27;
+// The pairing button (GPIO 22, header pin 15, to GND on pin 20): opens the
+// Bluetooth pairing window, a 5 s hold forgets every phone first.
+const int kPairingButtonGpio = 22;
 
 // [phone] ble, name: the phone link over Bluetooth LE, advertised as this name.
 const bool kBleEnabled = true;

@@ -44,9 +44,14 @@ gpio = 17
 # The status LED, through 330 ohm to GND (header pin 13).
 gpio = 27
 
+[pairing_button]
+# The pairing button, to GND (header pin 15, GND on pin 20): a short press
+# opens the Bluetooth pairing window for 2 minutes, a 5 s hold forgets every
+# phone first. Optional: dLidar runs without it.
+gpio = 22
+
 [phone]
-# The pairing window (2 minutes) opens with tools/pair.sh, later with the
-# pairing button.
+# The pairing window (2 minutes) also opens with tools/pair.sh.
 # Serve the phone link over Bluetooth LE (the app finds the scanner by its
 # service UUID; this name is shown).
 ble = true

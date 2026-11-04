@@ -8,6 +8,7 @@
 #include <chrono>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <thread>
 #include <vector>
 
@@ -71,6 +72,41 @@ void TestPattern()
           flashes);
 }
 
+// The pairing window: two 100 ms flashes a second while idle, and after the
+// failure flashes; recording, saving and failure keep priority.
+void TestPairingPattern()
+{
+    auto flashes = [](DeviceState state, int64_t ms0) {
+        int n = 0, on_ms = 0;
+        bool was_on = false;
+        for (int t = 0; t < 1000; t++)
+        {
+            bool on = LedOn(state, ms0 + t, true, t);
+            n += on && !was_on;
+            on_ms += on;
+            was_on = on;
+        }
+        return std::make_pair(n, on_ms);
+    };
+    CHECK(flashes(DeviceState::Idle, 0) == std::make_pair(2, 200), "idle: two 100 ms flashes a second");
+    CHECK(LedOn(DeviceState::Idle, 0, true, 0) && LedOn(DeviceState::Idle, 0, true, 99) &&
+              !LedOn(DeviceState::Idle, 0, true, 100) && LedOn(DeviceState::Idle, 0, true, 200) &&
+              !LedOn(DeviceState::Idle, 0, true, 300) && !LedOn(DeviceState::Idle, 0, true, 999) &&
+              LedOn(DeviceState::Idle, 0, true, 1000),
+          "flashes at 0-100 and 200-300 ms of each second");
+    for (int t : {0, 150, 500, 999})
+    {
+        CHECK(LedOn(DeviceState::Preparing, t, true, t) && LedOn(DeviceState::Recording, t, true, t),
+              "recording keeps priority at %d", t);
+        CHECK(LedOn(DeviceState::Finalizing, t, true, t) == LedOn(DeviceState::Finalizing, t),
+              "saving keeps priority at %d", t);
+        CHECK(LedOn(DeviceState::Error, t, true, t + 150) == LedOn(DeviceState::Error, t),
+              "the failure flashes keep priority at %d", t);
+    }
+    CHECK(flashes(DeviceState::Error, 600) == std::make_pair(2, 200), "after the failure flashes: the pairing pattern");
+    CHECK(!LedOn(DeviceState::Idle, 0, false, 0) && !LedOn(DeviceState::Error, 650, false, 0), "off without the window");
+}
+
 DeviceStatus State(DeviceState s)
 {
     DeviceStatus st;
@@ -104,6 +140,14 @@ void TestChannel()
         channel.OnState(State(DeviceState::Error));
         std::this_thread::sleep_for(1200ms);
         CHECK(led.Flashes() - before == 3 && !led.Level(), "3 flashes then off: %d", led.Flashes() - before);
+
+        before = led.Flashes();
+        channel.SetPairing(true);
+        std::this_thread::sleep_for(1050ms);
+        CHECK(led.Flashes() - before >= 2, "pairing window: flashing after a failure: %d", led.Flashes() - before);
+        channel.SetPairing(false);
+        std::this_thread::sleep_for(120ms);
+        CHECK(!led.Level(), "off when the window closes");
         channel.OnState(State(DeviceState::Recording));
         std::this_thread::sleep_for(120ms);
     }
@@ -128,6 +172,7 @@ void TestFailingLine()
 int main()
 {
     TestPattern();
+    TestPairingPattern();
     TestChannel();
     TestFailingLine();
     return FinishTests("Status LED");

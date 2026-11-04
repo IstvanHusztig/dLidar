@@ -22,6 +22,9 @@ namespace dlidar::phone
 
         // Closes the connection; OnClosed follows later on the loop.
         virtual void Close() = 0;
+
+        // What kind of client it is, for log lines ("phone", "local client").
+        virtual const char *Kind() const { return "client"; }
     };
 
     // What a transport tells the protocol server, on the loop's thread.
