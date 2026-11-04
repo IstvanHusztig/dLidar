@@ -49,7 +49,7 @@ The unit name is an adapter option, default `dlidar.service`. Level: for `dlidar
 
 ### D4. Paging by journal cursors
 - No `before`: `seek_tail`, then `previous` for each entry.
-- With `before`: `seek_cursor(before)` (`-EINVAL` → `LogCursorError` → `bad_request` naming `before`), then `previous`. If `sd_journal_test_cursor` says the reader stands on that exact entry, step `previous` once more, so the entry is not repeated. If the entry was vacuumed, `seek_cursor` lands on the nearest entry: if that entry is newer than the cursor's time (the `t=` field of the cursor), step back past it, so paging continues at the newest remaining older entry.
+- With `before`: `seek_cursor(before)` (`-EINVAL` → `LogCursorError` → `bad_request` naming `before`), then `previous`. A backward step after a cursor seek lands on the cursor's own entry, or, if that entry was vacuumed, on the nearest older one. If `sd_journal_test_cursor` says the reader stands on the cursor's own entry, it is skipped, so it is not repeated. No time comparison: the Pi's clock may jump backwards between boots, so a newer `t` does not mean a newer line.
 - `more` is the cursor of the last entry kept, or `null` when `previous` reached the head.
 
 Cursors are opaque strings for the client (about 130 bytes, well within a 4096-byte request). Newer lines do not move them, so pages stay stable while dLidar writes.

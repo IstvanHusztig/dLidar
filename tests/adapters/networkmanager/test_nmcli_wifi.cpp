@@ -9,6 +9,7 @@
 #include "../../check.h"
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <fcntl.h>
 #include <future>
@@ -16,6 +17,7 @@
 #include <sstream>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 
 using namespace dlidar;
 using namespace dlidar::network;
@@ -53,11 +55,23 @@ struct ScriptedRunner : CommandRunner
     std::optional<CommandOutput> first; // the answer to the first step of a join
     bool active = true;                 // wlan0 is on TP-Link_B8CB
     bool block_up = false;              // the join's up waits until Cancel()
-    bool cancelled = false;
+    // The CommandRunner contract: Cancel() kills the waiting Run; with none
+    // waiting, the next Run returns `cancelled` without running.
+    bool waiting = false, cancelled = false, cancel_pending = false;
+    std::vector<std::vector<std::string>> skipped; // Runs cancelled before they started
+    std::function<void()> during_add;              // called once inside the add, unlocked
 
     CommandOutput Run(const std::vector<std::string> &argv, std::chrono::milliseconds) override
     {
         std::unique_lock<std::mutex> lock(mutex);
+        if (cancel_pending)
+        {
+            cancel_pending = false;
+            skipped.push_back(argv);
+            CommandOutput o;
+            o.cancelled = true;
+            return o;
+        }
         calls.push_back(argv);
         auto is = [&](std::initializer_list<const char *> want) {
             std::vector<std::string> w(want.begin(), want.end());
@@ -85,12 +99,26 @@ struct ScriptedRunner : CommandRunner
         if (is({"nmcli", "-g", "802-11-wireless.ssid", "connection", "show", "uuid"}))
             return argv.back() == A ? Ok("TP-Link_B8CB\n") : Ok("Home\n");
         if (is({"nmcli", "connection", "add"}))
+        {
+            if (std::function<void()> fn = std::exchange(during_add, nullptr))
+            {
+                lock.unlock();
+                fn();
+                lock.lock();
+            }
             return add;
+        }
         if (is({"nmcli", "--wait"}) && Has(argv, NEW))
         {
-            if (block_up)
-                cv.wait(lock, [&] { return cancelled; });
-            return block_up ? Fail(-1, "") : up;
+            if (!block_up)
+                return up;
+            waiting = true;
+            cv.wait_for(lock, 10s, [&] { return cancelled; }); // bounded: a broken Stop fails the test, not hangs it
+            waiting = false;
+            cancelled = false;
+            CommandOutput o = Fail(-1, "");
+            o.cancelled = true;
+            return o;
         }
         if (is({"nmcli", "--wait"}))
             return restore;
@@ -105,8 +133,16 @@ struct ScriptedRunner : CommandRunner
     void Cancel() override
     {
         std::lock_guard<std::mutex> lock(mutex);
-        cancelled = true;
+        if (waiting)
+            cancelled = true;
+        else
+            cancel_pending = true;
         cv.notify_all();
+    }
+    bool CancelPending()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return cancel_pending;
     }
     std::vector<std::vector<std::string>> Calls()
     {
@@ -375,6 +411,40 @@ void TestStop()
     CHECK(late, "a join after Stop fails at once");
 }
 
+void TestStopBetweenSteps()
+{
+    printf("stop between two nmcli steps: the next step is cancelled, the cleanup still runs\n");
+    Rig r;
+    r.runner->block_up = true; // were the cancel lost, the up would wait 10 s
+    std::thread stopper;
+    std::atomic<bool> stopping{false};
+    r.runner->during_add = [&] {
+        stopper = std::thread([&] { r.wifi->Stop(); });
+        stopping = true;
+        for (int i = 0; i < 2000 && !r.runner->CancelPending(); i++)
+            std::this_thread::sleep_for(1ms);
+    };
+    r.wifi->Start();
+    bool called = false;
+    auto t0 = std::chrono::steady_clock::now();
+    r.wifi->Connect(WifiNetwork{"Home", WifiSecurity::Wpa2Psk, kMarker}, 60s, [&](const WifiResult &) { called = true; });
+    for (int i = 0; i < 2000 && !stopping; i++)
+        std::this_thread::sleep_for(1ms);
+    CHECK(stopping, "the add ran");
+    if (stopping)
+        stopper.join();
+    CHECK(std::chrono::steady_clock::now() - t0 < 2s, "stopped at once");
+    CHECK(!called, "done not called");
+    std::vector<std::vector<std::string>> skipped;
+    {
+        std::lock_guard<std::mutex> lock(r.runner->mutex);
+        skipped = r.runner->skipped;
+    }
+    CHECK(skipped.size() == 1 && skipped[0].size() > 1 && skipped[0][1] == "--wait", "the up was cancelled before it ran");
+    std::vector<std::string> del = Find(r.runner->Calls(), {"nmcli", "connection", "delete"});
+    CHECK(del.size() == 5 && del[4] == NEW, "the attempt deleted");
+}
+
 void TestLink()
 {
     printf("the link: unknown before the start, refreshed at start\n");
@@ -465,6 +535,7 @@ int main()
     TestNotJoined();
     TestNothingStarted();
     TestStop();
+    TestStopBetweenSteps();
     TestLink();
     TestProcessRunner();
     TestRealNmcli();

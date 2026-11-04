@@ -24,7 +24,7 @@
 ## 3. Journal adapter (D1, D3–D6)
 
 - [x] 3.1 Pure helpers in `src/adapters/journal/`: the level of a dLidar line (`WARNING:`, `ERROR:`) and of a systemd `PRIORITY`, the cut at 1024 bytes on a UTF-8 boundary with invalid bytes replaced, the short boot id. Verify with a new ctest `journal_reader` (`tests/adapters/journal/test_journal_reader.cpp`).
-- [x] 3.2 `JournalReader` (`sd-journal`, opened per request; the two match groups, the unit name an option; seek to the tail or to `before`, step past the cursor's own entry or a newer one after rotation; at most 5000 entries read; `more`). Verify with ctest `journal_reader` against the dev board's journal, read-only, skipped without `dlidar.service` lines:
+- [x] 3.2 `JournalReader` (`sd-journal`, opened per request; the two match groups, the unit name an option; seek to the tail or to `before`, step past the cursor's own entry (after a rotation the step lands on the nearest older one); at most 5000 entries read; `more`). Verify with ctest `journal_reader` against the dev board's journal, read-only, skipped without `dlidar.service` lines:
   - every entry belongs to the unit;
   - paging to the head returns each cursor once, in descending time;
   - a malformed cursor throws `LogCursorError`;
@@ -42,7 +42,7 @@
 
   Verify that every path and command named in them exists.
 
-- [ ] 4.3 Earlier reviewer notes, in a commit of their own: the Wi-Fi test fake's `Cancel()` follows the runner contract (the next Run is cancelled) with an `NmcliWifi` test where `Stop` lands between two nmcli steps; a comment on the cancel that arrives just as a child exits; `CLAUDE.md`'s link to the archived phone-link-ble design. Verify with ctest `nmcli_wifi` and that the link resolves.
+- [x] 4.3 Earlier reviewer notes, in a commit of their own: the Wi-Fi test fake's `Cancel()` follows the runner contract (the next Run is cancelled) with an `NmcliWifi` test where `Stop` lands between two nmcli steps; a comment on the cancel that arrives just as a child exits; `CLAUDE.md`'s link to the archived phone-link-ble design. Verify with ctest `nmcli_wifi` and that the link resolves.
 
 ## 5. Board checks
 

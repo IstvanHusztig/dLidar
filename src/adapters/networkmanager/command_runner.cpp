@@ -172,8 +172,13 @@ namespace dlidar::network
         {
             std::lock_guard<std::mutex> lock(mutex_);
             pid_ = -1;
+            // A Cancel that hit this command is used up by it. One that came
+            // just as the child ended by itself is not seen above and
+            // cancels the next Run; only NmcliWifi::Stop cancels, so at most
+            // the first cleanup step after a stop is skipped (the attempt's
+            // profile is unsaved, so nothing outlives NetworkManager).
             if (result.cancelled)
-                cancelled_ = false; // used up by this command
+                cancelled_ = false;
         }
         result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
         return result;
