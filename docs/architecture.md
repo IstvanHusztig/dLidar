@@ -2,7 +2,7 @@
 
 dLidar is the application of a handheld scanning device. It records a LiDAR with an IMU (a Unitree L2 or a Livox Mid-360S, chosen in the settings file) into files that dMapper, our SLAM solution, processes. Over time the device gains buttons, status LEDs, a Bluetooth link to a phone, and possibly a different LiDAR. The code follows Clean Architecture (Robert C. Martin) so that those can be added without touching the recording logic.
 
-The change that introduced this structure is `openspec/changes/clean-architecture-sensor-port/`.
+The change that introduced this structure is `openspec/changes/archive/2026-10-27-clean-architecture-sensor-port/`.
 
 ## Layers and the dependency rule
 

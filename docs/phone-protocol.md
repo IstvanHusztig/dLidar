@@ -1,6 +1,6 @@
 # dLidar phone protocol, version 1
 
-The contract between dLidar (the scanner) and a client such as the Android app. It is the same over every transport: the local Unix socket (now) and Bluetooth LE (next). The requirements are in `openspec/changes/phone-link-core/specs/phone-api/spec.md`; this document explains them for client authors.
+The contract between dLidar (the scanner) and a client such as the Android app. It is the same over every transport: the local Unix socket and Bluetooth LE. The requirements are in `openspec/changes/phone-link-core/specs/phone-api/spec.md`; this document explains them for client authors.
 
 Version 1 lets a client query and watch the scanner, start and stop recordings, put the scanner on a Wi-Fi network, and read its log.
 
@@ -307,7 +307,7 @@ Within protocol version 1, dLidar only adds: commands, events, result fields, en
 
 ## Transports
 
-**Local socket (now).** A Unix stream socket `dlidar.sock` in the service's runtime directory (`/run/dlidar/dlidar.sock` under systemd), else in `$XDG_RUNTIME_DIR`, mode 0600, at most 4 clients. `tools/phone_client.py` is a command-line client:
+**Local socket.** A Unix stream socket `dlidar.sock` in the service's runtime directory (`/run/dlidar/dlidar.sock` under systemd), else in `$XDG_RUNTIME_DIR`, mode 0600, at most 4 clients. `tools/phone_client.py` is a command-line client:
 
 ```bash
 tools/phone_client.py status.get

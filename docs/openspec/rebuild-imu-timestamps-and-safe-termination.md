@@ -1,5 +1,7 @@
 # Change: rebuild-imu-timestamps-and-safe-termination
 
+> **Historical.** Implemented in commit 7c9396c, before OpenSpec was set up; it was never split into `openspec/changes/`. The current behaviour is in `docs/imu_lidar_time_alignment.md` and `docs/recording-format.md`.
+
 > OpenSpec change document. When `openspec init` is run in this repository,
 > split it into `openspec/changes/rebuild-imu-timestamps-and-safe-termination/`:
 > the **Proposal** section → `proposal.md`, the **Design** section → `design.md`,

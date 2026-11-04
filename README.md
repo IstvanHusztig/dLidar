@@ -6,6 +6,20 @@ dLidar is the software of a handheld LiDAR scanner. It runs on a Raspberry Pi 5 
 
 The full manual is [`docs/manual.html`](docs/manual.html).
 
+## Status
+
+| Part | State |
+|---|---|
+| Recording, LAZ/CSV output, recovery after a crash or power loss | done; tested on the Unitree L2 and by replaying its packet logs |
+| Livox Mid-360S | done; tested on synthetic packets only, bring-up when the sensor arrives ([`docs/livox_mid360s.md`](docs/livox_mid360s.md)) |
+| Unitree L2 IMU timestamps on the L2's clock | done; not yet verified on hardware (the test unit's IMU is faulty) |
+| Push button, status LED, service mode | done; not yet tested with the real parts |
+| Phone link: status, start/stop, Wi-Fi setup, log over Bluetooth LE and the local socket | done; tested with the Android app over Bluetooth LE |
+| Pairing button | done; not yet tested with the real button (`tools/pair.sh` is tested) |
+| Later | listing and removing saved Wi-Fi networks, listing recordings and power-off from the phone, a live log stream |
+
+The open hardware checks are the remaining tasks in `openspec/changes/` (`push-button-recording`, `phone-link-commands`, `phone-link-core`, `add-livox-mid360s-sensor`).
+
 ## Build
 
 ```bash
