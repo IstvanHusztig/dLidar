@@ -26,7 +26,7 @@ Dependencies point inward only: `app` → `adapters` → `application` → `doma
 Enforcement:
 - **Build:** the CMake targets give each layer only what it needs.
   - `dlidar_core` (domain + application) has only `src/` on its include path and links nothing.
-  - `dlidar_l2` adds the Unitree SDK, `dlidar_livox` adds Livox-SDK2 (submodule `external/Livox-SDK2`, its static library linked privately), `dlidar_storage` adds LASzip and `3rd/`, `dlidar_phone` adds nlohmann/json (`external/json`) and GLib/GIO, privately, `dlidar_gpio`, `dlidar_network` and `dlidar_console` add nothing.
+  - `dlidar_l2` adds the Unitree SDK, `dlidar_livox` adds Livox-SDK2 (submodule `external/Livox-SDK2`, its static library linked privately), `dlidar_storage` adds LASzip and `3rd/`, `dlidar_phone` adds nlohmann/json (`external/json`) and GLib/GIO, privately, `dlidar_journal` adds libsystemd (sd-journal), privately, `dlidar_gpio`, `dlidar_network` and `dlidar_console` add nothing.
   - The core and its tests therefore build without the SDK or LASzip.
 - **Includes:** `tools/check_architecture.py --strict` (ctest `architecture`) checks every `#include` under `src/` against the table above.
 

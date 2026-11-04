@@ -7,8 +7,8 @@
 #include "../../check.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
-#include <set>
 #include <systemd/sd-journal.h>
 
 using namespace dlidar;
@@ -63,22 +63,31 @@ bool OfUnit(sd_journal *j, const std::string &cursor)
     return field("_SYSTEMD_UNIT") == kUnit || (field("_PID") == "1" && field("UNIT") == kUnit);
 }
 
-// The unit's lines, counted forward without the reader.
-int CountLines()
+// The unit's lines from the one at `newest` back to the head, in journal
+// order, read directly (not through the reader). Lines written later are
+// newer than `newest`, so dLidar logging during the test changes nothing.
+std::vector<std::string> LinesBack(const std::string &newest)
 {
+    std::vector<std::string> v;
     sd_journal *j;
     if (sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY) < 0)
-        return -1;
+        return v;
     std::string own = "_SYSTEMD_UNIT=" + kUnit, about = "UNIT=" + kUnit;
     sd_journal_add_match(j, own.c_str(), 0);
     sd_journal_add_disjunction(j);
     sd_journal_add_match(j, "_PID=1", 0);
     sd_journal_add_match(j, about.c_str(), 0);
-    int n = 0;
-    SD_JOURNAL_FOREACH(j)
-    n++;
+    if (sd_journal_seek_cursor(j, newest.c_str()) >= 0)
+        while (sd_journal_previous(j) > 0)
+        {
+            char *c = nullptr;
+            if (sd_journal_get_cursor(j, &c) < 0)
+                break;
+            v.push_back(c);
+            free(c);
+        }
     sd_journal_close(j);
-    return n;
+    return v;
 }
 
 void TestRealJournal()
@@ -108,39 +117,36 @@ void TestRealJournal()
     auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     printf("  a 200-line page took %.1f ms\n", ms);
     page = reader.Read({std::nullopt, 20, LogLevel::Info}); // small pages, so paging spans several
-    std::set<std::string> seen;
-    int64_t previous_t = INT64_MAX;
-    int total = 0, pages = 1, out_of_order = 0;
+    // Order by journal position, not by time: the Pi's clock may jump back
+    // between boots (D4).
+    std::vector<std::string> paged;
+    int pages = 1;
     for (;;)
     {
         for (const LogEntry &e : page.entries)
-        {
-            CHECK(seen.insert(e.cursor).second, "line repeated: %s", e.text.c_str());
-            if (e.time_ms > previous_t)
-                out_of_order++;
-            previous_t = e.time_ms;
-            total++;
-        }
+            paged.push_back(e.cursor);
         if (!page.more || pages > 10000)
             break;
         page = reader.Read({page.more, 20, LogLevel::Info});
         pages++;
     }
-    int counted = CountLines();
-    printf("  %d lines in %d pages (%d counted directly)\n", total, pages, counted);
-    CHECK(total == counted, "paging returns every line: %d of %d", total, counted);
-    CHECK(out_of_order == 0, "newest first: %d out of order", out_of_order);
+    std::vector<std::string> direct = paged.empty() ? paged : LinesBack(paged.front());
+    const int counted = (int)direct.size();
+    printf("  %zu lines in %d pages (%d read directly)\n", paged.size(), pages, counted);
+    CHECK(paged == direct, "paging returns every line once, newest first: %zu vs %d", paged.size(), counted);
 
-    // limit 1, then the next page starts just older.
-    LogPage one = reader.Read({std::nullopt, 1, LogLevel::Info});
-    CHECK(one.entries.size() == 1 && one.entries[0].cursor == first.entries[0].cursor, "the newest line");
-    if (counted > 1)
+    // limit 1 from a cursor, then the next page starts just older.
+    if (first.entries.size() >= 3)
     {
-        CHECK(one.more.has_value(), "more after one line");
+        LogPage one = reader.Read({first.entries[0].cursor, 1, LogLevel::Info});
+        CHECK(one.entries.size() == 1 && one.entries[0].cursor == first.entries[1].cursor && one.more,
+              "one line, just older than the cursor");
         LogPage two = reader.Read({one.more, 1, LogLevel::Info});
-        CHECK(two.entries.size() == 1 && first.entries.size() > 1 && two.entries[0].cursor == first.entries[1].cursor,
+        CHECK(two.entries.size() == 1 && two.entries[0].cursor == first.entries[2].cursor,
               "the next page continues just older");
     }
+    LogPage zero = reader.Read({std::nullopt, 0, LogLevel::Info});
+    CHECK(zero.entries.size() == 1, "a limit below 1 reads as 1");
 
     LogPage warnings = reader.Read({std::nullopt, 200, LogLevel::Warning});
     for (const LogEntry &e : warnings.entries)

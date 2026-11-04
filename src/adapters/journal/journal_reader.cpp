@@ -2,6 +2,7 @@
 
 #include "adapters/journal/journal_text.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -70,12 +71,13 @@ namespace dlidar::journal
         else if ((r = sd_journal_seek_tail(j.get())) < 0)
             throw LogUnavailable(Reason("cannot read the journal", r));
 
+        const int limit = std::max(1, query.limit);
         LogPage page;
         std::string last; // the cursor of the last line read
-        bool first = true;
+        bool first = true, past = false; // past: a line other than `before`'s own was read
         for (int read = 0;; read++)
         {
-            if ((int)page.entries.size() >= query.limit)
+            if ((int)page.entries.size() >= limit)
             {
                 // Full: `more` only if an older line exists.
                 r = sd_journal_previous(j.get());
@@ -93,7 +95,9 @@ namespace dlidar::journal
                 break; // the head of the log
             if (r < 0)
             {
-                if (read == 0)
+                // Nothing read past the cursor: `more` would repeat `before`,
+                // and a client paging to the end would never stop.
+                if (!past)
                     throw LogUnavailable(Reason("cannot read the journal", r));
                 page.more = last;
                 break;
@@ -105,6 +109,7 @@ namespace dlidar::journal
                 if (query.before && sd_journal_test_cursor(j.get(), query.before->c_str()) > 0)
                     continue;
             }
+            past = true;
 
             LogEntry e;
             e.source = Field(j.get(), "_SYSTEMD_UNIT") == options_.unit ? LogSource::Dlidar : LogSource::System;

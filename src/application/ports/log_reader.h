@@ -35,7 +35,7 @@ namespace dlidar
     struct LogQuery
     {
         std::optional<std::string> before; // a page's `more`; none: from the newest line
-        int limit = 50;
+        int limit = 50; // at least 1 (a smaller value reads as 1)
         LogLevel min_level = LogLevel::Info;
     };
 

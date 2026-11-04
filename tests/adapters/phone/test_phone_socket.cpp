@@ -19,6 +19,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <mutex>
 #include <optional>
 #include <poll.h>
 #include <string>
@@ -370,10 +371,14 @@ void TestWifiOverSocket()
 // on the loop thread.
 struct LongLog : LogReader
 {
+    std::mutex mutex; // Read runs on the loop thread, the checks on the test's
     std::vector<std::thread::id> threads;
     LogPage Read(const LogQuery &q) override
     {
-        threads.push_back(std::this_thread::get_id());
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            threads.push_back(std::this_thread::get_id());
+        }
         LogPage p;
         for (int i = 0; i < q.limit; i++)
             p.entries.push_back(LogEntry{1762246526123 - i, "36276c97", LogLevel::Info, LogSource::Dlidar,
@@ -401,6 +406,7 @@ void TestLogOverSocket()
         CHECK(kept >= 13 && kept < 200 && (*a)["result"]["more"] == "cursor" + std::to_string(kept - 1), "kept %zu", kept);
         CHECK((*a).dump().size() + 1 <= 16384, "within 16 KiB");
     }
+    std::lock_guard<std::mutex> lock(log.mutex);
     CHECK(log.threads.size() == 1 && log.threads[0] != std::this_thread::get_id(), "read on the loop thread");
 }
 
