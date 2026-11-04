@@ -414,6 +414,14 @@ void TestProcessRunner()
     o = p.Run({"sleep", "10"}, 10s);
     canceller.join();
     CHECK(std::chrono::steady_clock::now() - t0 < 2s, "cancelled");
+    o = p.Run({"true"}, 5s);
+    CHECK(o.exit_code == 0 && !o.cancelled, "a cancel is used up by the command it killed");
+    p.Cancel(); // between two commands: the next one is cancelled, the one after runs
+    t0 = std::chrono::steady_clock::now();
+    o = p.Run({"sleep", "10"}, 10s);
+    CHECK(o.cancelled && std::chrono::steady_clock::now() - t0 < 1s, "cancel between commands");
+    o = p.Run({"true"}, 5s);
+    CHECK(o.exit_code == 0 && !o.cancelled, "the command after it runs");
     int fd = open("/dev/null", O_RDONLY); // no O_CLOEXEC, like a vendor SDK's socket
     dup2(fd, 50);
     close(fd);

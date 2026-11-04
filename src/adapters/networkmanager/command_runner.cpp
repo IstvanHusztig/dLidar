@@ -78,10 +78,19 @@ namespace dlidar::network
         int rc;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            cancelled_ = false;
-            rc = posix_spawnp(&pid, arg_p[0], &actions, &attr, arg_p.data(), env_p.data());
-            if (rc == 0)
-                pid_ = pid;
+            // A Cancel between two commands cancels the next one.
+            if (cancelled_)
+            {
+                cancelled_ = false;
+                result.cancelled = true;
+                rc = ECANCELED;
+            }
+            else
+            {
+                rc = posix_spawnp(&pid, arg_p[0], &actions, &attr, arg_p.data(), env_p.data());
+                if (rc == 0)
+                    pid_ = pid;
+            }
         }
         posix_spawn_file_actions_destroy(&actions);
         posix_spawnattr_destroy(&attr);
@@ -91,6 +100,8 @@ namespace dlidar::network
         {
             close(out_pipe[0]);
             close(err_pipe[0]);
+            if (result.cancelled)
+                return result;
             result.exit_code = 127;
             result.err = "cannot start " + argv[0] + ": " + strerror(rc);
             return result;
@@ -161,6 +172,8 @@ namespace dlidar::network
         {
             std::lock_guard<std::mutex> lock(mutex_);
             pid_ = -1;
+            if (result.cancelled)
+                cancelled_ = false; // used up by this command
         }
         result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
         return result;

@@ -199,6 +199,13 @@ int main(int argc, char *argv[])
 		dlidar::network::NmcliWifi wifi(std::make_unique<dlidar::network::ProcessRunner>(), {});
 		wifi.Start();
 		dlidar::WifiSetup wifi_setup(wifi);
+		// If the block unwinds, the join stops before wifi_setup goes, so no
+		// late result reaches it.
+		struct StopWifi
+		{
+			dlidar::network::NmcliWifi &wifi;
+			~StopWifi() { wifi.Stop(); }
+		} stop_wifi{wifi};
 		dlidar::phone::BleOptions ble;
 		ble.enabled = settings.phone.ble;
 		ble.name = settings.phone.name;

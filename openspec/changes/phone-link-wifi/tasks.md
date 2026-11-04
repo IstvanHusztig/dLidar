@@ -101,7 +101,7 @@ Driven from the app by the user, the journal captured to a file. Before each ste
   - `README.md` and `CLAUDE.md`.
 
   Fill in D5 and the Open Questions with the board results. Verify that the manual and `architecture.md` agree.
-- [ ] 6.2 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, and the architecture-reviewer agent on the tip before the push.
+- [x] 6.2 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, and the architecture-reviewer agent on the tip before the push.
 
 ## Workflow follow-up
 

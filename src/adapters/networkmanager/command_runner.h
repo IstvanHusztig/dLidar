@@ -27,7 +27,8 @@ namespace dlidar::network
 
         virtual CommandOutput Run(const std::vector<std::string> &argv, std::chrono::milliseconds timeout) = 0;
 
-        // Kills the program Run is waiting for, if any; from any thread.
+        // Kills the program Run is waiting for; if none runs, the next Run
+        // returns `cancelled` at once without starting it. From any thread.
         virtual void Cancel() = 0;
     };
 
