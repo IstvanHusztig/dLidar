@@ -55,6 +55,8 @@
   Record the results in design.md ("Board results").
 - [x] 5.2 Without the group (the old unit), `log.get` returns dLidar's lines only, without an error. Verify on the board with a temporary unit drop-in, then remove it.
 
+- [ ] 5.3 BLE notifications at most 512 bytes (`BleLink::kMaxValue`; spec delta `phone-ble`): the app agent saw 2 bytes lost per 514-byte notification at MTU 517. Verify with ctest `ble_link` (MTU 517: 512 + 488; a 5000-byte message in pieces ≤ 512, joined unchanged) and `log.get` paging from the app over BLE.
+
 ## 6. Review
 
 - [ ] 6.1 Full ctest, `tools/golden_replay.sh` (identical), `tools/check_architecture.py --strict`, and the architecture-reviewer agent on the tip before the push.

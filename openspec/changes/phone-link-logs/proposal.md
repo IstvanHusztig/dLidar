@@ -45,8 +45,9 @@ This is the last phase of the phone link roadmap (`phone-link-core`, `-ble`, `-c
   - the `unavailable` error.
 
 ### Modified Capabilities
+- `phone-ble`: "Messages over writes and notifications": a notification is never more than 512 bytes, whatever the MTU. Found with `log.get`, the first answers over 512 bytes: Android delivers at most 512 bytes of a notification, so at MTU 517 two bytes of every 514-byte piece were lost (app agent, 2026-11-04).
 
-None. The `phone-ble`, `phone-wifi` and `device-control` requirements are unchanged; `hello`'s list of commands is not a requirement of a main spec (it lives in `phone-link-core`'s `phone-api` delta, which is not archived).
+Otherwise none. The `phone-ble`, `phone-wifi` and `device-control` requirements are unchanged; `hello`'s list of commands is not a requirement of a main spec (it lives in `phone-link-core`'s `phone-api` delta, which is not archived).
 
 ## Impact
 

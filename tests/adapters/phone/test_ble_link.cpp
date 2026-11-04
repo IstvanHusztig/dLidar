@@ -144,8 +144,16 @@ void TestSplitting()
     from = p.notified.size();
     h.conn->Send(Message(1000));
     run();
-    CHECK(p.notified.size() - from == 2 && p.notified[from].size() == 514 && p.notified[from + 1].size() == 486,
-          "MTU 517: 514 + 486");
+    CHECK(p.notified.size() - from == 2 && p.notified[from].size() == 512 && p.notified[from + 1].size() == 488,
+          "MTU 517: 512 + 488 (no piece over 512 bytes, Android's most)");
+    from = p.notified.size();
+    h.conn->Send(Message(5000));
+    run();
+    bool fits = true;
+    std::string joined;
+    for (size_t i = from; i < p.notified.size(); i++)
+        fits = fits && p.notified[i].size() <= 512, joined += p.notified[i];
+    CHECK(fits && joined == Message(5000), "a 5000-byte message: every piece at most 512 bytes, nothing lost");
     CHECK(h.bytes == "{\"v\":1,\"id\":1,\"cmd\":\"hello\"}\nx", "writes go to the server in order");
 }
 

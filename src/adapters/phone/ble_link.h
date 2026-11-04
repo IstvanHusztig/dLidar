@@ -52,8 +52,9 @@ namespace dlidar::phone
     //   are on, and closes when they go off, the phone leaves or BlueZ goes.
     //   A phone connected without notifications for `idle` is disconnected,
     //   so a leftover link never keeps the scanner from advertising.
-    // - A message is split into notifications of at most MTU-3 bytes, the
-    //   first piece fresh (D4, D6); the MTU is 23 until a write reports it.
+    // - A message is split into notifications of at most min(MTU-3,
+    //   kMaxValue) bytes, the first piece fresh (D4, D6); the MTU is 23
+    //   until a write reports it.
     // - Pieces leave at `rate` bytes/s, drained on clock wakes in `tick`
     //   steps (a token bucket with a burst of one tick, which may run one
     //   piece into debt). Past `cap` queued bytes the connection is closed and
@@ -62,6 +63,9 @@ namespace dlidar::phone
     {
     public:
         static const uint16_t kMinMtu = 23;
+        // The longest attribute value: Android delivers at most 512 bytes of
+        // a notification, even at MTU 517 (found with log.get, 2026-11-04).
+        static constexpr size_t kMaxValue = 512;
 
         struct Options
         {

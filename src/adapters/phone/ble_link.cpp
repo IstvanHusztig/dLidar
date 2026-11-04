@@ -201,7 +201,7 @@ namespace dlidar::phone
 
     void BleLink::Queue(const std::string &message)
     {
-        size_t piece = std::max<size_t>(mtu_ - 3, 1);
+        size_t piece = std::clamp<size_t>(mtu_ - 3, 1, kMaxValue);
         for (size_t i = 0; i < message.size(); i += piece)
             queue_.push_back(message.substr(i, piece)); // each message starts a fresh piece
         queued_ += message.size();
