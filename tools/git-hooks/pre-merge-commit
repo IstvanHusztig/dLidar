@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Refuses a merge into main of a branch the architecture-reviewer agent has not approved.
+# Runs for a merge that commits by itself; review_gate.sh finds what it merges.
 set -euo pipefail
 [ "$(git branch --show-current)" = main ] || exit 0
-exec "$(dirname "$0")/review_gate.sh" check $(cat "$(git rev-parse --git-dir)/MERGE_HEAD")
+exec "$(dirname "$0")/review_gate.sh" check-merge

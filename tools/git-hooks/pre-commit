@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# The same check for a merge into main concluded by git commit (after a conflict or
+# git merge --no-commit), which git does not pass through pre-merge-commit.
+set -euo pipefail
+[ "$(git branch --show-current)" = main ] || exit 0
+[ -f "$(git rev-parse --git-path MERGE_HEAD)" ] || exit 0
+exec "$(dirname "$0")/review_gate.sh" check-merge
