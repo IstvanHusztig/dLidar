@@ -93,7 +93,14 @@ claude-hook)
 import json, shlex, subprocess, sys
 cmd = json.load(sys.stdin).get("tool_input", {}).get("command", "")
 branch = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
-with_value = {"-m", "-F", "-s", "-X", "--strategy", "--strategy-option", "--file", "--message", "--into-name", "--cleanup", "-S", "--gpg-sign"}
+# Options whose value is the next word, per subcommand (-S, --gpg-sign take theirs attached).
+with_value = {
+    "merge": {"-m", "-F", "-s", "-X", "--strategy", "--strategy-option", "--file", "--message", "--into-name", "--cleanup"},
+    "checkout": {"--conflict", "--pathspec-from-file"},
+    "switch": {"--conflict"},
+    "push": {"--repo", "-o", "--push-option", "--receive-pack", "--exec"},
+}
+new_branch = {"-b", "-B", "--orphan", "-c", "-C", "--create", "--force-create"}  # their value is the new branch
 for part in cmd.replace("&&", ";").replace("||", ";").split(";"):
     try:
         w = shlex.split(part)
@@ -103,17 +110,25 @@ for part in cmd.replace("&&", ";").replace("||", ";").split(";"):
         w = w[1:]
     if len(w) < 2 or w[0] != "git":
         continue
-    args, skip = [], False
+    sub = w[1]
+    takes = with_value.get(sub, set()) | (new_branch if sub in ("checkout", "switch") else set())
+    args, created, skip = [], None, None
     for a in w[2:]:
         if skip:
-            skip = False
-        elif a in with_value:
-            skip = True
+            if skip in new_branch:
+                created = a
+            skip = None
+        elif a in takes:
+            skip = a
         elif not a.startswith("-"):
             args.append(a)
-    if w[1] in ("checkout", "switch") and args:
-        branch = args[0]  # the branch a later git merge in this command runs on
-    if w[1] == "push" and "--delete" not in w and "-d" not in w:
+    # The branch a later git merge in this command runs on; a checkout of files (--) changes none.
+    if sub in ("checkout", "switch") and "--" not in w:
+        if created:
+            branch = created
+        elif args:
+            branch = args[0]
+    if sub == "push" and "--delete" not in w and "-d" not in w:
         src = args[1].split(":")[0].lstrip("+") if len(args) > 1 else "HEAD"
         print(src or "HEAD")
     elif w[1] == "merge" and not {"--abort", "--continue", "--quit"} & set(w):
