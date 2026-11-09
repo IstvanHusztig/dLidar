@@ -53,7 +53,7 @@ namespace dlidar::livox
         // no packet arrives for 10 s or no Cartesian point packet within 60 s.
         bool Prepare(const StopToken &stop) override;
         RecordingInfo Versions() override { return info_; }
-        void Stop() override; // work mode sleep (best effort)
+        void Stop() override; // work mode IDLE (best effort; the Mid-360S has no sleep)
 
     private:
         explicit LiveLivoxSource(const LiveLivoxConfig &config) : config_(config) {}

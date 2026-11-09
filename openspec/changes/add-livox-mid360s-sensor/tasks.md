@@ -130,7 +130,7 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
 
 ## 8. Bring-up with the Mid-360S (when connected)
 
-- [ ] 8.1 Network: the sensor is found, the firmware version is printed or a warning appears, and point and IMU packets flow. Record which commands time out (#125) in `docs/livox_mid360s.md`.
+- [x] 8.1 Network: the sensor is found, the firmware version is printed or a warning appears, and point and IMU packets flow. Record which commands time out (#125) in `docs/livox_mid360s.md`. **Done 2026-11-09** (dev board, service mode, sensor flat on a table): firmware 35.1.1.8, every command answered. Refused: the IMU setting (`0x20`, so 200 Hz) and work mode sleep (`0x02`: the Mid-360S has no sleep mode); `Stop` now sets IDLE (0x02), after which the sensor sends no data, and the next start wakes it in ~8 s. Warnings now print the sensor's return code. Network: the sensor at 192.168.1.109 sending to 192.168.1.5, next to the Pi's Wi-Fi on the same subnet (/32 address and host route, recorded in the doc).
 - [ ] 8.2 Frame and mount check:
   - with the device level, the IMU CSV shows accZ ≈ +1 g;
   - nose down gives the expected accX sign, and left side down the expected accY sign;

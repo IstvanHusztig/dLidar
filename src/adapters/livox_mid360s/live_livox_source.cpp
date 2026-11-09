@@ -38,6 +38,10 @@ namespace dlidar::livox
         const std::chrono::seconds kCommandTimeout(2);
         const std::chrono::seconds kDrain(2);
 
+        // Mid-360 work modes (protocol, "LiDAR Working Status"): SAMPLING 0x01
+        // (the SDK's kLivoxLidarNormal) and IDLE 0x02 (its kLivoxLidarWakeUp).
+        const LivoxLidarWorkMode kMid360Idle = kLivoxLidarWakeUp;
+
         std::string SdkVersion()
         {
             LivoxLidarSdkVer v{};
@@ -198,20 +202,51 @@ namespace dlidar::livox
         return pending_.back().get();
     }
 
+    // The ACK return codes of the Mid-360 protocol (section "Return Code Description").
+    static const char *RetCodeName(int code)
+    {
+        switch (code)
+        {
+        case 0x01: return "failed";
+        case 0x02: return "not permitted in the current state";
+        case 0x03: return "value out of range";
+        case 0x20: return "parameter not supported";
+        case 0x21: return "takes effect after a reboot";
+        case 0x22: return "parameter read-only";
+        case 0x23: return "wrong parameter length";
+        case 0x24: return "key count mismatch";
+        case 0xff: return "no answer data";
+        default: return "unknown";
+        }
+    }
+
     bool LiveLivoxSource::Await(Pending *p, int send_status, const char *what)
     {
         bool ok = false;
         int status = send_status;
+        int ret_code = -1; // the sensor's answer, when it answered
         if (send_status == kLivoxLidarStatusSuccess)
         {
             std::unique_lock<std::mutex> lock(p->mutex);
             p->done_cv.wait_for(lock, kCommandTimeout, [p] { return p->done; });
             status = p->done ? p->status : kLivoxLidarStatusTimeout;
-            ok = p->done && p->status == kLivoxLidarStatusSuccess && p->ret_code == 0;
+            if (p->done && p->status == kLivoxLidarStatusSuccess)
+                ret_code = p->ret_code;
+            ok = ret_code == 0;
         }
         if (!ok)
-            std::cerr << "WARNING: the Mid-360S did not confirm " << what << " (status " << status
-                      << "); continuing with its current setting." << std::endl;
+        {
+            std::cerr << "WARNING: the Mid-360S did not confirm " << what << " (";
+            if (ret_code > 0)
+            {
+                char hex[8];
+                snprintf(hex, sizeof hex, "0x%02x", ret_code);
+                std::cerr << "it answered " << hex << ", " << RetCodeName(ret_code);
+            }
+            else
+                std::cerr << "status " << status;
+            std::cerr << "); continuing with its current setting." << std::endl;
+        }
         return ok;
     }
 
@@ -369,7 +404,9 @@ namespace dlidar::livox
                 return;
             handle = handle_;
         }
+        // The Mid-360S has no sleep mode (0x03, HAP only); IDLE (0x02, the
+        // SDK's kLivoxLidarWakeUp) stops sampling until the next Prepare.
         Pending *p = NewPending();
-        Await(p, SetLivoxLidarWorkMode(handle, kLivoxLidarSleep, &OnControl, p), "work mode sleep");
+        Await(p, SetLivoxLidarWorkMode(handle, kMid360Idle, &OnControl, p), "work mode idle");
     }
 }

@@ -1,5 +1,6 @@
 #include "adapters/console/console_events.h"
 
+#include <cmath>
 #include <iostream>
 
 namespace dlidar
@@ -48,12 +49,19 @@ namespace dlidar
                   << ", nudged " << st.nudged << std::endl;
         if (c.valid)
         {
-            std::cout << "Clocks over " << c.span_s << " s: IMU period " << c.imu_period_ns / 1e6 << " ms on the L2 clock ("
-                      << 1e9 / c.imu_period_ns << " Hz), L2 clock vs host " << c.lidar_rate_ppm << " ppm, IMU stamps vs host "
-                      << c.imu_rate_ppm << " ppm; IMU - point min latency " << c.min_latency_diff_start_ms << " -> "
-                      << c.min_latency_diff_end_ms << " ms; mean extra latency IMU " << c.imu_extra_latency_ms << " ms, points "
-                      << c.lidar_extra_latency_ms << " ms; the old host-stamped IMU would have lagged by "
-                      << c.old_lag_start_ms << " -> " << c.old_lag_end_ms << " ms" << std::endl;
+            std::cout << "Clocks over " << c.span_s << " s: IMU period " << c.imu_period_ns / 1e6 << " ms on the " << sensor_
+                      << " clock (" << 1e9 / c.imu_period_ns << " Hz), " << sensor_ << " clock vs host " << c.lidar_rate_ppm
+                      << " ppm, IMU stamps vs host " << c.imu_rate_ppm << " ppm; IMU - point min latency "
+                      << c.min_latency_diff_start_ms << " -> " << c.min_latency_diff_end_ms << " ms; mean extra latency IMU "
+                      << c.imu_extra_latency_ms << " ms, points " << c.lidar_extra_latency_ms << " ms; ";
+            // The old method's lag means something only for a sensor clock set
+            // to host time (the L2); a clock counting from power-on is off by years.
+            const double kHostTimeMs = 3600e3;
+            if (std::fabs(c.old_lag_start_ms) < kHostTimeMs && std::fabs(c.old_lag_end_ms) < kHostTimeMs)
+                std::cout << "the old host-stamped IMU would have lagged by " << c.old_lag_start_ms << " -> "
+                          << c.old_lag_end_ms << " ms" << std::endl;
+            else
+                std::cout << "the " << sensor_ << " clock is not on host time" << std::endl;
         }
     }
 }
