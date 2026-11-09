@@ -53,7 +53,7 @@ LAS 1.2, point format 1, written through the LASzip DLL API (`WriteLazChunk`, `s
 
 | Field | Value | Source |
 |---|---|---|
-| X, Y, Z | The sensor frame remapped by the configured mount (`mount` in the settings, default `"+Z +Y -X"`: x = orig_z, y = orig_y, z = −orig_x; +X front, +Y left, +Z up). No other rotation and no lever arm. L2: its calibrated point model. Mid-360S: its Cartesian mm values / 1000. | `l2::ParsePoints`, Mid-360S `ParsePoints`, `CaptureTiming` |
+| X, Y, Z | The sensor frame remapped by the configured mount (`mount` in the settings; +X front, +Y left, +Z up. Defaults: Mid-360S `"+Z +X +Y"`: x = orig_z, y = orig_x, z = orig_y; L2 `"+Z +Y -X"`: x = orig_z, y = orig_y, z = −orig_x). No other rotation and no lever arm. L2: its calibrated point model. Mid-360S: its Cartesian mm values / 1000. | `l2::ParsePoints`, Mid-360S `ParsePoints`, `CaptureTiming` |
 | `intensity` | The raw 0–255 byte as sent (`intensities[j]`), not scaled. It goes byte → float → U16. | `l2::ParsePoints`, `laz_encoder.cpp` |
 | `gps_time` | Seconds since the zero, which is the sensor stamp of the first point packet with points: `(stamp − zero)/1e9 + j·time_increment`. The packet stamp is the time of its first point. Mid-360S: the step is `time_interval·100 ns/(dot_num−1)`. The IMU `timestamp` column uses the same clock and zero, in ns. | `l2::ParsePoints`, Mid-360S `ParsePoints`, `laz_encoder.cpp` |
 | `user_data` | Always 1 (the hard-coded `ring`). It carries no information. | `l2::ParsePoints`, `laz_encoder.cpp` |
