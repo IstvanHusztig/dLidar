@@ -32,7 +32,7 @@ ctest --test-dir build --output-on-failure # no sensor needed
 
 ## Settings
 
-dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button, LED and pairing button pins, and the phone link (`[phone] ble`, `name`). Every key is listed there with its default, and explained in the manual ("Settings").
+dLidar reads [`dlidar.toml`](dlidar.toml) in the project folder (or `--config PATH`): which sensor, its network, the mount, the button, LED and pairing button pins, and the phone link (`[phone] ble`, `name`). Every key is listed there, with the values of the dev board's scanner (its Mid-360S at `192.168.1.109`, sending to `192.168.1.5`) and otherwise the defaults; the manual ("Settings") gives every default.
 
 ## Run
 

@@ -1,5 +1,7 @@
-# dLidar settings. Every key is listed with its default value; the keys are
-# explained in docs/manual.html ("Settings"). A key left out keeps its default.
+# dLidar settings. Every key is listed; the values are the defaults except the
+# Mid-360S's addresses, which are the dev board's sensor's. The keys and their
+# defaults are explained in docs/manual.html ("Settings"). A key left out keeps
+# its default.
 
 [device]
 # The LiDAR in use: "unitree_l2" or "livox_mid360s".
@@ -19,9 +21,9 @@ mount = "+Z +Y -X"
 
 [livox_mid360s]
 # Empty: the first Mid-360S found on the network.
-lidar_ip = ""
+lidar_ip = "192.168.1.109"
 # The Pi's address on the Mid-360S's link.
-host_ip = "192.168.1.50"
+host_ip = "192.168.1.5"
 cmd_data_port = 56101
 push_msg_port = 56201
 point_data_port = 56301
