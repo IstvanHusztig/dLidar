@@ -9,11 +9,11 @@ How dLidar records the Livox Mid-360S, the second supported sensor next to the U
 | Item | Value | Source |
 |---|---|---|
 | Range | 0.1 m blind zone (0.1–0.2 m reference only), 40 m at 10 % reflectivity, 100 m cut-off | Mid-360S spec sheet |
-| FoV | 360° horizontal, −7°…52° vertical | spec sheet |
+| FoV | 360° horizontal, −7°…52° vertical (from the sensor's XY plane, +Z up) | user manual p. 11 |
 | Points | 200,000 points/s, first return, 10 Hz frames; 96 points per UDP packet (~2,083 packets/s) | spec sheet, Livox protocol |
-| IMU | ICM40609, 200 Hz at power-on (50/100/200/500 Hz settable; dLidar sets 500 Hz); gyro rad/s, accel g | spec sheet, protocol |
+| IMU | ICM40609, 200 Hz at power-on (50/100/200/500 Hz settable since firmware 35.1.1.13; dLidar sets 500 Hz); gyro rad/s, accel g | user manual p. 22 (200 Hz at power-on); the rest: Livox-SDK2 `SetLivoxLidarImuRange`, Livox protocol |
 | Time | Packet stamp in ns, `time_type` 0: since power-on, 1: PTP, 2: GPS. dLidar uses the stamps as they come (no sync needed: IMU and points share the clock). | protocol |
-| Network | Sensor 192.168.1.1XX (XX: last two digits of the serial number), ports 56100–56500; host ports 56101–56501 | user manual |
+| Network | Sensor 192.168.1.1XX (XX: last two digits of the serial number), host 192.168.1.50 by default; ports 56100–56500, host ports 56101–56501 | user manual p. 17 (addresses); Livox-SDK2 sample configs (ports) |
 | Power | 6.5 W typical, up to 14 W self-heating (−20…0 °C), 9–27 V | spec sheet |
 
 ## How dLidar reads it
@@ -45,8 +45,9 @@ How dLidar records the Livox Mid-360S, the second supported sensor next to the U
 
 ### Frames and the IMU position
 
-- **Shared axes:** points and IMU share the Mid-360S frame (+X towards the Livox logo). The IMU sits at **(+11.0, +23.29, −44.12) mm** from the LiDAR origin in that frame (user manual). dLidar writes it, mapped through the mount, as `imu_position_m` in `timingNNNN.json`. Neither the sensor nor dLidar applies a lever arm to the data.
-- **Mount:** the default `mount = "+Z +Y -X"` assumes the Mid-360S is mounted like the L2: its +Z to the front and its −X up. *To confirm* at bring-up, then set in the settings file.
+- **Axes** (user manual p. 18–19, figure): right-handed, origin O on the dome's axis; **+Z up out of the dome** (with the sensor on its bottom face), **+X away from the M12 connector** (the connector is on the −X side), +Y 90° to the left of +X seen from above.
+- **Shared axes:** points and IMU share that frame (p. 22). The IMU sits at **(+11.0, +23.29, −44.12) mm** from the LiDAR origin in that frame (p. 22). dLidar writes it, mapped through the mount, as `imu_position_m` in `timingNNNN.json`. Neither the sensor nor dLidar applies a lever arm to the data.
+- **Mount:** the default `mount = "+Z +X +Y"` is the handheld's (2026-11-09): the dome faces forward (the sensor's +Z to the front), its +X to the left and +Y up, so the M12 connector points right. The view is a cone around the walking direction: floor, walls and ceiling ahead, blind within ~38° of straight ahead and behind. Lying flat on its bottom face with the connector at the back it is `"+X +Y +Z"`; the L2's `"+Z +Y -X"` would point the connector up. The mount can only be a multiple of 90° (`AxisMap`); a tilted mount is not supported.
 
 ### Tag filter
 
@@ -115,10 +116,10 @@ and in `dlidar.toml`: `lidar_ip = "192.168.1.109"`, `host_ip = "192.168.1.5"`.
 The Pi can flash the sensor with Livox-SDK2's own sample, built against the SDK library dLidar already builds (`build/lib/liblivox_lidar_sdk_static.a`):
 
 ```bash
-g++-12 -std=c++17 -O1 -o multi_lidars_upgrade external/Livox-SDK2/samples/multi_lidars_upgrade/main.cpp \
+g++-12 -std=c++17 -O1 -o build/multi_lidars_upgrade external/Livox-SDK2/samples/multi_lidars_upgrade/main.cpp \
     -Iexternal/Livox-SDK2/include build/lib/liblivox_lidar_sdk_static.a -lpthread
 sudo systemctl stop dlidar          # one program talks to the sensor at a time
-./multi_lidars_upgrade external/Livox-SDK2/samples/multi_lidars_upgrade/mid360s_config.json LIVOX_MID360S_FW_35.01.0113.bin
+build/multi_lidars_upgrade external/Livox-SDK2/samples/multi_lidars_upgrade/mid360s_config.json ~/LIVOX_MID360S_FW_35.01.0113.bin
 ```
 
 The sample's config uses host `192.168.1.5` and the default ports; it finds the sensor by its broadcast and flashes one sensor. Progress goes to 100 % and it prints "upgrade successfully" (about a minute), then keeps running: stop it with Ctrl-C, then `sudo systemctl start dlidar`. Keep the sensor's power and cable in during the upgrade. Use the firmware file for the **Mid-360S** (not the Mid-360) from Livox's download page. Done on the first unit on 2026-11-09: 35.1.1.8 → 35.1.1.13 (`LIVOX_MID360S_FW_35.01.0113.bin`, SHA-256 `61ac7d66cbb488ea17410be756faf8b00b42c7e7f08be356230ecc2fd2b93b9b`), which added the IMU rate setting.
@@ -143,6 +144,6 @@ The sample's config uses host `192.168.1.5` and the default ports; it finds the 
 |---|---|
 | Commands without an answer (#125) | none (firmware 35.1.1.8 and 35.1.1.13, 2026-11-09). 35.1.1.8 refused the IMU setting (`0x20`, parameter not supported: 200 Hz stays); 35.1.1.13 accepts it |
 | IMU rate | 500 Hz (period 2.000 ms) on 35.1.1.13, after one power cycle |
-| Mount | — |
+| Mount | `"+Z +X +Y"` on the handheld (dome forward, connector right); axes from the user manual's figure, no wall test |
 | Peak RSS / CPU, 5 min | — |
 | Finalization time, 5 min | — |

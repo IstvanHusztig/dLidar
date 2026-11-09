@@ -27,7 +27,7 @@ push_msg_port = 56201
 point_data_port = 56301
 imu_data_port = 56401
 log_data_port = 56501
-mount = "+Z +Y -X"
+mount = "+Z +X +Y"
 drop_low_confidence = false
 # 50, 100, 200 or 500 Hz.
 imu_rate_hz = 500

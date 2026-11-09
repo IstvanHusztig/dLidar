@@ -137,6 +137,8 @@ Groups 1–3 must also leave `tools/golden_replay.sh <base>` byte-identical, whe
   - a wall in front appears at +X in the LAZ.
 
   Set `mount` in `dlidar.toml` and the default in `settings.cpp` if it differs. Verify by repeating the check.
+
+  **2026-11-09:** the axes come from the user manual (p. 18–19: +Z out of the dome, +X away from the M12 connector); the user skipped the wall test. Flat on a table (`"+X +Y +Z"`) the IMU read accZ 0.995 g, accX −0.001 g, accY 0.004 g. The handheld mount is `"+Z +X +Y"` (dome forward, connector right), now the default (`kLivoxMount` in `device_config.h`; this task's settings.cpp is device_config.h). Still to do: one recording held level on the handheld shows accZ ≈ +1 g.
 - [ ] 8.3 Timing:
   - `timingNNNN.json` shows method `sensor` with the auto checks passed and `imu_period_ns` ≈ 5,000,000;
   - in `packetstateNNNN.tsv`, packet k+1's stamp minus packet k's equals `time_interval·100·dot_num/(dot_num−1)/dot_num`, to within 1 µs (this confirms the per-point time formula);

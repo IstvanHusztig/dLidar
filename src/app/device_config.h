@@ -34,11 +34,12 @@ const int kPairingButtonGpio = 22;
 const bool kBleEnabled = true;
 const char *const kBleName = "dLidar";
 
-// The Livox Mid-360S: mounted in the same orientation as the L2 (to be
-// confirmed at bring-up, docs/livox_mid360s.md). The host's address and
+// The Livox Mid-360S on the handheld (user, 2026-11-09): the dome faces
+// forward (+Z front), its +X to the left and +Y up, so the M12 connector
+// points right (docs/livox_mid360s.md, "Frames"). The host's address and
 // ports are Livox's recommended ones; the sensor's own ports are fixed
 // (56100-56500) and its IP is found on the network.
-const dlidar::AxisMap kLivoxMount{dlidar::Axis::PosZ, dlidar::Axis::PosY, dlidar::Axis::NegX};
+const dlidar::AxisMap kLivoxMount{dlidar::Axis::PosZ, dlidar::Axis::PosX, dlidar::Axis::PosY};
 const char *const kLivoxHostIp = "192.168.1.50";
 const unsigned short kLivoxHostCmdPort = 56101;
 const unsigned short kLivoxHostPushPort = 56201;
