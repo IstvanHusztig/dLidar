@@ -3,7 +3,7 @@
 
 [device]
 # The LiDAR in use: "unitree_l2" or "livox_mid360s".
-sensor = "unitree_l2"
+sensor = "livox_mid360s"
 # How IMU samples are timed: "auto", "sensor" or "host".
 imu_time = "auto"
 

@@ -391,7 +391,7 @@ const dlidar::AxisMap &DeviceSettings::Mount() const
 DeviceSettings DefaultSettings()
 {
 	DeviceSettings s;
-	s.sensor = SensorKind::UnitreeL2;
+	s.sensor = SensorKind::LivoxMid360s;
 	s.unitree_l2.lidar_ip = kLidarIp;
 	s.unitree_l2.lidar_port = kLidarPort;
 	s.unitree_l2.local_ip = kLocalIp;

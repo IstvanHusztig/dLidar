@@ -32,12 +32,12 @@ bool Has(const std::string &text, const std::string &part) { return text.find(pa
 void TestDefaults()
 {
 	DeviceSettings s = DefaultSettings();
-	CHECK(s.sensor == SensorKind::UnitreeL2, "default sensor is the L2");
+	CHECK(s.sensor == SensorKind::LivoxMid360s, "default sensor is the Mid-360S");
 	CHECK(s.unitree_l2.lidar_ip == kLidarIp && s.unitree_l2.lidar_port == kLidarPort, "L2 address");
 	CHECK(s.unitree_l2.local_ip == kLocalIp && s.unitree_l2.local_port == kLocalPort, "host address");
 	CHECK(s.unitree_l2.work_mode == kLidarWorkMode && Same(s.unitree_l2.mount, kMount), "work mode and mount");
 	CHECK(s.imu_time == dlidar::ImuTimeline::Mode::Auto, "IMU time mode");
-	CHECK(Same(s.Mount(), kMount), "the chosen sensor's mount");
+	CHECK(Same(s.Mount(), kLivoxMount), "the chosen sensor's mount");
 	CHECK(s.livox_mid360s.lidar_ip.empty() && s.livox_mid360s.host_ip == "192.168.1.50", "Livox addresses");
 	CHECK(s.livox_mid360s.cmd_data_port == 56101 && s.livox_mid360s.log_data_port == 56501, "Livox ports");
 	CHECK(!s.livox_mid360s.drop_low_confidence, "low-confidence points kept by default");
@@ -51,7 +51,7 @@ void TestDefaults()
 	// An empty file or one with only comments changes nothing.
 	DeviceSettings e;
 	CHECK(ParseError("", &e).empty() && e.unitree_l2.lidar_ip == kLidarIp, "empty file");
-	CHECK(ParseError("# nothing\n\n   # indented\n[device]\n", &e).empty() && e.sensor == SensorKind::UnitreeL2,
+	CHECK(ParseError("# nothing\n\n   # indented\n[device]\n", &e).empty() && e.sensor == SensorKind::LivoxMid360s,
 		  "comments only");
 }
 
@@ -209,8 +209,8 @@ void TestUnknownAndBadValues()
 	// A failed file leaves the settings untouched.
 	DeviceSettings s = DefaultSettings();
 	std::string error;
-	CHECK(!ParseSettings("[device]\nsensor = \"livox_mid360s\"\ntarget_chunks = 1500\n", "x", s, error) &&
-			  s.sensor == SensorKind::UnitreeL2,
+	CHECK(!ParseSettings("[device]\nsensor = \"unitree_l2\"\ntarget_chunks = 1500\n", "x", s, error) &&
+			  s.sensor == SensorKind::LivoxMid360s,
 		  "settings unchanged after an error");
 }
 

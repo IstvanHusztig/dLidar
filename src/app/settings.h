@@ -65,7 +65,7 @@ struct PhoneSettings
 
 struct DeviceSettings
 {
-	SensorKind sensor = SensorKind::UnitreeL2;
+	SensorKind sensor = SensorKind::LivoxMid360s; // the default sensor since 2026-11-09
 	dlidar::ImuTimeline::Mode imu_time = dlidar::ImuTimeline::Mode::Auto;
 	UnitreeL2Settings unitree_l2;
 	LivoxMid360sSettings livox_mid360s;
