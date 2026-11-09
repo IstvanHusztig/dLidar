@@ -1,5 +1,6 @@
 #include "adapters/console/console_events.h"
 
+#include <cmath>
 #include <iostream>
 
 namespace dlidar

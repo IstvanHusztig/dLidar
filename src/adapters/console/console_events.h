@@ -2,7 +2,6 @@
 
 #include "application/ports/device_events.h"
 
-#include <cmath>
 #include <string>
 #include <utility>
 
