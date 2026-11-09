@@ -144,7 +144,7 @@
     <tr><td><code>lidar_ip</code></td><td><code>""</code></td><td>The Mid-360S's address (192.168.1.1XX, XX from its serial number); empty: the first one found on the network.</td></tr>
     <tr><td><code>host_ip</code></td><td><code>"192.168.1.50"</code></td><td>The Pi's address on the Mid-360S's link.</td></tr>
     <tr><td><code>cmd_data_port</code>, <code>push_msg_port</code>, <code>point_data_port</code>, <code>imu_data_port</code>, <code>log_data_port</code></td><td><code>56101</code>, <code>56201</code>, <code>56301</code>, <code>56401</code>, <code>56501</code></td><td>The Pi's ports for the sensor's commands, status messages, points, IMU and log.</td></tr>
-    <tr><td><code>mount</code></td><td><code>"+Z +Y -X"</code></td><td>As for the L2; the default assumes the same orientation as the L2 and is confirmed at bring-up.</td></tr>
+    <tr><td><code>mount</code></td><td><code>"+Z +X +Y"</code></td><td>The handheld's mount: the dome faces forward, the sensor's +X to the left and +Y up, so the M12 connector points right. Lying flat on its bottom face, connector at the back: <code>"+X +Y +Z"</code>.</td></tr>
     <tr><td><code>drop_low_confidence</code></td><td><code>false</code></td><td><code>true</code>: drop the points the sensor flags as low confidence (glued objects, rain/fog/dust).</td></tr>
     <tr><td><code>imu_rate_hz</code></td><td><code>500</code></td><td>IMU output rate, set at every start-up: 50, 100, 200 or 500 Hz (the sensor's own default is 200 Hz). Needs Mid-360S firmware V35.1.0112 or newer; otherwise a warning, and the sensor keeps its rate. A changed rate takes effect after the sensor's next power-up.</td></tr>
     <tr><td><code>imu_accel_range_g</code></td><td><code>8</code></td><td>Accelerometer full scale: 4, 8, 16 or 32 g.</td></tr>
@@ -164,7 +164,7 @@ sensor = "livox_mid360s"
 
 [livox_mid360s]
 host_ip = "192.168.1.50"
-mount = "+Z +Y -X"
+mount = "+Z +X +Y"
 </code></pre>
 
   <h2 id="sensors">Connecting a sensor</h2>
