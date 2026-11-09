@@ -2,7 +2,7 @@
 
 How dLidar records the Livox Mid-360S, the second supported sensor next to the Unitree L2. To select it, set `sensor = "livox_mid360s"` in the settings file (`docs/manual.html`, "Settings"). The recording files are the same as for the L2, and their fields are described in `docs/recording-format.md`.
 
-**Status:** connected and recording since 2026-11-09 (firmware 35.1.1.8, bring-up step 1 done). Steps 2 to 4 of the bring-up checklist at the end (axes, timing, resources) still confirm the assumptions marked *to confirm*.
+**Status:** connected and recording since 2026-11-09 (firmware 35.1.1.13 since the upgrade the same day, bring-up step 1 done, IMU at 500 Hz). Steps 2 to 4 of the bring-up checklist at the end (axes, timing, resources) still confirm the assumptions marked *to confirm*.
 
 ## The sensor
 
@@ -30,7 +30,7 @@ How dLidar records the Livox Mid-360S, the second supported sensor next to the U
     4. Drop the backlog for 2 s.
   - **Warnings name the sensor's answer:** a refused command prints the protocol's return code (`it answered 0x20, parameter not supported`), a command without an answer its SDK status.
   - **Commands are best effort:** Livox-SDK2 issue #125 reports that commands time out on a Mid-360S while data still flows. A command without an answer only prints a warning, and only "no data" fails the start. After power-on the sensor samples with the IMU on.
-  - **IMU:** `SetLivoxLidarImuRange` sets the IMU at every start-up, default 500 Hz, ±8 g, ±2000 °/s (`imu_rate_hz`, `imu_accel_range_g`, `imu_gyro_range_dps`). It needs firmware V35.1.0112+; otherwise the sensor keeps its rate (200 Hz from the factory) and a warning says so. Firmware 35.1.1.8 (the first unit, 2026-11-09) answers `0x20` (parameter not supported) and runs at 200 Hz.
+  - **IMU:** `SetLivoxLidarImuRange` sets the IMU at every start-up, default 500 Hz, ±8 g, ±2000 °/s (`imu_rate_hz`, `imu_accel_range_g`, `imu_gyro_range_dps`). It needs firmware V35.1.0112+; otherwise the sensor keeps its rate (200 Hz from the factory) and a warning says so. Firmware 35.1.1.8 (the first unit, 2026-11-09) answers `0x20` (parameter not supported) and runs at 200 Hz. A new rate takes effect only after the sensor's next power-up: the firmware stores it and answers success at once, but keeps its old rate until then (35.1.1.13, 2026-11-09). So the first recording after changing `imu_rate_hz` runs at the old rate; power-cycle the sensor once.
   - **`Stop`** sets work mode IDLE (0x02, best effort): the Mid-360S has no sleep mode (0x03 is HAP only; it answers `0x02`, not permitted) and sends no points or IMU while idle. Waking from IDLE takes about 8 s before points arrive, against about 2 s when it was still sampling. Between recordings the source stays open, but its packets are dropped (`LivoxPacketPool::SetAccepting`), so the pool cannot grow while the service waits; each recording runs the start-up again (the search is skipped once the sensor is known).
   - **SDK configuration:** written from the settings as JSON to `$XDG_RUNTIME_DIR` (or `/tmp`) and passed by path; `LivoxLidarSdkInit(nullptr, ...)` crashes (issue #135).
   - **Ctrl-C:** during the start-up it stops the start within ~10 ms, but `LivoxLidarSdkUninit` takes another ~1.1 s while the SDK joins its threads.
@@ -68,7 +68,7 @@ Each point has a tag byte with three 2-bit confidence fields: bits 0–1 glued o
 ## What the recordings contain
 
 - **Files and units:** the same files, units, axes and timestamp rules as the L2 (`docs/recording-format.md`), with `sensor_model` `livox_mid360s` and the LAS system identifier `Livox Mid-360S`.
-- **IMU:** 500 Hz in the IMU CSV (200 Hz if the firmware ignores the setting, as 35.1.1.8 does), against about 890 Hz on the L2.
+- **IMU:** 500 Hz in the IMU CSV (200 Hz if the firmware ignores the setting, as 35.1.1.8 did), against about 890 Hz on the L2.
 - **Points:** ring (`user_data`) is always 1. The extra bytes hold the distance, the azimuth/elevation and the packet's frame/udp counters.
 - **Default filter:** 0.1 m to 100 m, no intensity floor (`livox::kDefaultFilter`); tune it at bring-up.
 - **Recording length:** no limit; a recording ends on a stop (the push button, once `push-button-recording` is done), a failure or low disk space. Finalization takes about 0.32× the recording length (measured below).
@@ -110,6 +110,19 @@ sudo nmcli dev reapply eth0
 
 and in `dlidar.toml`: `lidar_ip = "192.168.1.109"`, `host_ip = "192.168.1.5"`.
 
+## Firmware upgrade
+
+The Pi can flash the sensor with Livox-SDK2's own sample, built against the SDK library dLidar already builds (`build/lib/liblivox_lidar_sdk_static.a`):
+
+```bash
+g++-12 -std=c++17 -O1 -o multi_lidars_upgrade external/Livox-SDK2/samples/multi_lidars_upgrade/main.cpp \
+    -Iexternal/Livox-SDK2/include build/lib/liblivox_lidar_sdk_static.a -lpthread
+sudo systemctl stop dlidar          # one program talks to the sensor at a time
+./multi_lidars_upgrade external/Livox-SDK2/samples/multi_lidars_upgrade/mid360s_config.json LIVOX_MID360S_FW_35.01.0113.bin
+```
+
+The sample's config uses host `192.168.1.5` and the default ports; it finds the sensor by its broadcast and flashes one sensor. Progress goes to 100 % and it prints "upgrade successfully" (about a minute), then keeps running: stop it with Ctrl-C, then `sudo systemctl start dlidar`. Keep the sensor's power and cable in during the upgrade. Use the firmware file for the **Mid-360S** (not the Mid-360) from Livox's download page. Done on the first unit on 2026-11-09: 35.1.1.8 → 35.1.1.13 (`LIVOX_MID360S_FW_35.01.0113.bin`, SHA-256 `61ac7d66cbb488ea17410be756faf8b00b42c7e7f08be356230ecc2fd2b93b9b`), which added the IMU rate setting.
+
 ## Bring-up checklist (when the sensor is connected)
 
 1. **Network:**
@@ -128,7 +141,8 @@ and in `dlidar.toml`: `lidar_ip = "192.168.1.109"`, `host_ip = "192.168.1.5"`.
 
 | Measured | Value |
 |---|---|
-| Commands without an answer (#125) | none (firmware 35.1.1.8, 2026-11-09). Refused: the IMU setting (`0x20`, parameter not supported: 200 Hz stays) |
+| Commands without an answer (#125) | none (firmware 35.1.1.8 and 35.1.1.13, 2026-11-09). 35.1.1.8 refused the IMU setting (`0x20`, parameter not supported: 200 Hz stays); 35.1.1.13 accepts it |
+| IMU rate | 500 Hz (period 2.000 ms) on 35.1.1.13, after one power cycle |
 | Mount | — |
 | Peak RSS / CPU, 5 min | — |
 | Finalization time, 5 min | — |
