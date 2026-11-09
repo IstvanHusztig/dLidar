@@ -14,6 +14,9 @@
 // What the chosen sensor's recordings say about it.
 dlidar::RecordingProfile ProfileFor(const DeviceSettings &settings);
 
+// The sensor's short name for the console ("L2", "Mid-360S").
+const char *SensorShortName(const DeviceSettings &settings);
+
 // Every sensor's profile, so a leftover recording of any of them can be finished.
 std::vector<dlidar::RecordingProfile> AllProfiles();
 

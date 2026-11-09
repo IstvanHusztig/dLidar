@@ -84,5 +84,5 @@ After every group, run these on the Pi 5:
 
 - [ ] 7.1 Install the service; after a reboot, press → recording (LED on), press → finalized (LED blinks, then off), repeat 3 times; consecutive numbered files. With the sensor unplugged, a press gives LED on, then 3 flashes and off.
 - [ ] 7.2 Long press → the recording is finalized (LED blinks), then the Pi powers off (LED off); a leftover check at the next boot finds nothing.
-- [ ] 7.3 Mid-360S IMU: `timingNNNN.json` shows an IMU period of about 2 ms (500 Hz) or the firmware warning; note which in `docs/livox_mid360s.md`.
-- [ ] 7.4 Idle for 1 h with the Mid-360S streaming: the service's RSS is constant (`ps -o rss`); the next recording starts cleanly.
+- [x] 7.3 Mid-360S IMU: `timingNNNN.json` shows an IMU period of about 2 ms (500 Hz) or the firmware warning; note which in `docs/livox_mid360s.md`. **Done 2026-11-09:** the firmware warning (35.1.1.8 answers `0x20`, parameter not supported); the IMU period is 5.000 ms (200 Hz); noted in the doc.
+- [ ] 7.4 Idle for 1 h with the Mid-360S connected (since 2026-11-09 it is set to IDLE between recordings and sends no data): the service's RSS is constant (`ps -o rss`); the next recording starts cleanly.

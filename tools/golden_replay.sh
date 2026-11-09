@@ -34,8 +34,13 @@ if [ ! -x "$base_bin" ]; then
     rm -rf "$cache"
     mkdir -p "$(dirname "$cache")"
     git -C "$repo" worktree add --detach "$cache/src" "$hash" > /dev/null
-    rmdir "$cache/src/3rd" 2> /dev/null || rm -rf "$cache/src/3rd"
-    ln -s "$repo/3rd" "$cache/src/3rd" # LASzip submodule, same for both sides
+    # The submodules (LASzip; Livox-SDK2 and nlohmann/json in newer revisions),
+    # the same for both sides: a worktree has them empty.
+    for sub in 3rd external/Livox-SDK2 external/json; do
+        [ -d "$cache/src/$sub" ] || continue
+        rmdir "$cache/src/$sub" 2> /dev/null || rm -rf "$cache/src/$sub"
+        ln -s "$repo/$sub" "$cache/src/$sub"
+    done
     cmake -S "$cache/src" -B "$cache/build" -G Ninja > "$cache/configure.log"
     cmake --build "$cache/build" --target replay_capture > "$cache/build.log"
     # The worktree is only needed to build: keep the binary (its LASzip stays in

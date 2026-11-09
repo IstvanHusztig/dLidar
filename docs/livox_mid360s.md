@@ -2,7 +2,7 @@
 
 How dLidar records the Livox Mid-360S, the second supported sensor next to the Unitree L2. To select it, set `sensor = "livox_mid360s"` in the settings file (`docs/manual.html`, "Settings"). The recording files are the same as for the L2, and their fields are described in `docs/recording-format.md`.
 
-**Status:** built and tested against synthetic packets only. The sensor has not been connected yet; the bring-up checklist at the end confirms the assumptions marked *to confirm*.
+**Status:** connected and recording since 2026-11-09 (firmware 35.1.1.8, bring-up step 1 done). Steps 2 to 4 of the bring-up checklist at the end (axes, timing, resources) still confirm the assumptions marked *to confirm*.
 
 ## The sensor
 
@@ -28,9 +28,10 @@ How dLidar records the Livox Mid-360S, the second supported sensor next to the U
     2. Set work mode normal, IMU on and point type Cartesian high, and query the firmware version.
     3. Wait for Cartesian point packets: no packet for 10 s, or no points within 60 s, fails.
     4. Drop the backlog for 2 s.
+  - **Warnings name the sensor's answer:** a refused command prints the protocol's return code (`it answered 0x20, parameter not supported`), a command without an answer its SDK status.
   - **Commands are best effort:** Livox-SDK2 issue #125 reports that commands time out on a Mid-360S while data still flows. A command without an answer only prints a warning, and only "no data" fails the start. After power-on the sensor samples with the IMU on.
-  - **IMU:** `SetLivoxLidarImuRange` sets the IMU at every start-up, default 500 Hz, ±8 g, ±2000 °/s (`imu_rate_hz`, `imu_accel_range_g`, `imu_gyro_range_dps`). It needs firmware V35.1.0112+; without an answer the sensor keeps its rate (200 Hz from the factory) and a warning says so.
-  - **`Stop`** sets work mode sleep (best effort). Between recordings the source stays open, but its packets are dropped (`LivoxPacketPool::SetAccepting`), so the pool cannot grow while the service waits; each recording runs the start-up again (the search is skipped once the sensor is known).
+  - **IMU:** `SetLivoxLidarImuRange` sets the IMU at every start-up, default 500 Hz, ±8 g, ±2000 °/s (`imu_rate_hz`, `imu_accel_range_g`, `imu_gyro_range_dps`). It needs firmware V35.1.0112+; otherwise the sensor keeps its rate (200 Hz from the factory) and a warning says so. Firmware 35.1.1.8 (the first unit, 2026-11-09) answers `0x20` (parameter not supported) and runs at 200 Hz.
+  - **`Stop`** sets work mode IDLE (0x02, best effort): the Mid-360S has no sleep mode (0x03 is HAP only; it answers `0x02`, not permitted) and sends no points or IMU while idle. Waking from IDLE takes about 8 s before points arrive, against about 2 s when it was still sampling. Between recordings the source stays open, but its packets are dropped (`LivoxPacketPool::SetAccepting`), so the pool cannot grow while the service waits; each recording runs the start-up again (the search is skipped once the sensor is known).
   - **SDK configuration:** written from the settings as JSON to `$XDG_RUNTIME_DIR` (or `/tmp`) and passed by path; `LivoxLidarSdkInit(nullptr, ...)` crashes (issue #135).
   - **Ctrl-C:** during the start-up it stops the start within ~10 ms, but `LivoxLidarSdkUninit` takes another ~1.1 s while the SDK joins its threads.
 - **`LivoxMid360sSensor`** (`livox_mid360s_sensor.cpp`) is the `LidarSensor`:
@@ -67,7 +68,7 @@ Each point has a tag byte with three 2-bit confidence fields: bits 0–1 glued o
 ## What the recordings contain
 
 - **Files and units:** the same files, units, axes and timestamp rules as the L2 (`docs/recording-format.md`), with `sensor_model` `livox_mid360s` and the LAS system identifier `Livox Mid-360S`.
-- **IMU:** 500 Hz in the IMU CSV (200 Hz if the firmware ignores the setting), against about 890 Hz on the L2.
+- **IMU:** 500 Hz in the IMU CSV (200 Hz if the firmware ignores the setting, as 35.1.1.8 does), against about 890 Hz on the L2.
 - **Points:** ring (`user_data`) is always 1. The extra bytes hold the distance, the azimuth/elevation and the packet's frame/udp counters.
 - **Default filter:** 0.1 m to 100 m, no intensity floor (`livox::kDefaultFilter`); tune it at bring-up.
 - **Recording length:** no limit; a recording ends on a stop (the push button, once `push-button-recording` is done), a failure or low disk space. Finalization takes about 0.32× the recording length (measured below).
@@ -98,6 +99,17 @@ The replay is not paced: it produces the 300 s of data in 40 s, faster than the 
 
 Give the Pi an address in 192.168.1.0/24 on the Mid-360S's Ethernet link (default `host_ip = "192.168.1.50"`). The L2 stays on 192.168.0.x. If the Pi's Wi-Fi is also on 192.168.1.0/24, the SDK's discovery also reaches that network; use another subnet on one of the two links to avoid that.
 
+The sensor's address is 192.168.1.1xx (the last two digits of its serial number), and it sends to the host address stored in it, which need not be `.50`: `sudo tcpdump -i eth0 -n` shows both (its status broadcasts from `192.168.1.1xx.56200`, and ARP requests "who-has HOST tell 192.168.1.1xx").
+
+**Next to a Wi-Fi on 192.168.1.0/24** (the dev board, 2026-11-09: the sensor at `.109` sending to `.5`): give the Ethernet profile the host address as a single address and a route to the sensor's one address, so the Wi-Fi network keeps its route:
+
+```bash
+sudo nmcli con modify lidar +ipv4.addresses 192.168.1.5/32 +ipv4.routes "192.168.1.109/32 src=192.168.1.5"
+sudo nmcli dev reapply eth0
+```
+
+and in `dlidar.toml`: `lidar_ip = "192.168.1.109"`, `host_ip = "192.168.1.5"`.
+
 ## Bring-up checklist (when the sensor is connected)
 
 1. **Network:**
@@ -116,7 +128,7 @@ Give the Pi an address in 192.168.1.0/24 on the Mid-360S's Ethernet link (defaul
 
 | Measured | Value |
 |---|---|
-| Commands without an answer (#125) | — |
+| Commands without an answer (#125) | none (firmware 35.1.1.8, 2026-11-09). Refused: the IMU setting (`0x20`, parameter not supported: 200 Hz stays) |
 | Mount | — |
 | Peak RSS / CPU, 5 min | — |
 | Finalization time, 5 min | — |

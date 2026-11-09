@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
 
 	// Output channels: the console, the status LED (own thread, never delays
 	// a recording), and below the phone link (hub.AddAsync).
-	dlidar::ConsoleEvents console;
+	dlidar::ConsoleEvents console(SensorShortName(settings));
 	dlidar::EventHub hub;
 	hub.AddSync(console);
 	std::shared_ptr<dlidar::gpio::StatusLed> led;

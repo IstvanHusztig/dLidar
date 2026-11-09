@@ -20,6 +20,17 @@ dlidar::RecordingProfile ProfileFor(const DeviceSettings &settings)
 	}
 }
 
+const char *SensorShortName(const DeviceSettings &settings)
+{
+	switch (settings.sensor)
+	{
+	case SensorKind::LivoxMid360s:
+		return "Mid-360S";
+	default:
+		return "L2";
+	}
+}
+
 std::vector<dlidar::RecordingProfile> AllProfiles()
 {
 	return {dlidar::l2::kRecordingProfile, dlidar::livox::kRecordingProfile};

@@ -2,6 +2,10 @@
 
 #include "application/ports/device_events.h"
 
+#include <cmath>
+#include <string>
+#include <utility>
+
 namespace dlidar
 {
     // The device's console output: the texts bin/dLidar has always printed
@@ -11,11 +15,15 @@ namespace dlidar
     class ConsoleEvents : public DeviceEvents
     {
     public:
+        // `sensor`: the sensor's short name in the clock summary ("L2").
+        explicit ConsoleEvents(std::string sensor = "L2") : sensor_(std::move(sensor)) {}
+
         void OnState(const DeviceStatus &status) override;
         void OnWarning(const DeviceWarning &warning) override;
         void OnSummary(const RecordingSummary &summary) override;
 
     private:
+        std::string sensor_;
         DeviceState last_ = DeviceState::Idle;
     };
 }
